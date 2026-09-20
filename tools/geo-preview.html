@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Routing calibration</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css">
+<link rel="stylesheet" href="../css/base.css">
+<style>body{margin:0}#map{height:100vh;border:0;border-radius:0}</style>
+</head><body>
+<div id="map" class="map"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js"></script>
+<script src="../js/mdm.js"></script><script src="../js/icons.js"></script><script src="../js/roads.js"></script><script src="../js/geo.js"></script><script src="../js/map.js"></script>
+<script>
+  const q = new URLSearchParams(location.search);
+  const G = MDM.geo;
+  MDM.map.create('map', { zoom: 13 }).then(map => { window.__map = map;
+    const routes = [
+      [{ zone: 'male', key: 'M. Kaneerumaage, Majeedhee Magu' }, { zone: 'hulhumale_p1', key: 'Amin Avenue, Block B' }],
+      [{ zone: 'male', key: 'H. Dhonveli' }, { zone: 'airport', key: 'arrivals' }],
+      [{ zone: 'hulhumale_p1', key: 'Rehendhi Flat 3' }, { zone: 'hulhumale_p2', key: 'Hiyaa Tower 5' }],
+      [{ zone: 'male', key: 'G. Handhuvareege' }, { zone: 'male', key: 'Ma. Ranfaru' }],
+    ];
+    const colors = ['#0f6fde', '#c62828', '#1a7f4b', '#b86e00'];
+    const all = [];
+    routes.forEach((r, i) => {
+      const a = Object.assign({ zone: r[0].zone }, r[0].zone === 'airport' ? { lat: G.airportPoint('arrivals')[0], lng: G.airportPoint('arrivals')[1] } : G.geocodeZone(r[0].zone, r[0].key));
+      const b = Object.assign({ zone: r[1].zone }, r[1].zone === 'airport' ? { lat: G.airportPoint('arrivals')[0], lng: G.airportPoint('arrivals')[1] } : G.geocodeZone(r[1].zone, r[1].key));
+      const line = G.routeBetween(a, b);
+      MDM.map.route(map, 'r' + i, line, { color: colors[i], width: 4 });
+      MDM.map.marker(map, 'pickup', [a.lat, a.lng], { label: 'P' + (i + 1) });
+      MDM.map.marker(map, 'dropoff', [b.lat, b.lng], { label: 'D' + (i + 1) });
+      all.push([a.lat, a.lng], [b.lat, b.lng]);
+      console.log('route', i, 'pts', line.length, 'km', G.distanceKm(line).toFixed(2));
+    });
+    G.ZONE_LIST.forEach(z => MDM.map.marker(map, 'point', z.center, { label: z.label }));
+    const fit = q.get('fit');
+    if (fit === 'north') MDM.map.fit(map, [[4.200, 73.525], [4.245, 73.555]], { padding: 20 });
+    else if (fit === 'south') MDM.map.fit(map, [[4.165, 73.495], [4.195, 73.545]], { padding: 20 });
+    else if (fit === 'bridge') MDM.map.fit(map, [[4.166, 73.505], [4.200, 73.545]], { padding: 20 });
+    else MDM.map.fit(map, all, { padding: 40 });
+    window.__ready = true;
+  });
+</script>
+</body></html>

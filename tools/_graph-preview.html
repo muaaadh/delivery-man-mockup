@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css"><link rel="stylesheet" href="../css/base.css">
+<style>body{margin:0}#map{height:100vh;border:0;border-radius:0}</style></head><body><div id="map" class="map"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js"></script>
+<script src="../js/mdm.js"></script><script src="../js/icons.js"></script><script src="../js/roads.js"></script><script src="../js/geo.js"></script><script src="../js/map.js"></script>
+<script>
+const q=new URLSearchParams(location.search);
+MDM.map.create('map',{zoom:15,center:[Number(q.get('lat')||4.176),Number(q.get('lng')||73.51)]}).then(map=>{window.__map=map;
+ const R=MDM.roads; const feats=R.edges.map(([a,b,c])=>({type:'Feature',properties:{c},geometry:{type:'LineString',coordinates:[[R.nodes[a][1]*R.q,R.nodes[a][0]*R.q],[R.nodes[b][1]*R.q,R.nodes[b][0]*R.q]]}}));
+ map.addSource('g',{type:'geojson',data:{type:'FeatureCollection',features:feats}});
+ map.addLayer({id:'g',type:'line',source:'g',paint:{'line-color':['match',['get','c'],0,'#c62828',1,'#c62828',2,'#b86e00',3,'#1a7f4b','#0f6fde'],'line-width':2,'line-opacity':.9}});
+ window.__ready=true; });
+</script></body></html>
