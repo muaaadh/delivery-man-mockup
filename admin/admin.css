@@ -1,0 +1,74 @@
+/* Admin portal: layout only. Components (kpi-row, list, table, drawer, dialog, filters, stops, timeline) come from css/base.css. */
+body.page-admin .view > * + * { margin-top: 24px; }
+body.page-admin .view .page-head + * { margin-top: 0; }
+body.page-admin .admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+body.page-admin .admin-grid .section + .section { margin-top: 0; }
+body.page-admin .section-head { margin-bottom: 12px; }
+body.page-admin h1[tabindex="-1"]:focus { outline: none; box-shadow: none; }
+body.page-admin .auth h1 { margin-bottom: 16px; }
+body.page-admin .auth .alert + .alert, body.page-admin .auth .alert + .field, body.page-admin .auth .field + .btn { margin-top: 16px; }
+body.page-admin .auth .field + .field { margin-top: 12px; }
+
+/* Orders list */
+body.page-admin .orders-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+body.page-admin .orders-filters { flex: 1 1 auto; min-width: 0; }
+body.page-admin .orders-filters-btn { display: none; }
+body.page-admin .filters__chips:empty { display: none; }
+body.page-admin .orders-toolbar + .filters__chips { margin-top: 12px; }
+body.page-admin .filters__chips + .card { margin-top: 12px; }
+body.page-admin .table .badge, body.page-admin .table td.table__primary, body.page-admin .table td.mono, body.page-admin .table .table__sub.mono { white-space: nowrap; }
+body.page-admin .card > .empty { padding-left: 16px; padding-right: 16px; }
+
+/* Drawer content */
+body.page-admin .drawer__body > .drawer__section:first-child { padding-top: 16px; }
+body.page-admin .drawer .contact-links { display: block; margin-top: 2px; font-size: 13px; font-weight: 400; }
+body.page-admin .drawer .rate-table__value .badge { vertical-align: middle; }
+body.page-admin .drawer .rate-table__value.slip { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+body.page-admin .drawer .list__aside .row { justify-content: flex-end; margin-top: 4px; }
+body.page-admin .drawer .list__aside .mono { font-size: 15px; color: var(--text); }
+body.page-admin .drawer .stops .stop__aside { white-space: normal; max-width: 120px; }
+body.page-admin .drawer__footer .select { width: auto; min-width: 180px; flex: 1 1 180px; }
+body.page-admin .drawer .neworder-editor:empty { display: none; }
+body.page-admin .thumb-btn { display: inline-block; padding: 0; border: 0; background: none; border-radius: var(--radius-xs); cursor: pointer; }
+body.page-admin .thumb-btn:focus-visible { box-shadow: var(--focus); }
+body.page-admin .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+body.page-admin .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+body.page-admin .timeline__flag { margin-left: 6px; }
+/* While a drawer is open its sticky footer sits bottom-right, exactly where toasts stack; move them out of the way. */
+body.page-admin.has-drawer .toasts { right: auto; left: 20px; }
+
+/* Native dialog forms built by MDM.ui.dialog use .dialog__form/.dialog__fields/.dialog__actions, which base.css does not
+   style; these mirror .dialog__body and .dialog__footer so the forms get their padding and footer rule. */
+body.page-admin .dialog__form { padding: 20px; }
+body.page-admin .dialog__message { font-size: 15px; color: var(--text-2); max-width: none; }
+body.page-admin .dialog__fields { margin-top: 16px; }
+body.page-admin .dialog__fields .field + .field { margin-top: 16px; }
+body.page-admin .dialog__fields .dialog__error { margin-top: 12px; }
+body.page-admin .dialog__actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin: 20px -20px -20px; padding: 12px 20px; border-top: 1px solid var(--border); }
+body.page-admin .file-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+body.page-admin .file-pick__thumb { width: 56px; height: 56px; object-fit: cover; border: 1px solid var(--border); border-radius: var(--radius-xs); }
+body.page-admin .file-pick__name { font-size: 13px; color: var(--text-2); }
+
+/* Six KPIs: one row only when the main area is wide enough for the values, otherwise 3 + 3 (2 + 2 + 2 on phones, as base.css). */
+@media (max-width: 1400px) {
+  body.page-admin .kpi-row { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  body.page-admin .kpi:nth-child(3n + 1) { border-left: 0; }
+  body.page-admin .kpi:nth-child(n + 4) { border-top: 1px solid var(--border); }
+}
+@media (max-width: 1100px) {
+  body.page-admin .admin-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  body.page-admin .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.page-admin .kpi:nth-child(n + 1) { border-left: 1px solid var(--border); border-top: 0; }
+  body.page-admin .kpi:nth-child(2n + 1) { border-left: 0; }
+  body.page-admin .kpi:nth-child(n + 3) { border-top: 1px solid var(--border); }
+}
+@media (max-width: 960px) {
+  body.page-admin .orders-filters { display: none; }
+  body.page-admin .orders-filters-btn { display: inline-flex; }
+}
+@media (max-width: 720px) {
+  body.page-admin .drawer .stops .stop__aside { max-width: 90px; }
+  body.page-admin.has-drawer .toasts { left: 50%; bottom: auto; top: 12px; }
+}

@@ -1,0 +1,3 @@
+/* For businesses: page layout only. Components (rate-table, steps, form, card, alert) come from css/base.css unchanged. */
+body.page-business .business-note { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-business .business-received { max-width: 640px; }

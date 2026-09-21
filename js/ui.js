@@ -346,8 +346,8 @@
       wrap.append(el('label', { for: id }, f.label, optional), ctrl);
     } else if (type === 'segmented') {
       ctrl = el('fieldset', { class: 'segmented', id, 'data-testid': testid, 'aria-labelledby': id + '-label', 'aria-describedby': describe },
-        (f.options || []).map(o => el('label', { class: 'segmented__option' },
-          el('input', { class: 'sr-only', type: 'radio', name: f.name, value: o.value, checked: f.value != null && String(f.value) === String(o.value), 'data-testid': testid + '-' + o.value }),
+        (f.options || []).map(o => el('label', { class: 'segmented__option', 'data-testid': testid + '-' + o.value },
+          el('input', { class: 'sr-only', type: 'radio', name: f.name, value: o.value, checked: f.value != null && String(f.value) === String(o.value), 'data-testid': testid + '-' + o.value + '-input' }),
           el('span', null, o.label, o.hint ? el('small', null, o.hint) : null))));
       wrap.append(el('span', { class: 'field__label', id: id + '-label' }, f.label, optional), ctrl);
       focusEl = () => ctrl.querySelector('input:checked') || ctrl.querySelector('input');

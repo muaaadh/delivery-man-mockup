@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rider console · Mr. Delivery Man</title>
+<meta name="description" content="Rider console for Mr. Delivery Man: today's stops in route order, live location sharing and proof of delivery.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111114'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-weight='600' font-size='18' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" integrity="sha384-K282sW/zFjTkrjR/+yr1H+gCukuy4OEYrkXRybV88g7pk+kZZYpNV6SAV59NcgFg" crossorigin="anonymous">
+<link rel="stylesheet" href="../css/base.css">
+<link rel="stylesheet" href="../css/pages.css">
+<link rel="stylesheet" href="./page.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js" integrity="sha384-KKgyz2mG25bKJ1O2PyqTJPlAF8Kw2BpDmsLTNBXslICOBvhTAyF5F0XhLWF2ZovY" crossorigin="anonymous"></script>
+<script defer src="../js/mdm.js"></script>
+<script defer src="../js/icons.js"></script>
+<script defer src="../js/store.js"></script>
+<script defer src="../js/roads.js"></script>
+<script defer src="../js/geo.js"></script>
+<script defer src="../js/pricing.js"></script>
+<script defer src="../js/map.js"></script>
+<script defer src="../js/live.js"></script>
+<script defer src="../js/ui.js"></script>
+<script defer src="../js/shell.js"></script>
+<script defer src="../js/seed.js"></script>
+<script defer src="./page.js"></script>
+</head>
+<body class="page-driver" data-page="driver">
+<a class="sr-only" href="#main">Skip to content</a>
+<header data-shell="public"></header>
+<main id="main">
+  <div class="container">
+    <div class="driver">
+      <div class="page-head">
+        <h1>Rider console</h1>
+        <p class="page-head__desc">Your stops for today in route order. Tap each stop as you go so the office and the customer can follow.</p>
+      </div>
+
+      <section class="section" aria-labelledby="driver-shift-title">
+        <div class="section-head"><h2 id="driver-shift-title">Your shift</h2></div>
+        <div class="driver__controls">
+          <div class="field">
+            <label for="driver-select">Your name</label>
+            <select id="driver-select" class="select" data-testid="driver-select" autocomplete="off"></select>
+          </div>
+          <fieldset class="segmented" data-testid="driver-online" disabled>
+            <legend class="sr-only">Availability</legend>
+            <label><input class="sr-only" type="radio" name="online" value="online" data-testid="driver-online-online"><span>Online</span></label>
+            <label><input class="sr-only" type="radio" name="online" value="offline" data-testid="driver-online-offline"><span>Offline</span></label>
+          </fieldset>
+          <p class="driver__status" data-testid="driver-status" aria-live="polite">Location off</p>
+          <p class="driver__note">Keep this screen open while on route; phones pause location sharing in the background.</p>
+          <div class="grid-2 grid-2--keep">
+            <button type="button" class="btn btn--secondary btn--block" data-testid="driver-simulate" disabled>Simulate route</button>
+            <button type="button" class="btn btn--secondary btn--block" data-testid="driver-gps" disabled>Use my GPS</button>
+          </div>
+          <p class="driver__hint" data-testid="driver-gps-note" hidden>Location sharing needs an https address (it works on the published site)</p>
+          <div data-testid="driver-gps-alert" hidden></div>
+        </div>
+        <div class="driver__map">
+          <div class="map map--short" id="driver-map" data-testid="driver-map" aria-label="Map of your route">
+            <div class="map__overlay"><button type="button" class="btn btn--secondary btn--sm" data-testid="driver-recenter" hidden>Recenter</button></div>
+          </div>
+          <div class="map-legend"><span><i class="pickup"></i>Pickup</span><span><i class="dropoff"></i>Drop-off</span><span><i class="done"></i>Done</span><span><i class="failed"></i>Not completed</span><span><i class="driver"></i>You</span></div>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="driver-route-title">
+        <div class="section-head">
+          <h2 id="driver-route-title">Today's route</h2>
+          <p class="section-head__desc" data-testid="driver-route-summary"></p>
+        </div>
+        <div id="driver-route" data-testid="driver-route"></div>
+      </section>
+    </div>
+  </div>
+</main>
+<footer data-shell="public-footer"></footer>
+</body>
+</html>

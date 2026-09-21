@@ -1,0 +1,38 @@
+/* Request a delivery: page layout only. Components come from css/base.css and are not restyled here. */
+body.page-request .request-form { min-width: 0; }
+body.page-request .request-step .form { margin-top: 0; }
+
+/* Package cart rows (one card per saved package) */
+body.page-request .pkg-list > * + * { margin-top: 12px; }
+body.page-request .pkg-list { margin-bottom: 16px; }
+body.page-request .pkg-list:empty { display: none; }
+body.page-request .pkg-row__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+body.page-request .pkg-row__main { flex: 1 1 auto; min-width: 0; }
+body.page-request .pkg-row__label { font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+body.page-request .pkg-row__title { font-size: 15px; font-weight: 500; margin-top: 2px; overflow-wrap: anywhere; }
+body.page-request .pkg-row__desc { font-size: 15px; margin-top: 2px; overflow-wrap: anywhere; }
+body.page-request .pkg-row__line { font-size: 13px; line-height: 1.4; color: var(--text); margin-top: 6px; overflow-wrap: anywhere; }
+body.page-request .pkg-row__line + .pkg-row__line { margin-top: 2px; }
+body.page-request .pkg-row__flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+body.page-request .pkg-row__price { flex: none; font-size: 15px; font-weight: 500; white-space: nowrap; }
+body.page-request .pkg-row__actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 -6px -10px; }
+
+/* Step 1 packages heading sits between the service control and the list */
+body.page-request .request-step .section-head { margin-top: 8px; }
+body.page-request .request-step .section-head:first-child { margin-top: 0; }
+body.page-request .request-step .form > .section-head { margin-bottom: 12px; }
+
+/* Review step: the Edit action sits in each group heading row, so value rows stay plain text */
+body.page-request .review__edit { margin: -6px -10px -6px 0; }
+
+/* Sticky panel */
+body.page-request .request-panel__foot { padding: 6px 0 4px; }
+body.page-request .request-panel__foot .btn { margin-left: -10px; }
+body.page-request .request-layout__panel .summary > p { margin: 4px 0 6px; }
+
+/* Mobile bar contents */
+body.page-request .mobile-bar__info { min-width: 0; }
+body.page-request .mobile-bar .btn { flex: none; }
+
+/* Stepper items stay level when done steps become 44px buttons */
+body.page-request .stepper { min-height: 44px; }

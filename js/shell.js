@@ -161,7 +161,8 @@
     toggle.addEventListener('click', () => setOpen(!open));
     nav.addEventListener('click', e => { if (e.target.closest('a')) setOpen(false); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && open) { setOpen(false); toggle.focus(); } });
-    document.addEventListener('click', e => { if (open && !header.contains(e.target)) setOpen(false); });
+    // The toggle swaps its icon on click, which detaches e.target; composedPath() still resolves the click to the header.
+    document.addEventListener('click', e => { if (open && !e.composedPath().includes(header)) setOpen(false); });
     const mq = window.matchMedia('(min-width: 861px)');
     const onMq = () => { if (mq.matches && open) setOpen(false); };
     if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);

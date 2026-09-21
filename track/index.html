@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Track an order · Mr. Delivery Man</title>
+<meta name="description" content="Track a Mr. Delivery Man delivery in Greater Malé with your order code: rider location, estimated arrival, stops and payment status.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111114'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-weight='600' font-size='18' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" integrity="sha384-K282sW/zFjTkrjR/+yr1H+gCukuy4OEYrkXRybV88g7pk+kZZYpNV6SAV59NcgFg" crossorigin="anonymous">
+<link rel="stylesheet" href="../css/base.css">
+<link rel="stylesheet" href="../css/pages.css">
+<link rel="stylesheet" href="./page.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js" integrity="sha384-KKgyz2mG25bKJ1O2PyqTJPlAF8Kw2BpDmsLTNBXslICOBvhTAyF5F0XhLWF2ZovY" crossorigin="anonymous"></script>
+<script defer src="../js/mdm.js"></script>
+<script defer src="../js/icons.js"></script>
+<script defer src="../js/store.js"></script>
+<script defer src="../js/roads.js"></script>
+<script defer src="../js/geo.js"></script>
+<script defer src="../js/pricing.js"></script>
+<script defer src="../js/map.js"></script>
+<script defer src="../js/live.js"></script>
+<script defer src="../js/ui.js"></script>
+<script defer src="../js/shell.js"></script>
+<script defer src="../js/seed.js"></script>
+<script defer src="./page.js"></script>
+</head>
+<body class="page-track" data-page="track">
+<a class="sr-only" href="#main">Skip to content</a>
+<header data-shell="public"></header>
+<main id="main">
+  <div class="container container--narrow">
+    <div class="page-head">
+      <h1>Track an order</h1>
+      <p class="page-head__desc">Enter the order code from your confirmation message to see where your delivery is.</p>
+    </div>
+    <form class="form track-form" data-testid="track-form" novalidate>
+      <div class="field">
+        <label for="track-code">Order code</label>
+        <div class="input-group">
+          <input id="track-code" class="input mono" data-testid="track-input" type="text" inputmode="numeric" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search" placeholder="MDM-1038">
+          <button type="submit" class="btn btn--primary" data-testid="track-submit">Track</button>
+        </div>
+        <div class="field__hint">The MDM prefix is optional, the digits alone work too.</div>
+      </div>
+    </form>
+    <div id="track-empty" hidden></div>
+    <div id="track-result" class="track-result" tabindex="-1" hidden></div>
+  </div>
+</main>
+<footer data-shell="public-footer"></footer>
+</body>
+</html>

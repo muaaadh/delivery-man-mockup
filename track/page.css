@@ -1,0 +1,37 @@
+/* Track an order: layout only, every rule scoped to body.page-track. Components come from css/base.css untouched. */
+body.page-track .track-form { margin-bottom: 8px; }
+body.page-track .track-result:focus { outline: none; box-shadow: none; }
+
+/* Result header: badge and ETA share the polite live region; "Updated" sits beside it outside the region. */
+body.page-track .track-head__back { margin: -8px 0 12px -14px; }
+body.page-track .track-head__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+body.page-track .track-head__live { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+body.page-track .track-eta { font-size: 14px; font-weight: 500; }
+body.page-track .track-eta:empty { display: none; }
+body.page-track .track-head__updated { font-size: 13px; color: var(--text-2); }
+body.page-track .track-head__code { margin-top: 10px; font-size: 24px; font-weight: 500; line-height: 1.2; }
+body.page-track .track-head__summary { margin-top: 4px; font-size: 15px; color: var(--text-2); overflow-wrap: anywhere; }
+body.page-track .track-head__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+body.page-track .track-share { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; font-size: 13px; color: var(--text-2); }
+
+/* Status notices and their action buttons. */
+body.page-track .track-notices { margin-top: 24px; }
+body.page-track .track-notices > * + * { margin-top: 12px; }
+body.page-track .track-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+body.page-track .track-actions > .btn--ghost:first-child { margin-left: -14px; }
+body.page-track .track-proof .thumb { width: 56px; height: 56px; }
+
+/* Route: the map keeps its base height (300px, 420px from 720px); the stops list follows it. */
+body.page-track .track-result > .section:first-of-type { margin-top: 32px; }
+body.page-track .track-map-holder + .stops { margin-top: 16px; }
+body.page-track .track-summary-note { margin-top: 12px; }
+
+/* A stop row is a real button while the map is shown, so tapping it pans the map; a hover tint marks it as interactive. */
+body.page-track button.stop { width: calc(100% + 16px); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: var(--radius-xs); cursor: pointer; transition: background-color .15s ease; }
+body.page-track button.stop:focus-visible { box-shadow: var(--focus); }
+body.page-track .stop__main { min-width: 0; }
+body.page-track .stop__title, body.page-track .stop__meta { display: block; }
+@media (hover: hover) { body.page-track button.stop:hover { background: var(--surface); } }
+
+/* Timeline of public events plus what happens next. */
+body.page-track .timeline__item.is-upcoming .timeline__label { font-weight: 400; }

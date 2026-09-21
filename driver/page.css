@@ -1,0 +1,47 @@
+/* Driver console layout (SPEC §3.6): one left-aligned column, max 560px, mobile-first. Components come from base.css unchanged. */
+body.page-driver .driver { max-width: 560px; }
+body.page-driver .driver__controls { display: grid; gap: 16px; }
+body.page-driver .driver__status, body.page-driver .driver__note, body.page-driver .driver__hint { font-size: 13px; line-height: 1.4; color: var(--text-2); max-width: 60ch; }
+body.page-driver .driver__map { margin-top: 20px; }
+
+/* Order blocks: code + status, customer line, then the stops. */
+body.page-driver .driver-order + .driver-order { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); }
+body.page-driver .driver-order__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+body.page-driver .driver-order__customer { font-size: 13px; line-height: 1.4; color: var(--text-2); margin-top: 4px; overflow-wrap: anywhere; }
+body.page-driver .driver-order__start { margin-top: 16px; }
+body.page-driver .driver-order__stops { margin-top: 16px; display: grid; gap: 12px; }
+body.page-driver .driver-order__stops > .stop + .stop { border-top: 0; }
+
+/* Stop cards: the .stop row inside the card body carries the marker; the card padding replaces the row's own. */
+body.page-driver .driver-stop > .card__body > .stop { padding: 0; grid-template-columns: 24px minmax(0, 1fr); }
+body.page-driver .driver-stop.is-current { border-color: var(--border-strong); }
+body.page-driver .driver-stop__address { font-size: 17px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; margin-top: 4px; }
+body.page-driver .driver-stop__line { font-size: 13px; line-height: 1.4; color: var(--text-2); margin-top: 4px; overflow-wrap: anywhere; }
+body.page-driver .driver-stop__contact { margin-top: 8px; font-size: 15px; overflow-wrap: anywhere; }
+body.page-driver .driver-stop__shop { margin-top: 8px; font-size: 13px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere; }
+body.page-driver .driver-stop__shop dt { color: var(--text-3); }
+body.page-driver .driver-stop__shop dd { margin: 0; color: var(--text); }
+body.page-driver .driver-stop__shop dd + dt { margin-top: 4px; }
+body.page-driver .driver-stop__tags { display: inline-flex; gap: 6px; vertical-align: middle; margin-left: 6px; }
+body.page-driver .driver-stop__links { margin-top: 16px; }
+body.page-driver .driver-stop__actions { display: grid; gap: 8px; margin-top: 12px; }
+
+/* Collapsed rows (done or failed stops): the title stays on one line. */
+body.page-driver .driver-stop--row .stop__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Workaround for a shared mismatch: js/ui.js builds dialogs as .dialog__form > .dialog__message / .dialog__fields / .dialog__actions
+   and file fields as .file-pick, while css/base.css styles .dialog__body / .dialog__footer only. These rules give the rider's
+   dialogs the SPEC §2.5 dialog layout until the shared files agree; drop them once base.css or ui.js is fixed. */
+body.page-driver .dialog__form { padding: 20px; font-size: 15px; }
+body.page-driver .dialog__message { color: var(--text-2); max-width: none; }
+body.page-driver .dialog__fields .field { margin-top: 16px; }
+body.page-driver .dialog__error { margin-top: 12px; }
+body.page-driver .dialog__actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin: 20px -20px -20px; padding: 12px 20px; border-top: 1px solid var(--border); }
+body.page-driver .file-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+body.page-driver .file-pick__thumb { width: 56px; height: 56px; object-fit: cover; border: 1px solid var(--border); border-radius: var(--radius-xs); }
+body.page-driver .file-pick__name { font-size: 13px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere; }
+
+/* Workaround for a shared bug: base.css `.marker { position: relative }` loads after MapLibre's stylesheet and overrides
+   `.maplibregl-marker { position: absolute }` at equal specificity, so every marker is pushed down by the markers before it.
+   Restoring absolute positioning here; the real fix is dropping `position: relative` from `.marker` in css/base.css. */
+body.page-driver .maplibregl-marker.marker { position: absolute; }

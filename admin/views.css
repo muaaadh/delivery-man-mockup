@@ -1,0 +1,68 @@
+/* Admin secondary views (SPEC §3.7): layout only, scoped under body.page-admin; base components are never restyled here.
+   Also holds the few layout rules of the printable invoice (body.page-invoice), which loads this file next to base.css. */
+
+/* ---------- Live map: map fills the main height, 320px rider column, stacked below 960px ---------- */
+body.page-admin .live-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; height: calc(100dvh - 64px); min-height: 420px; }
+body.page-admin .live-layout > .map { height: 100%; min-height: 0; }
+body.page-admin .live-side { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
+body.page-admin .live-side > .card { flex: none; }
+body.page-admin .live-rider { cursor: pointer; }
+body.page-admin .live-rider.is-selected { background: var(--surface); }
+body.page-admin .live-rider__name { font: inherit; color: inherit; text-align: left; }
+body.page-admin .live-rider__title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+body.page-admin .live-rider__meta > a { color: inherit; font-weight: 500; }
+body.page-admin .live-order__title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+body.page-admin .live-order__code { font: inherit; font-weight: 500; color: inherit; }
+@media (max-width: 960px) {
+  body.page-admin .live-layout { grid-template-columns: 1fr; height: auto; min-height: 0; }
+  body.page-admin .live-layout > .map { height: calc(100dvh - 56px); min-height: 320px; }
+  body.page-admin .live-side { overflow: visible; }
+}
+
+/* ---------- Tables: row action cells never wrap their buttons ---------- */
+body.page-admin .table td.table__actions { white-space: nowrap; width: 1%; }
+body.page-admin .table .table__address { max-width: 220px; }
+body.page-admin .table__actions-row { display: inline-flex; gap: 4px; }
+@media (max-width: 720px) {
+  body.page-admin .table--stack td.table__actions { justify-content: flex-start; padding-top: 8px; }
+  body.page-admin .table--stack td.table__actions::before { content: none; }
+}
+
+/* ---------- Business tabs and the account page ---------- */
+body.page-admin .tabs { margin-bottom: 24px; }
+body.page-admin .wrap-value { display: block; max-width: 40ch; margin-left: auto; }
+@media (max-width: 480px) { body.page-admin .wrap-value { max-width: 22ch; } }
+body.page-admin .business-tab__count { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* ---------- Rates: the size grid (rows by size, columns by same island / across the bridge) ---------- */
+body.page-admin .rates-grid { display: grid; grid-template-columns: 72px minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+body.page-admin .rates-grid__head { font-size: 13px; font-weight: 500; line-height: 1.4; color: var(--text-2); }
+body.page-admin .rates-grid__label { font-size: 14px; font-weight: 500; }
+body.page-admin .form-caption { font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-admin .form-card__body > * + * { margin-top: 16px; }
+body.page-admin .form .card { max-width: none; }
+@media (max-width: 480px) { body.page-admin .rates-grid { grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; } }
+
+/* ---------- Settings ---------- */
+body.page-admin .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+body.page-admin .settings-note { font-size: 13px; line-height: 1.4; color: var(--text-2); max-width: 60ch; }
+
+/* ---------- Printable invoice ---------- */
+body.page-invoice main { padding-bottom: 48px; }
+body.page-invoice .invoice-parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 48px; align-items: start; }
+body.page-invoice .invoice-parties h2 { font-size: 15px; margin-bottom: 4px; }
+body.page-invoice .invoice-reference { font-size: 14px; }
+body.page-invoice .invoice-address { display: block; max-width: 30ch; margin-left: auto; }
+@media (max-width: 480px) { body.page-invoice .invoice-address { max-width: 22ch; } }
+@media (max-width: 720px) { body.page-invoice .invoice-parties { grid-template-columns: 1fr; gap: 24px; } }
+@media print {
+  body.page-invoice .container { max-width: none; padding: 0; }
+  body.page-invoice .page-head { padding-top: 0; margin-bottom: 20px; }
+  body.page-invoice .invoice-parties { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.page-invoice .table--stack thead { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+  body.page-invoice .table--stack, body.page-invoice .table--stack tbody { display: table; width: 100%; }
+  body.page-invoice .table--stack tbody { display: table-row-group; }
+  body.page-invoice .table--stack tr { display: table-row; border: 0; padding: 0; margin: 0; }
+  body.page-invoice .table--stack td { display: table-cell; padding: 8px 12px; border-bottom: 1px solid #999; }
+  body.page-invoice .table--stack td[data-label]::before { content: none; }
+}

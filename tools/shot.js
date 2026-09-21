@@ -22,7 +22,15 @@ const { chromium } = require('playwright');
       await page.goto(base + p, { waitUntil: 'networkidle' }).catch(e => errors.push({ path: p, width: w, error: 'goto: ' + e.message }));
       await page.waitForTimeout(600);
       const name = (p.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'home') + '-' + w + '.png';
-      await page.screenshot({ path: path.join(outDir, name), fullPage: !!opt.full });
+      if (opt.full) {
+        // Playwright's fullPage capture briefly resizes the viewport to 1x1, which makes MapLibre re-render at its 400x300 default.
+        // A tall viewport gives the same full-page image without disturbing the map.
+        const h = await page.evaluate(() => Math.min(20000, Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)));
+        await page.setViewportSize({ width: w, height: Math.max(h, w < 600 ? 844 : 800) });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.waitForTimeout(500);
+      }
+      await page.screenshot({ path: path.join(outDir, name) });
       const overflow = await page.evaluate(() => {
         const bad = [];
         const dw = document.documentElement.clientWidth;

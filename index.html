@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Delivery within Greater Malé · Mr. Delivery Man</title>
+<meta name="description" content="Same-day pickup, shopping runs and business deliveries in Malé, Hulhumalé and at Velana International Airport. Pay by bank transfer and follow your rider live.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111114'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-weight='600' font-size='18' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" integrity="sha384-K282sW/zFjTkrjR/+yr1H+gCukuy4OEYrkXRybV88g7pk+kZZYpNV6SAV59NcgFg" crossorigin="anonymous">
+<link rel="stylesheet" href="./css/base.css">
+<link rel="stylesheet" href="./css/pages.css">
+<link rel="stylesheet" href="./home.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js" integrity="sha384-KKgyz2mG25bKJ1O2PyqTJPlAF8Kw2BpDmsLTNBXslICOBvhTAyF5F0XhLWF2ZovY" crossorigin="anonymous"></script>
+<script defer src="./js/mdm.js"></script>
+<script defer src="./js/icons.js"></script>
+<script defer src="./js/store.js"></script>
+<script defer src="./js/roads.js"></script>
+<script defer src="./js/geo.js"></script>
+<script defer src="./js/pricing.js"></script>
+<script defer src="./js/map.js"></script>
+<script defer src="./js/live.js"></script>
+<script defer src="./js/ui.js"></script>
+<script defer src="./js/shell.js"></script>
+<script defer src="./js/seed.js"></script>
+<script defer src="./home.js"></script>
+</head>
+<body class="page-home" data-page="home">
+<a class="sr-only" href="#main">Skip to content</a>
+<header data-shell="public"></header>
+<main id="main">
+  <div class="container">
+
+    <section id="top" class="section home-top" aria-labelledby="top-title">
+      <div class="page-head page-head--stack">
+        <h1 id="top-title">Delivery within Greater Malé</h1>
+        <p class="page-head__desc">Bags, boxes and shopping runs across Malé, Hulhumalé and the airport. Pay by bank transfer, then follow your rider live until it is delivered.</p>
+        <div class="page-head__actions">
+          <a class="btn btn--primary" href="./request/" data-testid="home-request">Request a delivery</a>
+          <a class="btn btn--secondary" href="./track/" data-testid="home-track">Track an order</a>
+        </div>
+        <p class="home-hours" data-testid="home-hours"></p>
+      </div>
+    </section>
+
+    <section id="services" class="section" aria-labelledby="services-title">
+      <div class="section-head">
+        <h2 id="services-title">What we do</h2>
+      </div>
+      <ul class="home-services">
+        <li class="home-service" data-testid="home-service-pick">
+          <h3 class="home-service__title">Pick &amp; deliver</h3>
+          <div class="home-service__body">
+            <p class="home-service__text">We collect from any address in Malé or Hulhumalé and bring it to the door the same day.</p>
+            <a class="home-service__link" href="./request/">Request a pickup</a>
+          </div>
+          <div class="home-service__price"><span class="mono" data-testid="home-service-price-pick"></span></div>
+        </li>
+        <li class="home-service" data-testid="home-service-shop">
+          <h3 class="home-service__title">Shop &amp; deliver</h3>
+          <div class="home-service__body">
+            <p class="home-service__text">Send us a shopping list and a budget. We buy it, show you the receipt and deliver it.</p>
+            <a class="home-service__link" href="./request/">Request a shopping run</a>
+          </div>
+          <div class="home-service__price"><span class="mono" data-testid="home-service-price-shop"></span><small data-testid="home-service-fee-shop"></small></div>
+        </li>
+        <li class="home-service" data-testid="home-service-business">
+          <h3 class="home-service__title">Delivery for businesses</h3>
+          <div class="home-service__body">
+            <p class="home-service__text">One flat rate per package for shops and offices in Malé and Hulhumalé, on a single monthly invoice.</p>
+            <a class="home-service__link" href="./business/">For businesses</a>
+          </div>
+          <div class="home-service__price"><span class="mono" data-testid="home-service-price-business"></span><small>per package</small></div>
+        </li>
+      </ul>
+    </section>
+
+    <section id="rates" class="section" aria-labelledby="rates-title">
+      <div class="section-head">
+        <h2 id="rates-title">Rates</h2>
+        <p class="section-head__desc">By package size, within Malé and Hulhumalé.</p>
+      </div>
+      <div class="home-rates">
+        <div class="rate-table" data-testid="home-rates">
+          <div class="rate-table__row rate-table__row--head">Package size</div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">Bags<small data-testid="home-guide-bag"></small></div>
+            <div class="rate-table__value mono" data-testid="home-rate-bag"></div>
+          </div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">Box<small data-testid="home-guide-box"></small></div>
+            <div class="rate-table__value mono" data-testid="home-rate-box"></div>
+          </div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">XL packages<small data-testid="home-guide-xl"></small></div>
+            <div class="rate-table__value mono" data-testid="home-rate-xl"></div>
+          </div>
+        </div>
+        <p class="home-rates__note" data-testid="home-rates-note">Lower figure within one island, higher figure when we cross the bridge.</p>
+        <div class="rate-table" data-testid="home-fees">
+          <div class="rate-table__row rate-table__row--head">Fees</div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">Shopping fee<small>On shop &amp; deliver orders, worked out from the receipt</small></div>
+            <div class="rate-table__value mono" data-testid="home-fee-shopping"></div>
+          </div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">Cargo fee<small data-testid="home-fee-cargo-note"></small></div>
+            <div class="rate-table__value mono" data-testid="home-fee-cargo"></div>
+          </div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">Airport fee<small data-testid="home-fee-airport-note"></small></div>
+            <div class="rate-table__value mono" data-testid="home-fee-airport"></div>
+          </div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">Vehicle charge<small>When a package cannot go on a bike</small></div>
+            <div class="rate-table__value" data-testid="home-fee-vehicle">Confirmed before dispatch</div>
+          </div>
+          <div class="rate-table__row">
+            <div class="rate-table__label">Business rate<small>Malé and Hulhumalé Phase 1 &amp; 2, packages under 1 ft, invoiced monthly</small></div>
+            <div class="rate-table__value mono" data-testid="home-fee-business"></div>
+          </div>
+        </div>
+        <p class="home-rates__note">Prices in Maldivian Rufiyaa.</p>
+      </div>
+    </section>
+
+    <section id="how" class="section" aria-labelledby="how-title">
+      <div class="section-head">
+        <h2 id="how-title">How it works</h2>
+      </div>
+      <ol class="steps" data-testid="home-steps">
+        <li class="steps__item">
+          <div class="steps__head"><span class="steps__num mono">1</span><h3 class="steps__title">Request</h3></div>
+          <p class="steps__text">Tell us what to pick up, where it goes and when. You see the price before you send it.</p>
+        </li>
+        <li class="steps__item">
+          <div class="steps__head"><span class="steps__num mono">2</span><h3 class="steps__title">Transfer and upload your slip</h3></div>
+          <p class="steps__text">Pay by bank transfer and upload the slip. We check it and confirm your order<span data-testid="home-review-time"></span>.</p>
+        </li>
+        <li class="steps__item">
+          <div class="steps__head"><span class="steps__num mono">3</span><h3 class="steps__title">We pick up</h3></div>
+          <p class="steps__text">A rider collects the package and we message you on WhatsApp, Viber or SMS when it is on the way.</p>
+        </li>
+        <li class="steps__item">
+          <div class="steps__head"><span class="steps__num mono">4</span><h3 class="steps__title">Track it to the door</h3></div>
+          <p class="steps__text">Follow the rider on the map and see who received it once it is handed over.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section id="coverage" class="section" aria-labelledby="coverage-title">
+      <div class="section-head">
+        <h2 id="coverage-title">Where we deliver</h2>
+      </div>
+      <div class="map map--short" id="coverage-map" data-testid="home-map">
+        <noscript><div class="map__fallback"><div class="alert alert--warn">Map unavailable without JavaScript. The zones we cover are listed below.</div></div></noscript>
+      </div>
+      <div class="map-legend" data-testid="home-map-legend"><span><i class="corridor"></i>Sinamalé Bridge corridor, Malé to Hulhumalé</span></div>
+      <p class="home-coverage__text" data-testid="home-coverage-text">Malé, Hulhumalé Phase 1 and Phase 2 and Velana International Airport, plus Villimalé by ferry and any other island on request, both quoted before pickup.</p>
+    </section>
+
+  </div>
+</main>
+<footer data-shell="public-footer"></footer>
+</body>
+</html>

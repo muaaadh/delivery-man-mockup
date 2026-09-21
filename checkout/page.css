@@ -1,0 +1,22 @@
+/* Checkout page: layout only, every component comes from css/base.css. */
+body.page-checkout .checkout { max-width: 640px; }
+body.page-checkout .checkout-skeleton { height: 240px; }
+body.page-checkout .checkout-notice { margin-bottom: 24px; }
+body.page-checkout .checkout-code { font-size: 24px; font-weight: 500; letter-spacing: -.01em; line-height: 1.2; }
+body.page-checkout .checkout-account { font-size: 17px; font-weight: 500; line-height: 1.3; }
+body.page-checkout .checkout-copy { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+body.page-checkout .checkout-copy--end { justify-content: flex-end; }
+body.page-checkout .checkout-summary { margin-top: 16px; }
+body.page-checkout .checkout-ref { font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-checkout .checkout-terms { font-size: 13px; line-height: 1.4; color: var(--text-2); margin-bottom: 4px; }
+body.page-checkout .checkout-form .form-actions { margin-top: 8px; }
+body.page-checkout .checkout-panel .card__body > * + * { margin-top: 16px; }
+body.page-checkout .checkout-panel .checkout-copy { display: flex; }
+body.page-checkout .checkout-panel h3 + .checkout-next { margin-top: 8px; }
+body.page-checkout .checkout-next { list-style: decimal; padding-left: 22px; max-width: 60ch; }
+body.page-checkout .checkout-next li + li { margin-top: 6px; }
+body.page-checkout .checkout-next li::marker { color: var(--text-3); font-variant-numeric: tabular-nums; }
+body.page-checkout .checkout-panel .btn--primary { margin-top: 20px; }
+@media (max-width: 480px) {
+  body.page-checkout .checkout-copy--end { flex-direction: column; align-items: flex-end; gap: 0; }
+}

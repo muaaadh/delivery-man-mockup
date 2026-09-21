@@ -138,7 +138,7 @@
     const stdEvents = (created, opts) => {
       // opts: { paidAt, confirmedAt, assignedAt, driver, startedAt, pickedAt, pickedFrom, deliveredAt, deliveredTo }
       const e = [ev('created', 'Order placed', t(created), 'customer')];
-      if (opts.paidAt != null) { e.push(ev('payment_submitted', 'Payment slip submitted', t(opts.paidAt + 20), 'customer')); e.push(ev('payment_verified', 'Payment verified', t(opts.paidAt), 'admin')); e.push(ev('confirmed', 'Order confirmed, assigning a rider', t(opts.paidAt), 'admin')); }
+      if (opts.paidAt != null) { e.push(ev('payment_submitted', 'Payment slip submitted', t(Math.min(opts.paidAt + 20, created - 2)), 'customer')); e.push(ev('payment_verified', 'Payment verified', t(opts.paidAt), 'admin')); e.push(ev('confirmed', 'Order confirmed, assigning a rider', t(opts.paidAt), 'admin')); }
       if (opts.assignedAt != null) e.push(ev('assigned', 'Rider assigned: ' + opts.driver, t(opts.assignedAt), 'admin'));
       if (opts.startedAt != null) e.push(ev('route_started', opts.driver + ' is on the way', t(opts.startedAt), 'driver'));
       if (opts.pickedAt != null) { e.push(ev('arrived', opts.driver + ' arrived at pickup 1', t(opts.pickedAt + 3), 'driver')); e.push(ev('picked_up', 'Picked up from ' + opts.pickedFrom, t(opts.pickedAt), 'driver')); }

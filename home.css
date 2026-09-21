@@ -1,0 +1,32 @@
+/* Home page layout (SPEC §3.1). Every rule is scoped under body.page-home; base components keep their own styles. */
+
+/* Headline block: max-width 640px, hours line under the buttons. The page-head's own bottom margin is dropped because
+   the section gap already follows it. */
+body.page-home .home-top { max-width: 640px; }
+body.page-home .home-top .page-head { margin-bottom: 0; }
+body.page-home .home-hours { margin-top: 16px; min-height: 18px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+
+/* "What we do": rows separated by 1px borders. Desktop: name | sentence and link | price. Mobile: name and price on one line,
+   then the sentence. Same DOM at both widths, placed through grid areas. */
+body.page-home .home-service { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(168px, auto); grid-template-areas: "title body price"; gap: 6px 32px; padding: 20px 0; align-items: start; }
+body.page-home .home-service + .home-service { border-top: 1px solid var(--border); }
+body.page-home .home-service__title { grid-area: title; }
+body.page-home .home-service__body { grid-area: body; min-width: 0; }
+body.page-home .home-service__text { color: var(--text-2); }
+body.page-home .home-service__link { display: inline-block; margin-top: 6px; font-weight: 500; }
+body.page-home .home-service__price { grid-area: price; text-align: right; white-space: nowrap; font-weight: 500; line-height: 1.4; }
+body.page-home .home-service__price small { display: block; font-weight: 400; color: var(--text-2); white-space: normal; }
+
+/* Rates: the label · value table reads best at a form-like width. */
+body.page-home .home-rates { max-width: 640px; }
+body.page-home .home-rates__note { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-home .home-rates__note + .rate-table { margin-top: 12px; }
+
+/* Coverage: a line swatch for the corridor in the legend and the zone sentence under it. */
+body.page-home .map-legend i.corridor { width: 18px; height: 3px; border-radius: 0; background: var(--brand); opacity: .4; }
+body.page-home .home-coverage__text { margin-top: 12px; color: var(--text-2); }
+
+@media (max-width: 720px) {
+  body.page-home .home-service { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title price" "body body"; gap: 8px 16px; padding: 16px 0; }
+  body.page-home .home-service__price small { text-align: right; }
+}
