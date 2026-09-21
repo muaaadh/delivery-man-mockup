@@ -26,6 +26,8 @@ body.page-admin .table__actions-row { display: inline-flex; gap: 4px; }
 @media (max-width: 720px) {
   body.page-admin .table--stack td.table__actions { justify-content: flex-start; padding-top: 8px; }
   body.page-admin .table--stack td.table__actions::before { content: none; }
+  /* Stacked rows show the whole address (base.css .table--stack .table__address); the 220px desktop cap must not outrank it. */
+  body.page-admin .table--stack .table__address { max-width: none; }
 }
 
 /* ---------- Business tabs and the account page ---------- */
@@ -39,6 +41,10 @@ body.page-admin .rates-grid { display: grid; grid-template-columns: 72px minmax(
 body.page-admin .rates-grid__head { font-size: 13px; font-weight: 500; line-height: 1.4; color: var(--text-2); }
 body.page-admin .rates-grid__label { font-size: 14px; font-weight: 500; }
 body.page-admin .form-caption { font-size: 13px; line-height: 1.4; color: var(--text-2); }
+/* Rates is one <form> of sections laid out like Settings: full-width sections 24px apart (the .stack-6 rhythm), fields capped at the 640px form width. */
+body.page-admin .form--wide { max-width: none; }
+body.page-admin .form--wide > * + * { margin-top: 24px; }
+body.page-admin .form-card__body { max-width: 640px; }
 body.page-admin .form-card__body > * + * { margin-top: 16px; }
 body.page-admin .form .card { max-width: none; }
 @media (max-width: 480px) { body.page-admin .rates-grid { grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; } }

@@ -11,7 +11,7 @@
   const ASK_CANCEL = ['payment_review', 'confirmed', 'assigned', 'picked_up', 'in_transit', 'on_hold'];
   const RECENT_S = 120, STALE_S = 15, LOST_S = 60;
   const VEHICLES = { bike: 'Bike', car: 'Car', pickup: 'Pickup' };
-  const CHANNELS = { sms: 'SMS', whatsapp: 'WhatsApp', viber: 'Viber' };
+  const CHANNEL_ON = { sms: 'by SMS', whatsapp: 'on WhatsApp', viber: 'on Viber' };   // "message you by SMS" / "on WhatsApp", as checkout says it
   const MEET_AT = { door: 'At the door', lobby: 'At the lobby', reception: 'At reception or security' };
   const PAY_STATE = { unpaid: ['warn', 'Not paid yet'], review: ['warn', 'Checking your slip'], verified: ['ok', 'Verified'], rejected: ['danger', 'Could not match'], invoiced: ['neutral', 'On your monthly invoice'] };
   const ALERT_ICON = { info: 'info', warn: 'alert-triangle', danger: 'alert-circle', ok: 'check-circle' };
@@ -30,6 +30,8 @@
 
   const fmt = n => MDM.pricing.format(n);
   const fmtDate = (iso, o) => MDM.ui.fmtDate(iso, o);
+  // A stop completed today reads as a time ("at 14:32", SPEC §3.4); older deliveries keep their date so a week-old order still makes sense.
+  const fmtWhen = iso => (MDM.ui.dayKey(iso) === MDM.ui.dayKey(new Date()) ? MDM.ui.fmtTime(iso) : fmtDate(iso));
   const codeUrl = code => MDM.href('track/?code=' + encodeURIComponent(code));
   function normCode(raw) {
     let c = String(raw == null ? '' : raw).trim().toUpperCase().replace(/\s+/g, '');
@@ -319,18 +321,18 @@
     const href = ch === 'viber' ? links.viber : ch === 'sms' ? links.sms : links.wa;
     const attrs = { class: 'btn btn--ghost', href, 'data-testid': 'track-ask-cancel' };
     if (ch === 'whatsapp') { attrs.target = '_blank'; attrs.rel = 'noopener'; }
-    return el('a', attrs, 'Ask to cancel on ' + (CHANNELS[ch] || 'WhatsApp'));
+    return el('a', attrs, 'Ask to cancel ' + (CHANNEL_ON[ch] || CHANNEL_ON.whatsapp));
   }
 
   function buildNotices(o, stops, files, refs) {
     const s = state.settings || {}, ops = s.ops || {};
-    const channel = CHANNELS[o.customer && o.customer.notify] || 'WhatsApp';
+    const channelOn = CHANNEL_ON[o.customer && o.customer.notify] || CHANNEL_ON.whatsapp;
     const p = o.payment || {};
     const items = [];
     const actions = [];
     switch (o.status) {
       case 'quote_pending':
-        items.push(notice('warn', null, "We're confirming your price. We'll send the payment link on " + channel + '.'));
+        items.push(notice('warn', null, "We're confirming your price. We'll send the payment link " + channelOn + '.'));
         actions.push(cancelButton(o));
         break;
       case 'awaiting_payment': {
@@ -359,7 +361,7 @@
         const failed = stops.find(x => x.status === 'failed');
         const r = failed ? MDM.FAIL_REASONS.find(x => x.value === failed.failReason) : null;
         const words = r ? r.label.toLowerCase() : (failed && failed.failReason ? String(failed.failReason).replace(/_/g, ' ') : 'no answer');
-        items.push(notice('warn', null, "We couldn't complete " + (failed ? failed.label.toLowerCase() : 'a stop') + ' (' + words + "). We'll contact you on " + channel + '.'));
+        items.push(notice('warn', null, "We couldn't complete " + (failed ? failed.label.toLowerCase() : 'a stop') + ' (' + words + "). We'll contact you " + channelOn + '.'));
         break;
       }
       case 'delivered': case 'returned': {
@@ -373,7 +375,7 @@
               : 'Delivered to ' + (who || 'the recipient') + handedWords(x.handedTo);
             return el('div', { class: 'list__item' },
               f && f.dataUrl ? el('img', { class: 'thumb', src: f.dataUrl, alt: 'Proof of delivery photo', 'data-testid': 'track-proof-photo' }) : null,
-              el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, text + (x.at ? ' at ' + fmtDate(x.at) : '')), el('div', { class: 'list__meta' }, x.address)));
+              el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, text + (x.at ? ' at ' + fmtWhen(x.at) : '')), el('div', { class: 'list__meta' }, x.address)));
           })));
         }
         if (o.status === 'returned') items.push(notice('info', null, "We couldn't deliver this package, so it went back to the pickup address."));
@@ -381,7 +383,7 @@
         if (o.service === 'shop' && st && st.status !== 'none') {
           const parts = ['Receipt ' + fmt(o.totals.budget), 'Shopping fee ' + fmt(o.fees.shopping)];
           let more = '';
-          if (st.status === 'refund_due') { parts.push('We owe you ' + fmt(st.balance)); more = " We'll transfer it back and message you on " + channel + '.'; }
+          if (st.status === 'refund_due') { parts.push('We owe you ' + fmt(st.balance)); more = " We'll transfer it back and message you " + channelOn + '.'; }
           else if (st.status === 'topup_due') { parts.push('Please pay the difference ' + fmt(Math.abs(st.balance))); more = ' Transfer it with the reference ' + o.code + '.'; }
           else parts.push(st.balance > 0 ? 'We refunded ' + fmt(st.balance) : st.balance < 0 ? 'Difference paid ' + fmt(Math.abs(st.balance)) : 'Nothing to settle');
           if (st.settledAt && st.status === 'settled') more = ' Settled on ' + fmtDate(st.settledAt, { time: false }) + (st.reference ? ' (' + st.reference + ')' : '') + '.';
@@ -393,7 +395,7 @@
         const refund = p.refund;
         let body = (o.cancelledBy === 'customer' ? 'You cancelled this order' : 'We cancelled this order') + (o.cancelReason ? ': ' + o.cancelReason : '') + '.';
         if (refund) body += ' ' + fmt(refund.amount) + ' was sent to ' + (bankName(refund.toBank) || 'your bank') + (refund.at ? ' on ' + fmtDate(refund.at, { time: false }) : '') + '.';
-        else if (p.status === 'verified') body += " We'll contact you on " + channel + ' about your refund.';
+        else if (p.status === 'verified') body += " We'll contact you " + channelOn + ' about your refund.';
         items.push(notice('danger', refund ? 'Cancelled, refund sent' : 'Cancelled', body));
         break;
       }
@@ -405,7 +407,10 @@
   }
 
   function buildRoute(o, stops) {
-    const withMap = MAP_STATUSES.indexOf(o.status) >= 0 && MDM.map.available();
+    // The map box is mounted for every map status; when MapLibre itself is missing MDM.map.create rejects and syncMap() shows the
+    // .map__fallback notice (SPEC §2.5). Stop rows only become buttons when there is a map to pan.
+    const withMap = MAP_STATUSES.indexOf(o.status) >= 0;
+    const clickable = withMap && MDM.map.available();
     const active = ACTIVE.indexOf(o.status) >= 0;
     const current = active ? stops.findIndex(x => x.status === 'arrived' || x.status === 'pending') : -1;
     const rows = stops.map((x, i) => {
@@ -417,12 +422,12 @@
       if (x.meetAt && MEET_AT[x.meetAt]) meta.push(MEET_AT[x.meetAt]);
       if (x.type !== 'pickup' && x.contact && x.contact.name) meta.push('Recipient ' + x.contact.name);
       if (x.cargo && x.cargo.boat) meta.push('Boat ' + x.cargo.boat + (x.cargo.time ? ', ' + x.cargo.time : ''));
-      const aside = x.status === 'done' ? fmtDate(x.at) : x.status === 'failed' ? "Couldn't complete" : x.status === 'arrived' ? 'Rider arrived' : isCurrent ? 'Next' : 'Pending';
+      const aside = x.status === 'done' ? fmtWhen(x.at) : x.status === 'failed' ? "Couldn't complete" : x.status === 'arrived' ? 'Rider arrived' : isCurrent ? 'Next' : 'Pending';
       const shopName = x.shop ? String(x.label || '').replace(/^Shop: /, '') : '';
       const title = shopName ? shopName + (x.address && x.address !== shopName ? ' · ' + x.address : '') : x.address;
       const attrs = { class: cls, 'data-testid': 'track-stop', dataset: { stopId: x.id, status: x.status } };
-      if (withMap) { attrs.type = 'button'; attrs.on = { click: () => panToStop(x) }; attrs['aria-label'] = 'Show ' + kind.toLowerCase() + ' on the map: ' + x.address; }
-      return el(withMap ? 'button' : 'div', attrs,
+      if (clickable) { attrs.type = 'button'; attrs.on = { click: () => panToStop(x) }; attrs['aria-label'] = 'Show ' + kind.toLowerCase() + ' on the map: ' + x.address; }
+      return el(clickable ? 'button' : 'div', attrs,
         el('span', { class: 'stop__marker', 'aria-hidden': 'true' }, String(i + 1)),
         el('span', { class: 'stop__main' }, el('span', { class: 'stop__title' }, title), el('span', { class: 'stop__meta' }, meta.join(' · '))),
         el('span', { class: 'stop__aside' }, aside));
@@ -455,7 +460,7 @@
       const receipt = o.packages.some(p => p.shop && p.shop.receiptTotal > 0);
       lines.push(el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, receipt ? 'Shopping receipt' : 'Shopping budget (paid up front)'), el('span', { class: 'summary__amount mono' }, fmt(o.totals.budget))));
     }
-    MDM.pricing.feeLines(o).forEach(f => lines.push(el('div', { class: 'summary__line summary__line--fee', dataset: { fee: f.key } },
+    MDM.pricing.feeLines(o, state.settings).forEach(f => lines.push(el('div', { class: 'summary__line summary__line--fee', dataset: { fee: f.key } },
       el('span', { class: 'summary__desc' }, f.label, f.reason ? el('span', { class: 'summary__sub' }, f.reason) : null),
       el('span', { class: 'summary__amount mono' }, fmt(f.amount)))));
     const card = el('div', { class: 'summary', 'data-testid': 'track-summary' }, lines, el('div', { class: 'summary__rule' }),

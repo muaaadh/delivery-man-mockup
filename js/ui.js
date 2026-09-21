@@ -5,7 +5,7 @@
 (function (MDM) { 'use strict';
   const KINDS = ['neutral', 'ok', 'warn', 'danger', 'info'];
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   let seq = 0;
   const uid = p => (p || 'ui') + '-' + (++seq);
@@ -87,12 +87,18 @@
     if (!s) return String(status == null ? '' : status);
     return audience === 'customer' ? s.customer : s.label;
   }
-  // store.js owns the canonical MDM.badgeFor; this fallback only fills the gap when it is missing.
-  if (!MDM.badgeFor) MDM.badgeFor = function (status, opts) {
-    const s = MDM.STATUS && MDM.STATUS[status];
-    return badge(s ? s.kind : 'neutral', statusLabel(status, opts && opts.customer ? 'customer' : 'admin'), { 'data-status': status });
-  };
+  // store.js owns MDM.badgeFor (it loads earlier in the fixed order, SPEC §4.1); this only forwards to it.
   const statusBadge = (status, opts) => MDM.badgeFor(status, opts);
+  // The two non-order status badges, so pages share one wording. Payment has an admin label and a customer one ({ customer: true }).
+  const INVOICE_STATUS = { draft: ['neutral', 'Draft'], sent: ['info', 'Sent'], paid: ['ok', 'Paid'] };
+  const PAYMENT_STATUS = {
+    unpaid: ['warn', 'Unpaid', 'Not paid yet'], review: ['warn', 'In review', 'Checking your slip'], verified: ['ok', 'Verified', 'Verified'],
+    rejected: ['danger', 'Rejected', 'Could not match'], invoiced: ['neutral', 'Invoiced', 'On your monthly invoice'],
+  };
+  // invoiceBadge(status) / paymentBadge(status, { customer }) → HTML string like badge(); unknown values render neutral with the raw status.
+  function invoiceBadge(status) { const s = INVOICE_STATUS[status] || ['neutral', String(status == null ? '' : status)]; return badge(s[0], s[1], { 'data-status': status }); }
+  function paymentLabel(status, opts) { const s = PAYMENT_STATUS[status]; return s ? (opts && opts.customer ? s[2] : s[1]) : String(status == null ? '' : status); }
+  function paymentBadge(status, opts) { const s = PAYMENT_STATUS[status]; return badge(s ? s[0] : 'neutral', paymentLabel(status, opts), { 'data-status': status }); }
 
   // ---- Fields ----
   const CONTROL = '.input, .select, .textarea, fieldset, input, select, textarea';
@@ -354,7 +360,8 @@
     } else if (type === 'file') {
       const nameEl = el('span', { class: 'file-pick__name' }, f.emptyLabel || 'No file chosen');
       const thumb = el('img', { class: 'file-pick__thumb', alt: '', hidden: true });
-      ctrl = el('input', { class: 'sr-only', type: 'file', id, name: f.name, 'data-testid': testid, accept: f.accept, capture: f.capture, 'aria-labelledby': id + '-label', 'aria-describedby': describe });
+      // The labelled button is the one keyboard stop; the clipped input itself is skipped (tabindex -1) so focus never vanishes on a 1px box.
+      ctrl = el('input', { class: 'sr-only', type: 'file', id, name: f.name, 'data-testid': testid, tabindex: '-1', accept: f.accept, capture: f.capture, 'aria-labelledby': id + '-label', 'aria-describedby': describe });
       const btn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', on: { click: () => ctrl.click() } }, html(MDM.icon('upload', 16)), f.buttonLabel || 'Choose a file');
       ctrl.addEventListener('change', () => {
         const file = ctrl.files && ctrl.files[0];
@@ -402,7 +409,7 @@
         const v = fieldValue(f, parts[f.name].ctrl);
         values[f.name] = v;
         let msg = null;
-        if (f.required && isBlank(v)) msg = f.requiredMessage || 'This field is required';
+        if (f.required && isBlank(v)) msg = f.requiredMessage || 'Fill in this field';
         else if (f.type === 'number' && v != null && isNaN(v)) msg = 'Enter a number';
         else if (f.type === 'number' && v != null && f.min != null && v < Number(f.min)) msg = 'Enter at least ' + f.min;
         else if (f.type === 'number' && v != null && f.max != null && v > Number(f.max)) msg = 'Enter at most ' + f.max;
@@ -424,6 +431,8 @@
   }
 
   // ---- Phone (Maldives: mobile 7xxxxxx | 9xxxxxx, landline 3xxxxxx; international as +digits) ----
+  // Country codes per the ITU allocation: 1 and 7 are the only 1-digit codes, the 2-digit codes are a fixed set, everything else is 3 digits.
+  const COUNTRY_CODE = /^(1|7|2[07]|3[0-469]|4[013-9]|5[1-8]|6[0-6]|8[1246]|9[0-58])/;
   const phone = {
     // normalize('+960 777 1234') → '7771234'; '+44 20 7946 0958' → '+442079460958'; anything else → null
     normalize(raw) {
@@ -445,15 +454,26 @@
       if (/^[79]\d{6}$/.test(n)) return true;
       return /^3\d{6}$/.test(n) && !!(opts && opts.landline);
     },
+    // format(raw) → '+960 777 1234' for a Maldivian number. International: an already spaced string keeps its own grouping
+    // ('+44 20 7946 0958' stays as typed); an unspaced one gets the country code split off by the ITU rule and the rest grouped in
+    // threes from the left, ending in a 4 (or 4 4) so no group is shorter than 3: '+61412345678' → '+61 412 345 678',
+    // '+14155552671' → '+1 415 555 2671', '+6591234567' → '+65 9123 4567'. Anything normalize() rejects is returned trimmed.
     format(raw) {
-      const n = phone.normalize(raw);
-      if (!n) return String(raw == null ? '' : raw).trim();
+      const s = String(raw == null ? '' : raw).trim();
+      const n = phone.normalize(s);
+      if (!n) return s;
       if (n.charAt(0) !== '+') return '+960 ' + n.slice(0, 3) + ' ' + n.slice(3);
-      const d = n.slice(1), groups = [];
+      if (/^(\+|00)[\d\s-]+$/.test(s) && /\d[\s-]+\d/.test(s)) return s.replace(/^00/, '+').replace(/[\s-]+/g, ' ');
+      const d = n.slice(1);
+      const cc = (COUNTRY_CODE.exec(d) || [d.slice(0, 3)])[0], rest = d.slice(cc.length), groups = [];
       let i = 0;
-      while (d.length - i > 4) { groups.push(d.slice(i, i + 3)); i += 3; }
-      groups.push(d.slice(i));
-      return '+' + groups.join(' ');
+      while (rest.length - i > 4) { groups.push(rest.slice(i, i + 3)); i += 3; }
+      const tail = rest.slice(i);
+      if (tail.length === 2 && groups.length) {
+        const a = groups.pop();
+        if (groups.length) { const b = groups.pop(); groups.push(b + a.charAt(0), a.slice(1) + tail); } else groups.push(a + tail);
+      } else if (tail) groups.push(tail);
+      return '+' + cc + (groups.length ? ' ' + groups.join(' ') : '');
     },
     // links(raw, text?) → { tel, wa, viber, sms } or null when no digits at all. `sms:` uses ?body= (Android and current iOS).
     links(raw, text) {
@@ -500,15 +520,38 @@
   function minutesToHHMM(n) { n = ((Math.round(Number(n) || 0) % 1440) + 1440) % 1440; return pad2(Math.floor(n / 60)) + ':' + pad2(n % 60); }
   function parseHHMM(str) { const m = String(str == null ? '' : str).trim().match(/^(\d{1,2}):(\d{2})$/); if (!m) return null; const h = Number(m[1]), mi = Number(m[2]); return h > 23 || mi > 59 ? null : h * 60 + mi; }
 
-  // ---- Money and bytes ----
-  function fmtMoney(n, opts) {
-    const v = Number(n) || 0, abs = Math.abs(v);
-    const s = opts && opts.cents ? abs.toFixed(2) : String(Math.round(abs));
-    const parts = s.split('.');
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    return (v < 0 ? '−' : '') + 'MVR ' + parts.join('.');
+  // ---- Opening hours (settings.ops, local time) ----
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  // closedWindowsFor(ops, date) → [{ start, end }] (minutes of the day) for the closed windows that apply on that weekday.
+  // ops.closedWindows entries are 'HH:MM-HH:MM' (every day) or 'Fri 12:00-13:30' (that weekday only); malformed entries are ignored.
+  function closedWindowsFor(ops, date) {
+    const day = DAY_NAMES[(toDate(date) || new Date()).getDay()];
+    return (ops && Array.isArray(ops.closedWindows) ? ops.closedWindows : []).map(w => {
+      const m = /^(?:(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+)?(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/.exec(String(w == null ? '' : w).trim());
+      const start = m ? parseHHMM(m[2]) : null, end = m ? parseHHMM(m[3]) : null;
+      return m && start != null && end != null && (!m[1] || m[1] === day) ? { start, end } : null;
+    }).filter(Boolean);
   }
-  function money(n, opts) { return MDM.pricing && typeof MDM.pricing.format === 'function' ? MDM.pricing.format(n, opts) : fmtMoney(n, opts); }
+  // hours(ops, date?) → { open, from, openAt, closeAt }: are we taking orders at `date`? Reads ops.hours.open/close ('HH:MM', defaults
+  // 09:00 and 23:00; close before open means overnight) and the closed windows. `from` is the next opening time while closed (the end of
+  // the closed window we are in, else the opening time) and null while open. The footer, the home hours line and the request page's
+  // ASAP gate all read this one function, so they can never disagree about being open.
+  function hours(ops, date) {
+    ops = ops || {};
+    const d = toDate(date) || new Date(), h = ops.hours || {};
+    const a = parseHHMM(h.open) != null ? parseHHMM(h.open) : 540, b = parseHHMM(h.close) != null ? parseHHMM(h.close) : 1380;
+    const openAt = minutesToHHMM(a), closeAt = minutesToHHMM(b);
+    const cur = d.getHours() * 60 + d.getMinutes();
+    const inHours = a < b ? cur >= a && cur < b : cur >= a || cur < b;
+    const pause = closedWindowsFor(ops, d).find(w => cur >= w.start && cur < w.end);
+    if (pause) return { open: false, from: minutesToHHMM(pause.end), openAt, closeAt };
+    if (!inHours) return { open: false, from: openAt, openAt, closeAt };
+    return { open: true, from: null, openAt, closeAt };
+  }
+
+  // ---- Money and bytes ----
+  // money = MDM.pricing.format (pricing.js always precedes ui.js in the fixed order, SPEC §4.1); one formatter site-wide.
+  function money(n, opts) { return MDM.pricing.format(n, opts); }
   function formatBytes(n) {
     n = Number(n) || 0;
     if (n < 1024) return n + ' B';
@@ -564,11 +607,66 @@
     return { dataUrl, size: blob.size, type: 'image/jpeg', width: w, height: h, blob };
   }
 
+  // ---- Shared component markup (SPEC §2.5): pages never re-implement these ----
+  // plural(n, word, pluralForm?) → '1 package' | '2 packages' | '2 deliveries' (consonant + y → ies; pass pluralForm for anything else)
+  function plural(n, word, pluralForm) {
+    const c = Number(n) || 0;
+    return c + ' ' + (c === 1 ? word : (pluralForm || (/[^aeiou]y$/i.test(word) ? word.slice(0, -1) + 'ies' : word + 's')));
+  }
+  // field({ name, id, label, control, hint, optional, error, class }) → the .field wrapper: label above (a .field__label span for a
+  // fieldset, with aria-labelledby), the control, the hint (id <id>-hint, linked with aria-describedby) and an empty .field__error that
+  // setError() fills. The control's id is set from `id` when it has none; `name` becomes data-field on the wrapper.
+  function field(o) {
+    o = o || {};
+    const control = o.control, isGroup = !!control && control.tagName === 'FIELDSET';
+    const id = o.id || (control && control.id) || uid('f');
+    if (control && !control.id) control.id = id;
+    const optional = o.optional ? el('span', { class: 'optional' }, ' (optional)') : null;
+    const label = isGroup ? el('span', { class: 'field__label', id: id + '-label' }, o.label, optional) : el('label', { for: id }, o.label, optional);
+    if (isGroup && !control.getAttribute('aria-labelledby')) control.setAttribute('aria-labelledby', id + '-label');
+    const hint = o.hint ? el('div', { class: 'field__hint', id: id + '-hint' }, o.hint) : null;
+    if (hint && control) addDescribedBy(control, id + '-hint', true);
+    const wrap = el('div', { class: ['field', o.class], 'data-field': o.name || null }, label, control, hint, el('div', { class: 'field__error', id: id + '-error', hidden: true }));
+    if (o.error) setError(wrap, o.error);
+    return wrap;
+  }
+  // alertBox(kind, body, { title, role, action, testid }) → .alert.alert--<kind> with the kind's 16px icon; body is text (wrapped in a
+  // div), a Node or an array. Exported as MDM.ui.alert and MDM.ui.notice (same function: tools/check.sh flags a bare alert token, so
+  // destructure `notice` when you want a local name).
+  const ALERT_ICON = { info: 'info', warn: 'alert-triangle', danger: 'alert-circle', ok: 'check-circle' };
+  function alertBox(kind, body, opts) {
+    opts = opts || {};
+    kind = ALERT_ICON[kind] ? kind : 'info';
+    return el('div', { class: 'alert alert--' + kind, role: opts.role || null, 'data-testid': opts.testid || null }, html(MDM.icon(ALERT_ICON[kind], 16)),
+      el('div', { class: 'alert__body' }, opts.title ? el('div', { class: 'alert__title' }, opts.title) : null,
+        typeof body === 'string' || typeof body === 'number' ? el('div', null, body) : body, opts.action || null));
+  }
+  const MAP_FALLBACK_TEXT = 'Map unavailable right now. Stops and status are still updated below.';
+  // mapFallback(mapEl, { testid, text, role }) → the .map__fallback node inside mapEl (idempotent: a second call returns the existing one).
+  function mapFallback(mapEl, opts) {
+    opts = opts || {};
+    let fb = mapEl.querySelector(':scope > .map__fallback');
+    if (fb) return fb;
+    fb = el('div', { class: 'map__fallback', 'data-testid': opts.testid || null }, alertBox('warn', opts.text || MAP_FALLBACK_TEXT, { role: opts.role || null }));
+    mapEl.appendChild(fb);
+    return fb;
+  }
+  // rateRow(label, value, { mono, sub, valueSub, head }) → .rate-table__row (label · value; `sub` is the label's small line, `valueSub`
+  // the value's); head:true → a .rate-table__row--head group heading whose `value` slot may hold an action.
+  function rateRow(label, value, opts) {
+    opts = opts || {};
+    if (opts.head) return el('div', { class: 'rate-table__row rate-table__row--head' }, el('span', null, label), value == null ? null : value);
+    return el('div', { class: 'rate-table__row' },
+      el('div', { class: 'rate-table__label' }, label, opts.sub ? el('small', null, opts.sub) : null),
+      el('div', { class: ['rate-table__value', opts.mono ? 'mono' : null] }, value, opts.valueSub ? el('small', null, opts.valueSub) : null));
+  }
+
   MDM.ui = {
     el, html, esc, qs, qsa, on, debounce, scrollIntoViewIfNeeded,
     toast, drawer, confirm, dialog,
-    badge, statusBadge, statusLabel, setError, validate, focusFirstInvalid, setLoading,
-    phone, fmtDate, fmtTime, timeAgo, dayKey, monthKey, window: windowLabel, minutesToHHMM, parseHHMM,
+    badge, statusBadge, statusLabel, invoiceBadge, paymentBadge, paymentLabel, setError, validate, focusFirstInvalid, setLoading,
+    plural, field, alert: alertBox, notice: alertBox, mapFallback, rateRow,
+    phone, fmtDate, fmtTime, timeAgo, dayKey, monthKey, window: windowLabel, minutesToHHMM, parseHHMM, hours, closedWindowsFor,
     money, formatBytes, copy, fileToDataUrl, imageToJpeg,
   };
 })(window.MDM);

@@ -150,12 +150,17 @@
   const NOTIFY = { sms: 'SMS', whatsapp: 'WhatsApp', viber: 'Viber' };
   const PAYMENT = { unpaid: ['warn', 'Unpaid'], review: ['warn', 'In review'], verified: ['ok', 'Verified'], rejected: ['danger', 'Rejected'], invoiced: ['neutral', 'Invoiced'] };
   const money = n => MDM.pricing.format(n);
-  const plural = (n, word) => n + ' ' + word + (Number(n) === 1 ? '' : 's');
+  const plural = (n, word) => n + ' ' + (Number(n) === 1 ? word : word.replace(/y$/, 'ie') + 's');
   function uniq(arr) { return arr.filter((v, i) => v && arr.indexOf(v) === i); }
   const NBSP = '\u00a0';
   const nb = s => String(s).replace(/ /g, NBSP);
-  // Table cells wrap only at commas: "21 Sep, 04:59" breaks after the comma, "22 min ago" never does.
-  function whenCell(iso) { const t = MDM.ui.timeAgo(iso); return t.indexOf(',') >= 0 ? t.replace(/^(\S+) (\S+),/, '$1' + NBSP + '$2,') : nb(t); }
+  // One line per cell: "just now" / "22 min ago" as is, the time ("12:24") for the rest of today, the date ("20 Sep") for older
+  // rows; the exact timestamp lives in the drawer's Activity timeline.
+  function whenCell(iso) {
+    const t = MDM.ui.timeAgo(iso);
+    if (t.indexOf(',') < 0) return nb(t);
+    return nb(MDM.ui.dayKey(iso) === MDM.ui.dayKey(new Date()) ? MDM.ui.fmtTime(iso) : MDM.ui.fmtDate(iso, { dateOnly: true }));
+  }
   function pickupZone(pkg, service) { return service === 'shop' && pkg.shop ? pkg.shop.zone : (pkg.pickup ? pkg.pickup.zone : null); }
   // routeText(order) → 'Malé → HM Ph. 1' (zone shorts, unique, in package order)
   function routeText(o) {
@@ -180,12 +185,15 @@
   }
   function deliveredAt(o) { const ev = (o.events || []).filter(e => e.type === 'delivered').pop(); return ev ? ev.at : null; }
 
+  // Below 1400px the orders list folds Service into the Code sub-line and the Payment badge into the Total sub-line (ctx.narrow, set
+  // by orders.js) so the table fits the 1280 desktop width; at 1400px and up, and in the stacked phone layout, every column is its own.
   const COLUMNS = {
-    code: { label: 'Code', cell: o => el('td', { class: 'table__primary', 'data-label': 'Code' }, el('a', { href: '#/orders/' + encodeURIComponent(o.id), class: 'mono', 'data-testid': 'orders-row-link' }, o.code)) },
+    code: { label: 'Code', cell: (o, ctx) => el('td', { class: 'table__primary', 'data-label': 'Code' }, el('a', { href: '#/orders/' + encodeURIComponent(o.id), class: 'mono', 'data-testid': 'orders-row-link' }, o.code),
+      ctx.narrow ? el('span', { class: 'table__sub' }, SERVICE_SHORT[o.service] || o.service) : null) },
     customer: { label: 'Customer', cell: o => el('td', { 'data-label': 'Customer' }, o.customer ? o.customer.name : '', el('span', { class: 'table__sub mono' }, o.customer ? MDM.ui.phone.format(o.customer.phone) : '')) },
     service: { label: 'Service', cell: o => el('td', { 'data-label': 'Service' }, SERVICE_SHORT[o.service] || o.service) },
     route: { label: 'Route', cell: o => el('td', { 'data-label': 'Route' }, routeText(o), el('span', { class: 'table__sub' }, nb(plural((o.packages || []).length, 'package')))) },
-    total: { label: 'Total', th: 'num', cell: o => el('td', { class: 'num mono', 'data-label': 'Total' }, money(o.totals ? o.totals.total : 0)) },
+    total: { label: 'Total', th: 'num', cell: (o, ctx) => el('td', { class: 'num mono', 'data-label': 'Total' }, money(o.totals ? o.totals.total : 0), ctx.narrow ? el('span', { class: 'table__sub' }, paymentBadge(o)) : null) },
     payment: { label: 'Payment', cell: o => el('td', { 'data-label': 'Payment' }, paymentBadge(o)) },
     status: { label: 'Status', cell: o => el('td', { class: 'table__primary', 'data-label': 'Status' }, html(MDM.badgeFor(o.status))) },
     rider: { label: 'Rider', cell: (o, ctx) => el('td', { 'data-label': 'Rider' }, driverName(o.driverId, ctx.drivers) || el('span', { class: 'subtle' }, o.status === 'confirmed' ? 'Unassigned' : '')) },
@@ -194,7 +202,7 @@
   function orderTableHead(columns) {
     return el('thead', null, el('tr', null, columns.map(k => el('th', { scope: 'col', class: COLUMNS[k].th || null }, COLUMNS[k].label))));
   }
-  // orderRow(order, columns, { drivers }) → <tr class="is-clickable" data-testid="orders-row"> that opens the drawer on click.
+  // orderRow(order, columns, { drivers, narrow }) → <tr class="is-clickable" data-testid="orders-row"> that opens the drawer on click.
   function orderRow(o, columns, ctx) {
     ctx = ctx || {};
     return el('tr', { class: 'orders-row is-clickable', 'data-testid': 'orders-row', 'data-order-id': o.id, 'data-status': o.status,
@@ -349,10 +357,16 @@
   views.overview = overviewView();
 
   // ---- Boot ----------------------------------------------------------------------------------------------------------------------
-  function domReady() { return document.readyState === 'loading' ? new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true })) : Promise.resolve(); }
+  // Deferred scripts run while readyState is already 'interactive', so only 'complete' proves DOMContentLoaded has fired. Waiting for
+  // it (or load, whichever comes first) guarantees the later-deferred orders.js and views.js have registered their views before the
+  // first route(); otherwise a cold load of any deep link would be replaced by #/overview.
+  function domReady() {
+    if (document.readyState === 'complete') return Promise.resolve();
+    return new Promise(r => { document.addEventListener('DOMContentLoaded', r, { once: true }); window.addEventListener('load', r, { once: true }); });
+  }
   async function main() {
     await MDM.store.ready;
-    await domReady();                       // every deferred script (orders.js, views.js) has registered its views by now
+    await domReady();                       // fires after every deferred script, so orders.js and views.js have registered their views
     window.addEventListener('hashchange', () => { route(); });
     document.addEventListener('mdm:signout', () => { signOut().catch(() => {}); });
     state.session = readSession();

@@ -18,6 +18,9 @@ body.page-driver .driver-stop.is-current { border-color: var(--border-strong); }
 body.page-driver .driver-stop__address { font-size: 17px; font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; margin-top: 4px; }
 body.page-driver .driver-stop__line { font-size: 13px; line-height: 1.4; color: var(--text-2); margin-top: 4px; overflow-wrap: anywhere; }
 body.page-driver .driver-stop__contact { margin-top: 8px; font-size: 15px; overflow-wrap: anywhere; }
+/* Inline tel links (stop contact, order customer): symmetric negative margins keep the line box as it is while the hit area grows to
+   the SPEC §2.6 44px. */
+body.page-driver .driver-stop__contact a, body.page-driver .driver-order__customer a { display: inline-block; padding: 14px 0; margin: -14px 0; }
 body.page-driver .driver-stop__shop { margin-top: 8px; font-size: 13px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere; }
 body.page-driver .driver-stop__shop dt { color: var(--text-3); }
 body.page-driver .driver-stop__shop dd { margin: 0; color: var(--text); }
@@ -25,9 +28,8 @@ body.page-driver .driver-stop__shop dd + dt { margin-top: 4px; }
 body.page-driver .driver-stop__tags { display: inline-flex; gap: 6px; vertical-align: middle; margin-left: 6px; }
 body.page-driver .driver-stop__links { margin-top: 16px; }
 body.page-driver .driver-stop__actions { display: grid; gap: 8px; margin-top: 12px; }
-
-/* Collapsed rows (done or failed stops): the title stays on one line. */
-body.page-driver .driver-stop--row .stop__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Collapsed rows (done or failed stops) keep base.css .stop__title as is: the address wraps (SPEC §3.6 never truncates it) and the
+   time stays in the row's auto column. */
 
 /* Workaround for a shared mismatch: js/ui.js builds dialogs as .dialog__form > .dialog__message / .dialog__fields / .dialog__actions
    and file fields as .file-pick, while css/base.css styles .dialog__body / .dialog__footer only. These rules give the rider's

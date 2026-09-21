@@ -76,12 +76,14 @@
       const t = MDM.geo.terminals().find(x => x.value === cargo.terminal);
       parts.push(t ? t.label : cargo.terminal);
       if (cargo.boat) parts.push('Boat ' + cargo.boat);
-      if (cargo.time) parts.push('Expected ' + cargo.time);
+      // Mirrors the package editor's labels: a pickup's time is the boat's expected arrival, a drop-off's is when it leaves.
+      if (cargo.time) parts.push((stop.type === 'pickup' ? 'Expected ' : 'Leaves ') + cargo.time);
       if (cargo.consignee) parts.push('Consignee ' + cargo.consignee);
       if (cargo.receiptNo) parts.push('Cargo receipt ' + cargo.receiptNo);
     }
     if (stop.zone === 'airport' && stop.meetAt) { const a = MDM.geo.airportPoints().find(x => x.value === stop.meetAt); parts.push('Meeting point: ' + (a ? a.label : stop.meetAt)); }
-    else if (stop.type !== 'pickup' && stop.meetAt) parts.push(MEET[stop.meetAt] || stop.meetAt);
+    // A cargo drop-off is handed to the boat at the terminal, so a "meet at" line means nothing there (the editor leaves it blank).
+    else if (stop.type !== 'pickup' && stop.meetAt && !(cargo && cargo.terminal)) parts.push(MEET[stop.meetAt] || stop.meetAt);
     return parts.join(' · ');
   }
   function contactNode(stop) {
@@ -110,7 +112,7 @@
     if (stop.shop) tags.push(el('span', { class: 'tag' }, 'Shop'));
     if (pkg && pkg.fragile) tags.push(el('span', { class: 'tag' }, 'Fragile'));
     const links = stop.contact && stop.contact.phone ? MDM.ui.phone.links(stop.contact.phone) : null;
-    const directions = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(stop.lat + ',' + stop.lng) + '&travelmode=driving';
+    const directions = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(Number(stop.lat).toFixed(5) + ',' + Number(stop.lng).toFixed(5)) + '&travelmode=driving';
     const detail = detailLine(stop);
     const primary = stop.status === 'arrived'
       ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block', 'data-testid': 'driver-stop-done', on: { click: e => onDone(e.currentTarget, order, stop) } }, doneLabel(stop))
@@ -326,8 +328,11 @@
   }
   async function onStart(btn, order) {
     btn.disabled = true;
+    // The button disappears on re-render; renderRoute moves focus to the first open stop's "Arrived" so the keyboard flow continues.
+    const first = state.route.stops.find(s => s.orderId === order.id && isOpen(s));
+    state.focusStop = first ? first.id : null;
     try { await MDM.store.startRoute(order.id, { by: by() }); MDM.ui.toast('Route started for ' + order.code, 'ok'); }
-    catch (e) { btn.disabled = false; MDM.ui.toast(storeErrorMessage(e, 'Could not start the route'), 'danger'); }
+    catch (e) { state.focusStop = null; btn.disabled = false; MDM.ui.toast(storeErrorMessage(e, 'Could not start the route'), 'danger'); }
   }
   async function onArrived(btn, order, stop) {
     btn.disabled = true; state.focusStop = stop.id;

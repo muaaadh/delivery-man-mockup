@@ -170,10 +170,10 @@
       el('span', { class: 'summary__desc' }, label, sub ? el('span', { class: 'summary__sub' }, sub) : null),
       el('span', { class: 'summary__amount mono' }, MDM.pricing.format(amount)));
   }
-  function summary(order) {
+  function summary(order, settings) {
     const lines = (order.packages || []).map(p => line(MDM.pricing.lineLabel(p, order.service), p.description, p.price ? p.price.lineTotal : 0));
     if (order.totals.budget) lines.push(line('Shopping budget (paid up front)', null, order.totals.budget, true));
-    MDM.pricing.feeLines(order).forEach(f => lines.push(line(f.label, f.reason, f.amount, true)));
+    MDM.pricing.feeLines(order, settings).forEach(f => lines.push(line(f.label, f.reason, f.amount, true)));
     return el('div', { class: 'summary checkout-summary' }, lines, el('div', { class: 'summary__rule' }),
       el('div', { class: 'summary__total' }, el('span', null, 'Amount due'), el('span', { class: 'mono', 'data-testid': 'checkout-amount' }, MDM.pricing.format(order.totals.total))));
   }
@@ -201,7 +201,7 @@
   }
 
   // ---- Sections ----
-  function orderSection(order) {
+  function orderSection(order, settings) {
     const c = order.customer || {};
     return el('section', { class: 'section', 'aria-labelledby': 'co-order' },
       el('div', { class: 'section-head' }, el('h2', { id: 'co-order' }, 'Your order')),
@@ -209,7 +209,7 @@
         row('Order code', el('span', { class: 'checkout-copy checkout-copy--end' }, el('span', { class: 'checkout-code mono', 'data-testid': 'checkout-code' }, order.code), copyButton(order.code, 'checkout-copy-code', 'order code'))),
         row('Customer', [c.name || '', el('small', { class: 'mono' }, MDM.ui.phone.format(c.phone))]),
         row('Pickup', scheduleText(order))),
-      summary(order));
+      summary(order, settings));
   }
   function bankSection(order, settings) {
     const banks = settings.banks || [];
@@ -304,7 +304,7 @@
   function renderForm(order, settings, slip) {
     const frag = document.createDocumentFragment();
     if (order.payment && order.payment.status === 'rejected') frag.append(rejectedNotice(order));
-    frag.append(orderSection(order), bankSection(order, settings), formSection(order, settings, slip));
+    frag.append(orderSection(order, settings), bankSection(order, settings), formSection(order, settings, slip));
     return frag;
   }
   function renderConfirmation(order, settings) {

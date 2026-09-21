@@ -17,7 +17,7 @@
         { id: 'bml', name: 'Bank of Maldives', accountName: 'Mr. Delivery Man', accountNo: '7730 0000 12345' },
         { id: 'mib', name: 'Maldives Islamic Bank', accountName: 'Mr. Delivery Man', accountNo: '9010 0000 67890' },
       ],
-      contact: { phone: '7770000', whatsapp: '7770000', viber: '7770000', email: 'hello@mrdeliveryman.mv' },
+      contact: { phone: '7770000', whatsapp: '7770000', viber: '7770000', email: 'hello@example.com' },
       terms: "We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.",
       notice: { text: 'Sinamalé Bridge closed to motorcycles during heavy rain, Hulhumalé deliveries may be delayed', active: false },
       invoiceDueDays: 14, gstPercent: 0, demo: { autopilot: true },
@@ -31,7 +31,7 @@
 
     const C = {
       shifza:  { id: 'cus_shifza',  name: 'Aishath Shifza',   phone: '7912345', email: 'shifza@example.com', notify: 'whatsapp' },
-      nazeeha: { id: 'cus_nazeeha', name: 'Mariyam Nazeeha',  phone: '9601234', email: '',                   notify: 'viber' },
+      nazeeha: { id: 'cus_nazeeha', name: 'Mariyam Nazeeha',  phone: '9912045', email: '',                   notify: 'viber' },
       rilwan:  { id: 'cus_rilwan',  name: 'Mohamed Rilwan',   phone: '7778901', email: 'rilwan@example.com', notify: 'whatsapp' },
       zeena:   { id: 'cus_zeena',   name: 'Fathimath Zeena',  phone: '7654321', email: '',                   notify: 'sms' },
       waheed:  { id: 'cus_waheed',  name: 'Ali Waheed',       phone: '9912345', email: 'waheed@example.com', notify: 'whatsapp' },
@@ -65,7 +65,7 @@
         id: 'pkg_seed_' + String(pkgSeq++).padStart(2, '0'), size: o.size || 'bag', description: o.description || '', needsVehicle: !!o.needsVehicle, fragile: !!o.fragile,
         underOneFt: o.underOneFt !== false,
         pickup: o.shop ? null : endpoint(o.pickup, { contact: o.pickupContact || null, cargo: o.pickupCargo || null, meetAt: o.pickupMeetAt || '' }),
-        dropoff: endpoint(o.dropoff, { recipient: o.recipient || null, cargo: o.dropCargo || null, meetAt: o.meetAt || 'door' }),
+        dropoff: endpoint(o.dropoff, { recipient: o.recipient || null, cargo: o.dropCargo || null, meetAt: o.dropCargo ? '' : (o.meetAt || 'door') }),
         shop: o.shop ? Object.assign({ address: '', unavailable: 'call', receiptTotal: null, receiptPhotoId: null }, o.shop, MDM.geo.geocodeZone(o.shop.zone, o.shop.name)) : null,
         notes: o.notes || '',
       };
@@ -131,18 +131,23 @@
         o.settlement = { status: spec.settle === 'settled' ? 'settled' : (balance > 0 ? 'refund_due' : balance < 0 ? 'topup_due' : 'settled'), paid, due, balance, settledAt: spec.settle === 'settled' ? o.updatedAt : null, reference: spec.settle === 'settled' ? 'FAVARA 2291' : '' };
       }
       if (spec.cancelReason) { o.cancelReason = spec.cancelReason; o.cancelledBy = spec.cancelledBy || 'customer'; }
+      // Contract (§4.2): rider events are by 'driver:<driverId>'; every seeded order with rider events has a driverId.
+      o.events.forEach(e => { if (e.by === 'driver') e.by = o.driverId ? 'driver:' + o.driverId : 'system'; });
+      // Pages render events in store order, so keep it chronological (stable sort keeps same-minute events as written).
+      o.events.sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
       orders.push(o);
       return o;
     }
-    const paidOn = (min, amount, bank, payer, ref) => ({ status: 'verified', bank, payerName: payer, paidAmount: amount, reference: ref || '', submittedAt: t(min + 20), verifiedAt: t(min), verifiedBy: 'admin' });
+    // paidOn(createdMin, verifiedMin, …): the slip is uploaded 20 min before verification but never before the order was placed (same clamp as stdEvents).
+    const paidOn = (createdMin, min, amount, bank, payer, ref) => ({ status: 'verified', bank, payerName: payer, paidAmount: amount, reference: ref || '', submittedAt: t(Math.min(min + 20, createdMin - 2)), verifiedAt: t(min), verifiedBy: 'admin' });
     const stdEvents = (created, opts) => {
-      // opts: { paidAt, confirmedAt, assignedAt, driver, startedAt, pickedAt, pickedFrom, deliveredAt, deliveredTo }
+      // opts: { paidAt, confirmedAt, assignedAt, driver, startedAt, pickedAt, pickedFrom, deliveredAt, deliveredTo, dropIndex (which drop-off the final delivery is, default 1) }
       const e = [ev('created', 'Order placed', t(created), 'customer')];
       if (opts.paidAt != null) { e.push(ev('payment_submitted', 'Payment slip submitted', t(Math.min(opts.paidAt + 20, created - 2)), 'customer')); e.push(ev('payment_verified', 'Payment verified', t(opts.paidAt), 'admin')); e.push(ev('confirmed', 'Order confirmed, assigning a rider', t(opts.paidAt), 'admin')); }
       if (opts.assignedAt != null) e.push(ev('assigned', 'Rider assigned: ' + opts.driver, t(opts.assignedAt), 'admin'));
       if (opts.startedAt != null) e.push(ev('route_started', opts.driver + ' is on the way', t(opts.startedAt), 'driver'));
       if (opts.pickedAt != null) { e.push(ev('arrived', opts.driver + ' arrived at pickup 1', t(opts.pickedAt + 3), 'driver')); e.push(ev('picked_up', 'Picked up from ' + opts.pickedFrom, t(opts.pickedAt), 'driver')); }
-      if (opts.deliveredAt != null) { e.push(ev('arrived', opts.driver + ' arrived at drop-off 1', t(opts.deliveredAt + 2), 'driver')); e.push(ev('delivered', 'Delivered to ' + opts.deliveredTo, t(opts.deliveredAt), 'driver')); }
+      if (opts.deliveredAt != null) { e.push(ev('arrived', opts.driver + ' arrived at drop-off ' + (opts.dropIndex || 1), t(opts.deliveredAt + 2), 'driver')); e.push(ev('delivered', 'Delivered to ' + opts.deliveredTo, t(opts.deliveredAt), 'driver')); }
       return e;
     };
 
@@ -150,20 +155,20 @@
     // Delivered over the last week
     order({ code: 'MDM-1025', service: 'pick', customer: C.shifza, status: 'delivered', createdMin: days(6, 3), updatedMin: days(6, 1), driverId: 'drv_shiyam',
       packages: [pkg({ size: 'bag', description: 'Documents in an envelope', pickup: A.kaneeru, dropoff: A.handhuvaree, recipient: { name: 'Ahmed Sobah', phone: '7788123' } })],
-      payment: paidOn(days(6, 2.6), 35, 'bml', 'Aishath Shifza', 'MDM-1025'),
+      payment: paidOn(days(6, 3), days(6, 2.6), 35, 'bml', 'Aishath Shifza', 'MDM-1025'),
       events: stdEvents(days(6, 3), { paidAt: days(6, 2.6), assignedAt: days(6, 2.4), driver: 'Ibrahim Shiyam', startedAt: days(6, 2.2), pickedAt: days(6, 1.8), pickedFrom: A.kaneeru.address, deliveredAt: days(6, 1), deliveredTo: 'Ahmed Sobah' }),
       stops: [{ status: 'done', at: t(days(6, 1.8)) }, { status: 'done', at: t(days(6, 1)), handedTo: 'recipient', recipientName: 'Ahmed Sobah' }] });
 
     order({ code: 'MDM-1026', service: 'shop', customer: C.nazeeha, status: 'delivered', createdMin: days(5, 4), updatedMin: days(5, 1.5), driverId: 'drv_nazim',
-      packages: [pkg({ size: 'bag', description: 'Groceries', shop: { name: 'STO People\'s Choice', zone: 'male', address: 'Boduthakurufaanu Magu', list: '2 kg rice, 1 L cooking oil, 12 eggs, 2 kg onions, dhal 1 kg, chilli 250 g', budget: 450, unavailable: 'closest' }, dropoff: A.ranfaru, recipient: { name: 'Mariyam Nazeeha', phone: '9601234' } })],
-      payment: paidOn(days(5, 3.5), 530, 'mib', 'Mariyam Nazeeha', 'MDM-1026'),
+      packages: [pkg({ size: 'bag', description: 'Groceries', shop: { name: 'STO People\'s Choice', zone: 'male', address: 'Boduthakurufaanu Magu', list: '2 kg rice, 1 L cooking oil, 12 eggs, 2 kg onions, dhal 1 kg, chilli 250 g', budget: 450, unavailable: 'closest' }, dropoff: A.ranfaru, recipient: { name: 'Mariyam Nazeeha', phone: '9912045' } })],
+      payment: paidOn(days(5, 4), days(5, 3.5), 530, 'mib', 'Mariyam Nazeeha', 'MDM-1026'),
       receipt: 412, settle: 'due',
       events: stdEvents(days(5, 4), { paidAt: days(5, 3.5), assignedAt: days(5, 3.2), driver: 'Ahmed Nazim', startedAt: days(5, 3), pickedAt: days(5, 2.2), pickedFrom: 'STO People\'s Choice (receipt MVR 412)', deliveredAt: days(5, 1.5), deliveredTo: 'Mariyam Nazeeha' }),
       stops: [{ status: 'done', at: t(days(5, 2.2)), receiptTotal: 412 }, { status: 'done', at: t(days(5, 1.5)), handedTo: 'recipient', recipientName: 'Mariyam Nazeeha' }] });
 
     order({ code: 'MDM-1027', service: 'pick', customer: C.rilwan, status: 'delivered', createdMin: days(4, 6), updatedMin: days(4, 3), driverId: 'drv_rasheed',
       packages: [pkg({ size: 'box', description: 'Printer cartridges (2 boxes taped together)', fragile: true, pickup: A.meerubahuru, dropoff: A.vinares, recipient: { name: 'Ibrahim Naail', phone: '7723456' }, meetAt: 'lobby' })],
-      payment: paidOn(days(4, 5.5), 60, 'bml', 'Mohamed Rilwan', 'MDM-1027'),
+      payment: paidOn(days(4, 6), days(4, 5.5), 60, 'bml', 'Mohamed Rilwan', 'MDM-1027'),
       events: stdEvents(days(4, 6), { paidAt: days(4, 5.5), assignedAt: days(4, 5), driver: 'Hassan Rasheed', startedAt: days(4, 4.5), pickedAt: days(4, 4), pickedFrom: A.meerubahuru.address, deliveredAt: days(4, 3), deliveredTo: 'Ibrahim Naail' }),
       stops: [{ status: 'done', at: t(days(4, 4)) }, { status: 'done', at: t(days(4, 3)), handedTo: 'recipient', recipientName: 'Ibrahim Naail' }] });
 
@@ -172,21 +177,21 @@
       events: [ev('created', 'Order placed', t(days(3, 5)), 'customer'), ev('cancelled', 'Cancelled by customer: Recipient travelled', t(days(3, 4)), 'customer')] });
 
     order({ code: 'MDM-1029', service: 'pick', customer: C.zeena, status: 'delivered', createdMin: days(2, 7), updatedMin: days(2, 4), driverId: 'drv_nazim',
-      packages: [pkg({ size: 'bag', description: 'Passport and documents from a relative arriving on MLE flight', pickup: { address: 'Velana International Airport, Arrivals hall', zone: 'airport' }, pickupMeetAt: 'arrivals', pickupContact: { name: 'Hawwa Leena', phone: '+61412345678' }, dropoff: A.handhuvaree, recipient: { name: 'Fathimath Zeena', phone: '7654321' }, meetAt: 'reception' })],
-      payment: paidOn(days(2, 6.5), 75, 'bml', 'Fathimath Zeena', 'MDM-1029'),
+      packages: [pkg({ size: 'bag', description: 'Passport and documents from a relative arriving on MLE flight', pickup: { address: 'Velana International Airport, Arrivals hall', zone: 'airport' }, pickupMeetAt: 'arrivals', pickupContact: { name: 'Hawwa Leena', phone: '+61 412 345 678' }, dropoff: A.handhuvaree, recipient: { name: 'Fathimath Zeena', phone: '7654321' }, meetAt: 'reception' })],
+      payment: paidOn(days(2, 7), days(2, 6.5), 75, 'bml', 'Fathimath Zeena', 'MDM-1029'),
       events: stdEvents(days(2, 7), { paidAt: days(2, 6.5), assignedAt: days(2, 6), driver: 'Ahmed Nazim', startedAt: days(2, 5.5), pickedAt: days(2, 4.8), pickedFrom: 'Velana International Airport, Arrivals hall', deliveredAt: days(2, 4), deliveredTo: 'Fathimath Zeena (security or reception)' }),
       stops: [{ status: 'done', at: t(days(2, 4.8)) }, { status: 'done', at: t(days(2, 4)), handedTo: 'security', recipientName: 'Fathimath Zeena' }] });
 
     order({ code: 'MDM-1030', service: 'pick', customer: C.afeef, status: 'delivered', createdMin: days(1, 8), updatedMin: days(1, 6), driverId: 'drv_shiyam',
       packages: [pkg({ size: 'box', description: 'Spare parts for a dhoni engine, to the boat', pickup: A.ranfaru, dropoff: { address: 'Malé North Harbour', zone: 'male' }, dropCargo: { terminal: 'male_north', boat: 'Alihaa Express', time: '16:00', consignee: 'Hassan Ziyad, Thoddoo', receiptNo: '' }, recipient: { name: 'Boat crew, Alihaa Express', phone: '7911223' } })],
-      payment: paidOn(days(1, 7.5), 65, 'mib', 'Hussain Afeef', 'MDM-1030'),
+      payment: paidOn(days(1, 8), days(1, 7.5), 65, 'mib', 'Hussain Afeef', 'MDM-1030'),
       events: stdEvents(days(1, 8), { paidAt: days(1, 7.5), assignedAt: days(1, 7), driver: 'Ibrahim Shiyam', startedAt: days(1, 6.8), pickedAt: days(1, 6.5), pickedFrom: A.ranfaru.address, deliveredAt: days(1, 6), deliveredTo: 'Alihaa Express crew (cargo receipt photo)' }),
       stops: [{ status: 'done', at: t(days(1, 6.5)) }, { status: 'done', at: t(days(1, 6)), handedTo: 'recipient', recipientName: 'Alihaa Express crew' }] });
 
     // Delivered today
     const o1031 = order({ code: 'MDM-1031', service: 'pick', customer: C.shifza, status: 'delivered', createdMin: 300, updatedMin: 180, driverId: 'drv_nazim',
       packages: [pkg({ size: 'bag', description: 'Lunch tiffin', pickup: A.kaneeru, dropoff: A.amin, recipient: { name: 'Mohamed Shaffan', phone: '7700456' } })],
-      payment: paidOn(280, 45, 'bml', 'Aishath Shifza', 'MDM-1031'),
+      payment: paidOn(300, 280, 45, 'bml', 'Aishath Shifza', 'MDM-1031'),
       events: stdEvents(300, { paidAt: 280, assignedAt: 270, driver: 'Ahmed Nazim', startedAt: 250, pickedAt: 235, pickedFrom: A.kaneeru.address, deliveredAt: 180, deliveredTo: 'Mohamed Shaffan' }),
       stops: [{ status: 'done', at: t(235) }, { status: 'done', at: t(180), handedTo: 'recipient', recipientName: 'Mohamed Shaffan' }] });
     o1031.route.stops[1].photoId = proofFile(o1031.id, t(180));
@@ -196,13 +201,15 @@
         pkg({ size: 'bag', description: 'Keys and a charger', pickup: A.ranfaru, dropoff: A.dhonveli, recipient: { name: 'Ali Nasih', phone: '7712233' } }),
         pkg({ size: 'box', description: 'Baby clothes', pickup: A.ranfaru, dropoff: A.rehendhi, recipient: { name: 'Aminath Sana', phone: '9944556' }, meetAt: 'door' }),
       ],
-      payment: paidOn(245, 95, 'bml', 'Mariyam Nazeeha', 'MDM-1032'),
-      events: stdEvents(260, { paidAt: 245, assignedAt: 240, driver: 'Hassan Rasheed', startedAt: 230, pickedAt: 215, pickedFrom: A.ranfaru.address, deliveredAt: 120, deliveredTo: 'Aminath Sana' }).concat([ev('delivered', 'Delivered to Ali Nasih', t(190), 'driver')]),
+      payment: paidOn(260, 245, 95, 'bml', 'Mariyam Nazeeha', 'MDM-1032'),
+      events: stdEvents(260, { paidAt: 245, assignedAt: 240, driver: 'Hassan Rasheed', startedAt: 230, pickedAt: 215, pickedFrom: A.ranfaru.address }).concat([
+        ev('arrived', 'Hassan Rasheed arrived at drop-off 1', t(192), 'driver'), ev('delivered', 'Delivered to Ali Nasih', t(190), 'driver'),
+        ev('arrived', 'Hassan Rasheed arrived at drop-off 2', t(122), 'driver'), ev('delivered', 'Delivered to Aminath Sana', t(120), 'driver')]),
       stops: [{ status: 'done', at: t(215) }, { status: 'done', at: t(215) }, { status: 'done', at: t(190), handedTo: 'recipient', recipientName: 'Ali Nasih' }, { status: 'done', at: t(120), handedTo: 'family', recipientName: 'Sana\'s mother' }] });
 
     order({ code: 'MDM-1033', service: 'shop', customer: C.rilwan, status: 'delivered', createdMin: 200, updatedMin: 60, driverId: 'drv_shiyam',
       packages: [pkg({ size: 'bag', description: 'Pharmacy run', shop: { name: 'Lifeline Pharmacy', zone: 'male', address: 'Majeedhee Magu', list: 'Panadol 2 strips, ORS sachets ×6, thermometer', budget: 300, unavailable: 'call' }, dropoff: A.meerubahuru, recipient: { name: 'Mohamed Rilwan', phone: '7778901' } })],
-      payment: paidOn(185, 365, 'mib', 'Mohamed Rilwan', 'MDM-1033'),
+      payment: paidOn(200, 185, 365, 'mib', 'Mohamed Rilwan', 'MDM-1033'),
       receipt: 300, settle: 'settled',
       events: stdEvents(200, { paidAt: 185, assignedAt: 180, driver: 'Ibrahim Shiyam', startedAt: 170, pickedAt: 110, pickedFrom: 'Lifeline Pharmacy (receipt MVR 300)', deliveredAt: 60, deliveredTo: 'Mohamed Rilwan' }),
       stops: [{ status: 'done', at: t(110), receiptTotal: 300 }, { status: 'done', at: t(60), handedTo: 'recipient', recipientName: 'Mohamed Rilwan' }] });
@@ -234,30 +241,31 @@
     // Live demo: on the way right now
     order({ code: 'MDM-1038', service: 'pick', customer: C.nazeeha, status: 'in_transit', createdMin: 45, updatedMin: 6, driverId: 'drv_nazim',
       packages: [pkg({ size: 'bag', description: 'Office keys and a laptop charger', pickup: A.kaneeru, dropoff: A.amin, recipient: { name: 'Ismail Riyaz', phone: '7755667' }, meetAt: 'lobby' })],
-      payment: paidOn(30, 45, 'bml', 'Mariyam Nazeeha', 'MDM-1038'),
+      payment: paidOn(45, 30, 45, 'bml', 'Mariyam Nazeeha', 'MDM-1038'),
       events: stdEvents(45, { paidAt: 30, assignedAt: 22, driver: 'Ahmed Nazim', startedAt: 15, pickedAt: 6, pickedFrom: A.kaneeru.address }),
       stops: [{ status: 'done', at: t(6) }] });
 
     order({ code: 'MDM-1039', service: 'pick', customer: C.rilwan, status: 'assigned', createdMin: 38, updatedMin: 12, driverId: 'drv_shiyam',
       packages: [pkg({ size: 'box', description: 'Photo frames', fragile: true, pickup: A.meerubahuru, dropoff: A.handhuvaree, recipient: { name: 'Mariyam Waheeda', phone: '7733445' } })],
-      payment: paidOn(20, 45, 'mib', 'Mohamed Rilwan', 'MDM-1039'),
+      payment: paidOn(38, 20, 45, 'mib', 'Mohamed Rilwan', 'MDM-1039'),
       events: stdEvents(38, { paidAt: 20, assignedAt: 12, driver: 'Ibrahim Shiyam' }) });
 
     order({ code: 'MDM-1040', service: 'pick', customer: C.zeena, status: 'on_hold', createdMin: 95, updatedMin: 18, driverId: 'drv_rasheed',
       packages: [pkg({ size: 'bag', description: 'Medicine from the pharmacy', pickup: A.handhuvaree, dropoff: A.hiyaa5, recipient: { name: 'Aminath Shifana', phone: '7677889' }, meetAt: 'door' })],
-      payment: paidOn(80, 45, 'bml', 'Fathimath Zeena', 'MDM-1040'),
+      payment: paidOn(95, 80, 45, 'bml', 'Fathimath Zeena', 'MDM-1040'),
       events: stdEvents(95, { paidAt: 80, assignedAt: 70, driver: 'Hassan Rasheed', startedAt: 60, pickedAt: 50, pickedFrom: A.handhuvaree.address }).concat([
-        ev('arrived', 'Hassan Rasheed arrived at drop-off 1', t(22), 'driver'), ev('stop_failed', "Couldn't complete drop-off 1: no answer (called twice, no reply at 14-03)", t(18), 'driver')]),
+        ev('arrived', 'Hassan Rasheed arrived at drop-off 1', t(22), 'driver'), ev('stop_failed', "Couldn't complete drop-off 1: no answer", t(18), 'driver'),
+        ev('note', 'Rider note: Called twice, no reply at 14-03', t(18), 'driver', 'internal')]),
       stops: [{ status: 'done', at: t(50) }, { status: 'failed', failReason: 'no_answer', failedAt: t(18), note: 'Called twice, no reply at 14-03', attempts: 1 }] });
 
     order({ code: 'MDM-1041', service: 'pick', customer: C.afeef, status: 'confirmed', createdMin: 25, updatedMin: 15,
       packages: [pkg({ size: 'bag', description: 'USB drive', pickup: A.dhonveli, dropoff: A.ranfaru, recipient: { name: 'Ahmed Fazeel', phone: '7811223' } })],
-      payment: paidOn(15, 35, 'bml', 'Hussain Afeef', 'MDM-1041'),
+      payment: paidOn(25, 15, 35, 'bml', 'Hussain Afeef', 'MDM-1041'),
       events: stdEvents(25, { paidAt: 15 }) });
 
     order({ code: 'MDM-1042', service: 'shop', customer: C.waheed, status: 'confirmed', createdMin: 22, updatedMin: 10,
       packages: [pkg({ size: 'bag', description: 'Snacks for the office', shop: { name: 'Fantasy Store', zone: 'male', address: 'Fareedhee Magu', list: '3 packs of biscuits, 6 juice boxes, 1 kg dates', budget: 250, unavailable: 'skip' }, dropoff: A.kaneeru, recipient: { name: 'Ali Waheed', phone: '9912345' }, meetAt: 'reception' })],
-      payment: paidOn(10, 310, 'mib', 'Ali Waheed', 'MDM-1042'),
+      payment: paidOn(22, 10, 310, 'mib', 'Ali Waheed', 'MDM-1042'),
       events: stdEvents(22, { paidAt: 10 }) });
 
     order({ code: 'MDM-1043', service: 'pick', customer: C.shifza, status: 'picked_up', createdMin: 70, updatedMin: 9, driverId: 'drv_shiyam',
@@ -265,7 +273,7 @@
         pkg({ size: 'bag', description: 'Return parcel', pickup: A.handhuvaree, dropoff: A.rehendhi, recipient: { name: 'Nashwa Ahmed', phone: '7809988' } }),
         pkg({ size: 'bag', description: 'Second parcel', pickup: A.dhonveli, dropoff: A.rehendhi, recipient: { name: 'Nashwa Ahmed', phone: '7809988' } }),
       ],
-      payment: paidOn(55, 90, 'bml', 'Aishath Shifza', 'MDM-1043'),
+      payment: paidOn(70, 55, 90, 'bml', 'Aishath Shifza', 'MDM-1043'),
       events: stdEvents(70, { paidAt: 55, assignedAt: 45, driver: 'Ibrahim Shiyam', startedAt: 30, pickedAt: 9, pickedFrom: A.handhuvaree.address }),
       stops: [{ status: 'done', at: t(9) }] });
 
@@ -275,7 +283,7 @@
     const biz = (code, createdMin, deliveredMin, packages) => order({ code, service: 'business', source: 'walkin', accountId: 'bacc_kandu', customer: kandu, status: 'delivered', createdMin, updatedMin: deliveredMin, driverId: 'drv_rasheed',
       payment: { method: 'invoice', status: 'invoiced' }, packages,
       events: [ev('created', 'Order created by admin (walk-in)', t(createdMin), 'admin', 'internal'), ev('assigned', 'Rider assigned: Hassan Rasheed', t(createdMin - 10), 'admin'), ev('route_started', 'Hassan Rasheed is on the way', t(createdMin - 20), 'driver'), ev('picked_up', 'Picked up from ' + A.kandu.address, t(createdMin - 30), 'driver'), ev('delivered', 'Delivered', t(deliveredMin), 'driver')],
-      stops: packages.map(() => ({ status: 'done', at: t(createdMin - 30) })).concat(packages.map(() => ({ status: 'done', at: t(deliveredMin), handedTo: 'recipient' }))) });
+      stops: packages.map(() => ({ status: 'done', at: t(createdMin - 30) })).concat(packages.map(p => ({ status: 'done', at: t(deliveredMin), handedTo: 'recipient', recipientName: p.dropoff.recipient ? p.dropoff.recipient.name : '' }))) });
     biz('MDM-1044', days(9, 5), days(9, 3), [bizPkg('Textbook order 1182', A.amin, { name: 'Aishath Leela', phone: '7710101' }), bizPkg('Textbook order 1183', A.rehendhi, { name: 'Moosa Rasheed', phone: '7710202' })]);
     biz('MDM-1045', days(6, 4), days(6, 2), [bizPkg('Stationery order 1190', A.ranfaru, { name: 'Ibrahim Nazeer', phone: '9910303' }), bizPkg('Stationery order 1191', A.handhuvaree, { name: 'Sara Ahmed', phone: '7710404' }), bizPkg('Stationery order 1192', A.hiyaa5, { name: 'Ahmed Naseem', phone: '7710505' })]);
     biz('MDM-1046', days(3, 6), days(3, 4), [bizPkg('Textbook order 1201', A.vinares, { name: 'Fathimath Ibrahim', phone: '7710606' }), bizPkg('Textbook order 1202', A.dhonveli, { name: 'Hussain Shareef', phone: '9910707' })]);

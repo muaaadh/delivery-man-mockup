@@ -493,7 +493,7 @@
         { label: 'Business', primary: true, render: a => el('a', { href: '#/business/' + a.id, on: { click: e => { e.preventDefault(); navigate('#/business/' + a.id); } } }, a.name) },
         { label: 'Contact', nowrap: true, render: a => el('span', null, a.contactName || '', el('span', { class: 'table__sub mono' }, phone.format(a.phone))) },
         { label: 'Packages this month', num: true, render: a => String(packageCount(monthOrders(orders, a.id, month))) },
-        { label: 'Invoice total', num: true, render: a => money(orderTotal(monthOrders(orders, a.id, month)), { cents: true }) },
+        { label: 'Invoice total', num: true, render: a => money(orderTotal(monthOrders(orders, a.id, month))) },
         { label: 'Status', primary: true, render: a => badge({ approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } }, a.status) },
         { label: 'Actions', actions: true, render: a => el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-view', on: { click: () => navigate('#/business/' + a.id) } }, 'View') },
       ];
@@ -567,10 +567,10 @@
           { label: 'Delivered', nowrap: true, render: o => fmtDate(deliveredAt(o)) },
           { label: 'Recipients', render: o => el('span', { class: 'table__address', title: recipients(o) }, recipients(o)) },
           { label: 'Packages', num: true, render: o => String((o.packages || []).length) },
-          { label: 'Amount', num: true, render: o => money(o.totals.total, { cents: true }) },
+          { label: 'Amount', num: true, render: o => money(o.totals.total) },
         ];
         ui.orders.replaceChildren(table(cols, sorted.map(o => ({ data: o, attrs: { class: 'is-clickable', 'data-testid': 'business-order-row', 'data-order-id': o.id, 'data-status': o.status, on: { click: e => { if (e.target.closest('button, a')) return; openOrder(o.id); } } } })), { testid: 'business-orders' }),
-          el('div', { class: 'pagination' }, el('span', null, plural(packageCount(mine), 'package') + ' delivered in ' + monthLabel(month)), el('span', { class: 'mono' }, money(orderTotal(mine), { cents: true }))));
+          el('div', { class: 'pagination' }, el('span', null, plural(packageCount(mine), 'package') + ' delivered in ' + monthLabel(month)), el('span', { class: 'mono' }, money(orderTotal(mine)))));
       }
       // Invoices
       if (!invoices.length) ui.invoices.replaceChildren(empty('No invoices yet.', 'Generate the invoice for ' + monthLabel(month) + ' once the month is delivered.'));
@@ -578,7 +578,7 @@
         const cols = [
           { label: 'Number', primary: true, render: i => el('span', { class: 'mono nowrap' }, i.number) },
           { label: 'Period', nowrap: true, render: i => monthLabel(i.month) },
-          { label: 'Total', num: true, render: i => money(i.total, { cents: true }) },
+          { label: 'Total', num: true, render: i => money(i.total) },
           { label: 'Status', primary: true, render: i => badge(INVOICE_STATUS, i.status) },
           { label: 'Issued', nowrap: true, render: i => fmtDate(i.issuedAt, { dateOnly: true }) },
           { label: 'Due', nowrap: true, render: i => i.status === 'paid' ? 'Paid ' + fmtDate(i.paidAt, { dateOnly: true }) : fmtDate(i.dueAt, { dateOnly: true }) },
@@ -594,7 +594,7 @@
     function invoiceUrl(inv) { return MDM.href('admin/invoice.html?id=' + encodeURIComponent(inv.id)); }
     function invoiceActions(inv, account) {
       const url = invoiceUrl(inv);
-      const text = 'Mr. Delivery Man: invoice ' + inv.number + ' for ' + monthLabel(inv.month) + ', ' + money(inv.total, { cents: true }) + ', due ' + fmtDate(inv.dueAt, { dateOnly: true }) + '. ' + url;
+      const text = 'Mr. Delivery Man: invoice ' + inv.number + ' for ' + monthLabel(inv.month) + ', ' + money(inv.total) + ', due ' + fmtDate(inv.dueAt, { dateOnly: true }) + '. ' + url;
       const links = phone.links(account.phone, text);
       const markSent = async () => { if (inv.status === 'draft') { try { await MDM.store.update('invoices', inv.id, { status: 'sent', sentAt: nowIso() }); } catch (e) { /* the link still opens */ } } };
       return actionsRow(
@@ -611,11 +611,11 @@
       }
       try {
         const inv = await MDM.store.createInvoice(account.id, month);
-        toast('Invoice ' + inv.number + ' created, ' + money(inv.total, { cents: true }) + ' due ' + fmtDate(inv.dueAt, { dateOnly: true }));
+        toast('Invoice ' + inv.number + ' created, ' + money(inv.total) + ' due ' + fmtDate(inv.dueAt, { dateOnly: true }));
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function markPaid(inv) {
-      const v = await MDM.ui.dialog({ title: 'Mark ' + inv.number + ' as paid', message: money(inv.total, { cents: true }) + ' received by bank transfer.', okLabel: 'Mark paid',
+      const v = await MDM.ui.dialog({ title: 'Mark ' + inv.number + ' as paid', message: money(inv.total) + ' received by bank transfer.', okLabel: 'Mark paid',
         fields: [{ name: 'paidAt', label: 'Date received', type: 'date', required: true, value: MDM.ui.dayKey(new Date()) }, { name: 'reference', label: 'Transfer reference', type: 'text', placeholder: 'FAVARA 2291' }] });
       if (!v) return;
       const d = new Date(v.paidAt + 'T12:00:00');
@@ -648,22 +648,24 @@
       if (!ctx || !ctx.alive) return;
       const ops = s.ops || {}, hours = ops.hours || {}, banks = (s.banks || []).slice(0, 2);
       while (banks.length < 2) banks.push({ id: banks.length ? 'bank2' : 'bank1', name: '', accountName: '', accountNo: '' });
-      const formCard = (title, caption, children) => el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, title)),
-        el('div', { class: 'card__body form-card__body' }, caption ? el('p', { class: 'form-caption' }, caption) : null, children));
-      form = el('form', { class: 'form', novalidate: true, 'data-testid': 'rates-form', on: { submit: save, input: () => { dirty = true; } } },
-        formCard('Package rates', 'MVR per package. The lower figure applies within one island, the higher one when pickup and drop-off are on different islands.',
-          [grid(s), checkbox('xlQuoted', s.rates.sizes.xl.quoted, 'XL is quoted before pickup', 'The website prints "from MVR 60" for XL and the request waits for your quote')]),
-        formCard('Fees', null, [
+      // Same section rhythm as #/settings (SPEC §2.5): <section aria-labelledby> → .section-head (H2 + caption as its desc) → full-width card,
+      // with the fields inside capped at the 640px form width by .form-card__body.
+      const formSection = (id, title, caption, children) => el('section', { 'aria-labelledby': id }, sectionHead(id, title, caption),
+        card(null, el('div', { class: 'card__body' }, el('div', { class: 'form-card__body' }, children))));
+      form = el('form', { class: 'form form--wide', novalidate: true, 'data-testid': 'rates-form', on: { submit: save, input: () => { dirty = true; } } },
+        formSection('rates-sizes', 'Package rates', 'Assumed rule, confirm with client. MVR per package. The lower figure applies within one island, the higher one when pickup and drop-off are on different islands.',
+          [grid(s), checkbox('xlQuoted', s.rates.sizes.xl.quoted, 'XL is quoted before pickup', 'The website prints "from ' + MDM.pricing.format(s.rates.sizes.xl.same) + '" for XL and the request waits for your quote')]),
+        formSection('rates-fees', 'Fees', null, [
           el('div', { class: 'grid-2' }, field('Cargo fee, MVR', numInput('cargo', s.rates.cargo), { hint: 'Per package picked up or dropped at a terminal' }), field('Airport fee, MVR', numInput('airport', s.rates.airport), { hint: 'Once per order touching the airport' })),
           el('div', { class: 'grid-2' }, field('Shopping fee, % of the receipt', numInput('shoppingPct', s.rates.shoppingPct, { max: '100' })), field('Business rate per package, MVR', numInput('business', s.rates.business), { hint: 'New business accounts start on this rate' }))]),
-        formCard('Rules', 'Assumed rule, confirm with client', [
+        formSection('rates-rules', 'Rules', 'Assumed, confirm with client', [
           checkbox('airportReplacesCross', s.rules.airportReplacesCross, 'Airport replaces the cross-island figure', 'A package touching the airport is priced at its same-island figure and the airport fee is added once'),
           el('div', { class: 'grid-2' },
             field('Cargo fee charged per', select('cargoFeePer', s.rules.cargoFeePer, [{ value: 'package', label: 'Package' }, { value: 'order', label: 'Order' }])),
             field('Airport fee charged per', select('airportFeePer', s.rules.airportFeePer, [{ value: 'order', label: 'Order' }, { value: 'package', label: 'Package' }])))]),
-        formCard('Size guide', 'Wording to confirm with client', [
+        formSection('rates-size-guide', 'Size guide', 'Wording to confirm with client', [
           field('Bag', textarea('guide.bag', s.sizeGuide.bag, { rows: 2 })), field('Box', textarea('guide.box', s.sizeGuide.box, { rows: 2 })), field('XL', textarea('guide.xl', s.sizeGuide.xl, { rows: 2 }))]),
-        formCard('Operations', 'Operations · demo defaults, not from the client brief', [
+        formSection('rates-ops', 'Operations', 'Operations · demo defaults, not from the client brief', [
           el('div', { class: 'grid-2' }, field('Opens at', input('hours.open', hours.open, { placeholder: '09:00', inputmode: 'numeric' })), field('Closes at', input('hours.close', hours.close, { placeholder: '23:00', inputmode: 'numeric' }))),
           field('Days', input('days', ops.days)),
           field('ASAP wording', input('asapText', ops.asapText), { hint: 'Shown under "ASAP" on the request page' }),
@@ -672,9 +674,9 @@
           el('div', { class: 'grid-3' }, field('City speed, km/h', numInput('speedCityKmh', ops.speedCityKmh)), field('Bridge speed, km/h', numInput('speedHighwayKmh', ops.speedHighwayKmh)), field('Peak buffer, minutes', numInput('peakBufferMin', ops.peakBufferMin))),
           field('Peak windows', input('peakWindows', (ops.peakWindows || []).join(', ')), { hint: 'Comma separated, 24 h clock: 08:00-09:30, 17:00-19:30' }),
           field('Closed windows', input('closedWindows', (ops.closedWindows || []).join(', ')), { hint: 'Comma separated, optional day prefix: Fri 12:00-13:30' })]),
-        formCard('Bank accounts', 'Printed at checkout and on invoices. Transfer reference is always the order or invoice number.', banks.map((b, i) => el('div', { class: 'grid-3' },
+        formSection('rates-banks', 'Bank accounts', 'Printed at checkout and on invoices. Transfer reference is always the order or invoice number.', banks.map((b, i) => el('div', { class: 'grid-3' },
           field('Bank ' + (i + 1), input('banks.' + i + '.name', b.name)), field('Account name', input('banks.' + i + '.accountName', b.accountName)), field('Account number', input('banks.' + i + '.accountNo', b.accountNo, { class: 'input mono', inputmode: 'numeric' }))))),
-        formCard('Terms and invoicing', null, [
+        formSection('rates-terms', 'Terms and invoicing', null, [
           field('What we carry', textarea('terms', s.terms), { hint: 'Shown at checkout with the "I\'ve read what we carry" checkbox' }),
           el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides the GST line on invoices' }))]),
         el('div', { class: 'form-actions' }, el('span', { class: 'form-caption' }, 'Changes apply to new requests and quotes.'), el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'rates-save' }, 'Save rates')));

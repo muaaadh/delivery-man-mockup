@@ -21,9 +21,14 @@
       map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
       if (opts.interactive !== false) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       map.touchZoomRotate.disableRotation();
-      const timer = setTimeout(() => reject(new Error('map_timeout')), 6000);
-      map.once('load', () => { clearTimeout(timer); resolve(map); });
-      map.on('error', e => { if (!map.loaded()) { clearTimeout(timer); reject(e && e.error ? e.error : new Error('map_error')); } });
+      // One settle path: a failed instance is torn down here (canvas, worker, tile requests), because the caller never gets a handle
+      // to destroy it and only shows .map__fallback on rejection (SPEC §4.5).
+      let settled = false;
+      const fail = e => { if (settled) return; settled = true; clearTimeout(timer); map.off('error', onError); try { map.remove(); } catch (x) { /* already gone */ } reject(e); };
+      const onError = e => { if (!map.loaded()) fail(e && e.error ? e.error : new Error('map_error')); };
+      const timer = setTimeout(() => fail(new Error('map_timeout')), 6000);
+      map.once('load', () => { if (settled) return; settled = true; clearTimeout(timer); map.off('error', onError); resolve(map); });
+      map.on('error', onError);
     });
   }
 

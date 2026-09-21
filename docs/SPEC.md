@@ -189,7 +189,9 @@ wordmark markup (a `<span class="brand__word">`). Favicon: 32px black square wit
   "PDF" label), file name, size, and "Remove" (`.btn--ghost .btn--sm`).
 - `.map`: explicit height (300px < 720px, 420px desktop; `.map--tall` 560px; `.map--fill` fills its column), 1px `--border`, radius 8px,
   `position: relative`; `.map__overlay` top-right holds the "Recenter" `.btn--secondary .btn--sm`; `.map__fallback` shows `.alert--warn`
-  "Map unavailable right now. Stops and status are still updated below." when the style fails or 6s pass without a load event.
+  "Map unavailable right now. Stops and status are still updated below." when the style fails or 6s pass without a load event. The
+  `<noscript>` fallback on index.html may instead read "Map unavailable without JavaScript. The zones we cover are listed below."
+  and home.js prints the same sentence when the map cannot load, since the zone list follows.
   Markers: `.marker--pickup` (14px black square, r=4, white 2px border), `.marker--dropoff` (14px brand circle), `.marker--done` (green),
   `.marker--failed` (red), `.marker--driver` (28px white circle, 2px brand ring, 16px navigation icon rotated by `--heading`, initials
   label below), `.is-stale` (50% opacity). `.marker__label` 11px/500 white chip under the marker. `.map-legend` 13px row.
@@ -497,9 +499,19 @@ insert(col, doc) → doc           // fills id, createdAt, updatedAt (and orders
 update(col, id, patchOrFn) → doc // shallow merge at top level; a nested object/array in the patch REPLACES the old value; fn form gets a clone and returns a patch; read-modify-write against localStorage in one synchronous step; StoreError('not_found')
 remove(col, id) → void
 settings() → settings; saveSettings(patch) → settings   // deep-merges only known top-level keys
-subscribe(col|'*', cb) → unsubscribe                     // cb({ collection, id, op:'insert'|'update'|'remove'|'reset', origin:'local'|'remote' })
+subscribe(col|'*', cb) → unsubscribe                     // cb({ collection, id|null, ids:string[], op:'insert'|'update'|'remove'|'reset'|'refresh', origin:'local'|'remote' })
 reset() / exportJSON({ includeFiles }) / importJSON(text)
+createInvoice(accountId, month) → invoice   // one draft invoice from the account's delivered business orders whose `delivered` event falls in 'YYYY-MM' (one line per package plus adjustment lines), numbered INV-<month>-<seq>, due in settings.invoiceDueDays
+orderByCode(code) → order|null             // tolerant lookup: '1038', 'mdm1038', 'MDM-1038 ' all resolve to MDM-1038
+buildStops(order) → stops[]                // derives route.stops (pickup/shop then drop-offs, with points) from a not-yet-routed order; pure, the order is not written
 ```
+Notifications are coalesced per collection per tick; `id` is set only when exactly one doc changed, `ids` lists all; on wake/visibility
+(and window focus) the store invalidates its caches and emits `op:'refresh'` on `'*'` and every collection with origin `'remote'`, which is
+what pages use instead of polling. A remote reset emits `op:'reset'` on `'*'`, every collection and `settings`.
+Constants on `MDM`: `ACTIVE_STATUSES` (`['assigned','picked_up','in_transit','on_hold']`, the statuses that occupy a rider),
+`ADJUSTMENT_PRESETS` (`[{ value:'vehicle'|'waiting'|'freight'|'redelivery'|'discount'|'quote'|'other', label }]` for addAdjustment/sendQuote),
+`FAIL_REASONS` (`[{ value:'no_answer'|'wrong_address'|'closed'|'refused'|'not_ready'|'boat_not_arrived', label }]` for a failed stop),
+`HANDED_TO` (`[{ value:'recipient'|'family'|'security'|'left', label }]` for the driver's Delivered dialog).
 Collections: `orders`, `customers`, `drivers`, `business_requests`, `business_accounts`, `invoices`, `positions` (id = driverId),
 `events` (audit log, capped at 1000, oldest trimmed), `files` (`{ id, kind:'slip'|'proof'|'receipt', orderId, name, type, size, dataUrl, at }`).
 Keys: `mdm:schema`, `mdm:v1:<collection>`, `mdm:v1:settings`, `mdm:v1:meta = { seededAt, dirty, orderSeq, invoiceSeq }`, `mdm:me`,
@@ -579,34 +591,43 @@ Settings (`mdm:v1:settings`):
         businessReplyText:'within 1 working day', slotStart:'09:00', slotEnd:'23:00', slotMinutes:120, speedCityKmh:18, speedHighwayKmh:40, peakBufferMin:10,
         peakWindows:['08:00-09:30','17:00-19:30'], closedWindows:['Fri 12:00-13:30'] },
   banks:[ { id:'bml', name:'Bank of Maldives', accountName:'Mr. Delivery Man', accountNo:'7730 0000 12345' }, { id:'mib', name:'Maldives Islamic Bank', accountName:'Mr. Delivery Man', accountNo:'9010 0000 67890' } ],
-  contact:{ phone:'7XXXXXX', whatsapp:'7XXXXXX', viber:'7XXXXXX', email:'hello@example.com' },   // demo values, edited in Admin → Settings
+  contact:{ phone:'7770000', whatsapp:'7770000', viber:'7770000', email:'hello@example.com' },   // demo values, edited in Admin → Settings
   terms:"We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.",
   notice:{ text:'', active:false }, invoiceDueDays:14, gstPercent:0, demo:{ autopilot:true } }
 ```
 All amounts are integers in MVR. `saveSettings` deep-merges only these top-level keys.
 
 Seed (`js/seed.js`, `MDM.seed.build(now) → { settings, customers, drivers, business_requests, business_accounts, invoices, orders, positions, events, files }`, pure):
-fixed ids and codes (`ord_seed_01`…, `drv_nazim`, `drv_shiyam`, `drv_rasheed`, codes MDM-1025 … MDM-1040; `orderSeq` = max + 1).
+fixed ids and codes (`ord_seed_01`…, `drv_nazim`, `drv_shiyam`, `drv_rasheed`, codes MDM-1025 … MDM-1047; `orderSeq` = max + 1).
 Drivers: Ahmed Nazim (bike, Honda Wave), Ibrahim Shiyam (bike, Yamaha), Hassan Rasheed (pickup, Toyota Hilux). Customers: Aishath Shifza,
 Mariyam Nazeeha, Mohamed Rilwan, Fathimath Zeena, Ali Waheed, Hussain Afeef (phones 7XX XXXX / 9XX XXXX patterns). Addresses: Malé
 "M. Kaneerumaage, 2nd floor, Majeedhee Magu", "H. Dhonveli, Boduthakurufaanu Magu", "G. Handhuvareege, Sosun Magu", "Ma. Ranfaru, Ameenee
 Magu", "H. Meerubahuruge, Chandhanee Magu"; Phase 1 "Amin Avenue, Block B, Apt 4-02", "Rehendhi Flat 3, Apt 205"; Phase 2 "Hiyaa Tower 5,
 Apt 14-03", "Vinares Tower 3, Apt 9-01"; Villimalé "V. Hiyaleege" (quote_pending order); airport "Velana International Airport, Arrivals
 hall"; cargo "Malé North Harbour, boat Alihaa Express from Thoddoo" (a "to boat" order). Business account "Kandu Books & Stationery,
-M. Kaneerumaage, Chandhanee Magu" (approved, 8 to 10 delivered business packages this month, one draft invoice); pending request
-"Shifa's Cakes, home baker, Hulhumalé Phase 1, 11 to 30/week". Orders (16) across every status, dated relative to `now` over the last 7
-days including today: 1 quote_pending (Villimalé), 1 awaiting_payment, 2 payment_review with generated sample slips (a plain SVG
-"transfer receipt" data URL, not a real bank's branding), 2 confirmed (unassigned), 1 assigned (not started), **MDM-1038 in_transit**
-(Ahmed Nazim, Malé → Hulhumalé Phase 1, position seeded on the bridge at lat 4.1800 lng 73.5210 heading 45 speed 40 source 'sim'),
-1 picked_up, 1 on_hold (no answer, Hiyaa tower), 1 delivered shop order whose receipt is below the budget (refund_due), 3 delivered today
-(with handedTo and one proof photo file), 1 cancelled, plus the business packages. The tracking demo link is always `/track/?code=MDM-1038`.
+M. Kaneerumaage, Chandhanee Magu" (`bacc_kandu`, approved, 4 delivered business orders this month carrying 9 packages, one draft invoice);
+pending request "Shifa's Cakes, home baker, Hulhumalé Phase 1, 11 to 30/week". Orders (23) across every status, dated relative to `now`
+over the last 10 days including today: 12 delivered (the 4 business orders, 1 shop order whose receipt is below the budget (refund_due),
+1 shop order already settled, and 3 delivered today with handedTo and one proof photo file), 2 payment_review with generated sample slips
+(a plain SVG "transfer receipt" data URL, not a real bank's branding), 2 confirmed (unassigned), and 1 each of quote_pending (Villimalé),
+awaiting_payment, assigned (not started), **MDM-1038 in_transit** (Ahmed Nazim, Malé → Hulhumalé Phase 1, position computed from a point
+along the seeded route polyline, speed 38, source 'sim'), picked_up, on_hold (no answer, Hiyaa tower) and cancelled. The tracking demo link
+is always `/track/?code=MDM-1038`. Seed facts (verbatim from BUILDERS.md, the two documents must agree): 23 orders MDM-1025…MDM-1047;
+MDM-1038 is in transit with rider `drv_nazim`; MDM-1036/1037 are in payment review with slips; MDM-1034 is quote pending (Villimalé);
+MDM-1035 awaiting payment; MDM-1040 on hold; MDM-1041/1042 confirmed and unassigned; MDM-1039 assigned to `drv_shiyam`; business account
+`bacc_kandu` with 4 delivered orders this month. `MDM.store.reset()` restores this.
 
 ### 4.3 `MDM.pricing` (js/pricing.js)
 ```
 MDM.pricing.quote(draft, settings) → { packages:[{ …pkg, price:{ same, cross, crossIsland, lineTotal } }], fees:{ cargo, airport, shopping, adjustments:[] }, totals:{ packages, fees, adjustments:0, total, quoteRequired, quoteReasons:[] }, feeLines:[{ key, label, amount, reason }] }
 MDM.pricing.recalc(order, settings) → order       // re-derives totals from packages[].price, fees and fees.adjustments (and shop receiptTotal)
+MDM.pricing.feeLines(order, settings?) → [{ key, label, amount, reason }]   // frozen order.fees as rows; settings shape the labels ('Cargo fee × 2', 'Shopping fee 10%'), reasons name the saved meeting point or terminal ('drop-off at Arrivals hall'); adjustments follow as their own rows
 MDM.pricing.format(n, { cents=false }) → 'MVR 1,250' | 'MVR 1,250.00' | '−MVR 20'
-MDM.pricing.lineLabel(pkg) → 'Bag · Malé to Hulhumalé Phase 1'
+MDM.pricing.lineLabel(pkg, service?) → 'Bag · Malé to Hulhumalé Phase 1'   // shop packages read 'Bag · Shop in Malé to …'
+MDM.pricing.sizeLabel(size) → 'Bag' | 'Box' | 'XL'
+MDM.pricing.sizePriceLabel(size, pickupZone, dropZone, settings) → 'MVR 35' | 'from MVR 60'   // the figure printed on a size option for the chosen zones; XL is always 'from …'
+MDM.pricing.reasonText(reason) → 'XL packages are quoted before pickup' | …   // one sentence per quoteReasons entry (xl, vehicle, villimale, other_zone)
+MDM.pricing.isCross(pickupZone, dropZone, rules) → bool   // the cross-island test used by quote(): different islands, unless an airport endpoint and rules.airportReplacesCross
 ```
 `draft = { service, packages:[{ size, needsVehicle, underOneFt?, pickup:{ zone, cargo }|null, dropoff:{ zone, cargo }, shop:{ zone, budget }|null }] }`.
 Rules in order: shop packages use `shop.zone` as the pickup island. `crossIsland` = `MDM.geo.island(pickupZone) !== MDM.geo.island(dropZone)`,
@@ -634,6 +655,8 @@ MDM.map.route(map, id, polyline, { active=true, dashed }) → { update(polyline)
 MDM.map.driverMarker(map, pos, driver) → { moveTo(pos, ms=1000), setStale(bool), remove() }   // rAF lerp of lat/lng/heading only while visible; jumps when > 500 m; never extrapolates
 MDM.map.fit(map, points, { padding=48, maxZoom=16 })
 MDM.map.refresh(map)      // requestAnimationFrame(() => map.resize()); mandatory after revealing a map (drawer, tab, hash view)
+MDM.map.panTo(map, [lat,lng]|{lat,lng}, zoom?)   // easeTo in 400ms, zoom defaults to max(current, 15); used to focus one rider or stop
+MDM.map.available() → bool                       // maplibregl loaded; false → the page shows .map__fallback without calling create()
 MDM.map.destroy(map)
 ```
 Marker roots carry `data-testid="marker-<kind>"` and `data-driver-id`/`data-stop-id`. Driver marker shows two-letter initials.
@@ -646,6 +669,9 @@ MDM.live.last(driverId) → position|null                     // sync, in-memory
 MDM.live.simulate(driverId, polyline, { speedKmh=25, timeScale=1, stops=[], dwellMs=0, autoStops=false, onStop(stop), loop=false }) → { stop(), pause(), resume(), get state }
 MDM.live.watchGPS(driverId) → Promise<void>; MDM.live.stopGPS(); MDM.live.gpsState() → 'off'|'on'|'denied'|'unavailable'
 MDM.live.autopilot()                                        // demo only; see below
+MDM.live.autopilotState() → { started, enabled, tabId, lease, holdsLease, running, orderId, code, driverId, sim }   // test hook for the demo rider
+MDM.live.lease = { take(owner:'autopilot'|'driver') → bool, release(), read() → { tabId, at, owner }|null, holds() → bool, KEY, STALE_MS }   // the mdm:simlease helpers; 'driver' takes over an autopilot lease, never a fresh 'driver' one
+MDM.live.timeScale() → number                               // the stored mdm:timeScale (default 1), read by simulate() when opts.timeScale is absent
 ```
 Simulation is time-based (`position = pointAtDistance(polyline, elapsed × speed × timeScale)`), ticks every 1s and on `visibilitychange`;
 speed 40 km/h inside `inHighway` else `speedKmh`. Pauses within 40 m of each stop and fires `onStop`; with `autoStops` it calls
@@ -665,6 +691,10 @@ badge(kind, label, attrs?) → HTML string; statusBadge = MDM.badgeFor
 setError(fieldEl, message|null); validate(formEl, rules) helpers; phone = { normalize(raw) → '7712345'|null, valid(raw, {landline, intl}) → bool, format(raw) → '+960 771 2345', links(raw, text?) → { tel, wa, viber, sms } }
 fmtDate(iso, { time=true, dateOnly }) → '21 Sep, 14:32' / '21 Sep 2026'; timeAgo(iso) (< 60 min, else fmtDate); dayKey(d) → 'YYYY-MM-DD' (local); window(str) → '14:00 to 16:00'
 copy(text) → Promise<bool>; debounce(fn, ms); money = MDM.pricing.format; imageToJpeg(file, { maxEdge, quality }) → Promise<{ dataUrl, size, type }>
+html(str) → DocumentFragment   // parses trusted markup (badge strings, icons); every interpolated value must already be esc()'d
+fmtTime(iso) → '14:32'; monthKey(d?) → 'YYYY-MM' (local); minutesToHHMM(n) → '09:30'; parseHHMM('9:30') → 570 | null
+setLoading(btn, on)            // .is-loading + aria-busy, keeps the button's width; scrollIntoViewIfNeeded(node, block='center') scrolls only when off screen, respects reduced motion
+formatBytes(n) → '12 KB' | '1.4 MB'; statusLabel(status, audience?) → the MDM.STATUS label ('customer' → the customer wording)
 ```
 Rule: pages build DOM with `el()`; where a template literal is used, every interpolated value is wrapped in `esc()`. Never `window.prompt`
 /`window.confirm`/`alert`.
@@ -672,7 +702,16 @@ Rule: pages build DOM with `el()`; where a template literal is used, every inter
 ### 4.8 `MDM.shell` (js/shell.js)
 Renders the public header (brand, nav with `aria-current` from `data-page`, CTA, mobile menu), the notice bar, the footer (contact/hours
 from settings), and the admin sidebar/topbar. `MDM.logo()`. Calls `MDM.live.autopilot()` after `store.ready`. Exposes
-`MDM.shell.contactLinks()` for pages.
+`MDM.shell.contactLinks()` for pages, plus:
+```
+MDM.shell.refresh() → Promise          // re-renders the notice bar and footer from settings (the shell calls it on settings changes and reset)
+MDM.shell.hoursLine(settings?, date?) → 'Open today 09:00 to 23:00 · Malé and Hulhumalé' | 'Closed now, open from 09:00'   // local time, used in the footer and the request page
+MDM.shell.setCounts({ orders, live, drivers, customers, business, reviews, quotes, requests, … })   // fills the sidebar chips (hidden at 0); a number or { value, hot }; alias keys (reviews, quotes, requests) add to their view and tint it
+MDM.shell.setChrome(visible)           // false hides sidebar and topbar (admin login state) so <main> spans the page
+MDM.shell.setActive(view?)             // aria-current on the sidebar link for the current #/view and the topbar title
+MDM.shell.setTitle(text|null)          // custom topbar title (an account name); null returns to the view's label
+MDM.shell.setSidebarOpen(bool)         // mobile sidebar drawer with backdrop; Escape and a nav click close it
+```
 
 ### 4.9 Dates and "today"
 All timestamps ISO 8601 UTC strings; display only through `fmtDate`/`timeAgo`. "Today" = `dayKey(iso) === dayKey(new Date())` local. KPIs:

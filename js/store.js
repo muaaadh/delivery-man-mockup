@@ -64,13 +64,15 @@
     const label = opts && opts.customer ? s.customer : s.label;
     return '<span class="badge badge--' + s.kind + '" data-status="' + esc(status) + '">' + esc(label) + '</span>';
   };
+  // Local copy of MDM.ui.esc: store.js loads before ui.js (SPEC §4.1) and badgeFor may be called before the page script runs.
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
   // ---- Low-level storage ----------------------------------------------------------------------------------------------
   const clone = typeof structuredClone === 'function' ? (v => structuredClone(v)) : (v => JSON.parse(JSON.stringify(v)));
   const cache = {};                     // collection → array (parsed) | undefined when invalidated
   let settingsCache = null, metaCache = null;
-  const tabId = MDM.id('tab');
+  let tabId = null;                     // lazy: no MDM.* call at load time (SPEC §4.1)
+  function getTabId() { return tabId || (tabId = MDM.id('tab')); }
   let readyResolve; const ready = new Promise(r => { readyResolve = r; });
   let readyState = 'booting';
   let seedBuilder = null;
@@ -116,10 +118,10 @@
   }
   let channel = null;
   function broadcast(msg) {
-    if (channel) { try { channel.postMessage(Object.assign({ v: 1, tabId }, msg)); } catch (e) { /* channel closed */ } }
+    if (channel) { try { channel.postMessage(Object.assign({ v: 1, tabId: getTabId() }, msg)); } catch (e) { /* channel closed */ } }
   }
   function onRemote(msg) {
-    if (!msg || msg.tabId === tabId) return;
+    if (!msg || msg.tabId === getTabId()) return;
     if (msg.op === 'reset') { invalidateAll(); schedule('*', null, 'reset', 'remote'); COLLECTIONS.forEach(c => schedule(c, null, 'reset', 'remote')); schedule('settings', null, 'reset', 'remote'); return; }
     if (msg.collection === 'settings') { settingsCache = null; schedule('settings', null, 'update', 'remote'); return; }
     if (msg.collection) { cache[msg.collection] = undefined; schedule(msg.collection, msg.id, msg.op, 'remote'); }
@@ -473,7 +475,9 @@
     } else if (p.status === 'failed') {
       s.status = 'failed'; s.failReason = p.failReason || 'no_answer'; s.note = p.note || ''; s.failedAt = now();
       const r = MDM.FAIL_REASONS.find(x => x.value === s.failReason);
-      pushEvent(o, makeEvent('stop_failed', "Couldn't complete " + s.label.toLowerCase() + ': ' + (r ? r.label.toLowerCase() : s.failReason) + (p.note ? ' (' + p.note + ')' : ''), by, 'public', { stopId }));
+      // The customer sees the reason in words only; the rider's free-text note is an internal event (admin Activity and the stop row).
+      pushEvent(o, makeEvent('stop_failed', "Couldn't complete " + s.label.toLowerCase() + ': ' + (r ? r.label.toLowerCase() : s.failReason), by, 'public', { stopId }));
+      if (p.note) pushEvent(o, makeEvent('note', 'Rider note: ' + p.note, by, 'internal', { stopId }));
       o.status = 'on_hold';
     } else if (p.status === 'pending') {
       s.status = 'pending'; s.attempts = (s.attempts || 0) + 1; s.failReason = null;
@@ -565,7 +569,7 @@
     get: P(get), list: P(list), insert: P(insert), update: P(update), remove: P(remove),
     settings: P(settings), saveSettings: P(saveSettings), subscribe,
     reset: P(reset), exportJSON: P(exportJSON), importJSON: P(importJSON),
-    _boot: boot, _tabId: tabId,
+    _boot: boot, get _tabId() { return getTabId(); },
     transition: P(transition), addEvent: P(addEvent), addNote: P(addNote), addAdjustment: P(addAdjustment), sendQuote: P(sendQuote),
     verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), cancel: P(cancel), recordRefund: P(recordRefund), markSettled: P(markSettled),
     assignDriver: P(assignDriver), startRoute: P(startRoute), setStop: P(setStop), retryStop: P(retryStop), returnToSender: P(returnToSender),

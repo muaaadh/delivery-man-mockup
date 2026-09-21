@@ -18,6 +18,35 @@
     return a !== b;
   }
 
+  // feeContext(packages, service) → which packages attract the airport and cargo fees and why. Reasons come in two forms: the
+  // generic one the request panel prints while the draft is still being edited ('drop-off at the airport', 'pickup at a terminal')
+  // and the named place for a saved order ('drop-off at Arrivals hall', 'drop-off at Malé North Harbour'). Business orders carry no fees.
+  function feeContext(packages, service) {
+    const ctx = { airportCount: 0, cargoCount: 0, airportReasons: [], airportPlaces: [], cargoReasons: [], cargoPlaces: [] };
+    if (service === 'business') return ctx;
+    (packages || []).forEach(pkg => {
+      const pz = pickupZoneOf(pkg, service), dz = dropZoneOf(pkg);
+      if (pz === 'airport' || dz === 'airport') {
+        const atPickup = pz === 'airport', end = (atPickup ? pkg.pickup : pkg.dropoff) || {};
+        const point = MDM.geo.airportPoints().find(p => p.value === end.meetAt);
+        ctx.airportCount += 1;
+        ctx.airportReasons.push(atPickup ? 'pickup at the airport' : 'drop-off at the airport');
+        ctx.airportPlaces.push((atPickup ? 'pickup at ' : 'drop-off at ') + (point ? point.label : 'the airport'));
+      }
+      const cargoPickup = !!(pkg.pickup && pkg.pickup.cargo), cargoDrop = !!(pkg.dropoff && pkg.dropoff.cargo);
+      if (cargoPickup || cargoDrop) {
+        const end = cargoPickup ? pkg.pickup : pkg.dropoff;
+        const terminal = MDM.geo.terminals().find(t => t.value === (end.cargo && end.cargo.terminal));
+        ctx.cargoCount += 1;
+        ctx.cargoReasons.push((cargoPickup ? 'pickup' : 'drop-off') + ' at a terminal');
+        ctx.cargoPlaces.push((cargoPickup ? 'pickup at ' : 'drop-off at ') + (terminal ? terminal.label : 'a terminal'));
+      }
+    });
+    return ctx;
+  }
+  function cargoLabel(count, rules) { return 'Cargo fee' + (count > 1 && rules.cargoFeePer !== 'order' ? ' × ' + count : ''); }
+  function shoppingLabel(rates) { const pct = Number(rates.shoppingPct) || 0; return 'Shopping fee' + (pct ? ' ' + pct + '%' : ''); }
+
   // quote(draft, settings) → { packages, fees, totals, feeLines }
   function quote(draft, settings) {
     const s = settings || {};
@@ -25,8 +54,8 @@
     const service = draft.service || 'pick';
     const reasons = new Set();
     const feeLines = [];
-    let airportCount = 0, cargoCount = 0, shopping = 0, budget = 0;
-    const airportReasons = [], cargoReasons = [];
+    let shopping = 0, budget = 0;
+    const { airportCount, cargoCount, airportReasons, cargoReasons } = feeContext(draft.packages, service);
 
     const packages = (draft.packages || []).map((pkg, i) => {
       const size = SIZES[pkg.size] ? pkg.size : 'bag';
@@ -43,15 +72,10 @@
       if (pkg.needsVehicle) reasons.add('vehicle');
       if (island(pz) === 'villimale' || island(dz) === 'villimale') reasons.add('villimale');
       if (pz === 'other' || dz === 'other') reasons.add('other_zone');
-      if (service !== 'business') {
-        if (pz === 'airport' || dz === 'airport') { airportCount += 1; airportReasons.push(pz === 'airport' ? 'pickup at the airport' : 'drop-off at the airport'); }
-        const cargoAt = (pkg.pickup && pkg.pickup.cargo) ? 'pickup' : null, cargoDrop = (pkg.dropoff && pkg.dropoff.cargo) ? 'drop-off' : null;
-        if (cargoAt || cargoDrop) { cargoCount += 1; cargoReasons.push((cargoAt ? 'pickup' : 'drop-off') + ' at a terminal'); }
-        if (service === 'shop' && pkg.shop) {
-          const base = pkg.shop.receiptTotal != null && pkg.shop.receiptTotal > 0 ? round(pkg.shop.receiptTotal) : round(pkg.shop.budget);
-          budget += base;
-          shopping += round(base * (Number(rates.shoppingPct) || 0) / 100);
-        }
+      if (service === 'shop' && pkg.shop) {
+        const base = pkg.shop.receiptTotal != null && pkg.shop.receiptTotal > 0 ? round(pkg.shop.receiptTotal) : round(pkg.shop.budget);
+        budget += base;
+        shopping += round(base * (Number(rates.shoppingPct) || 0) / 100);
       }
       return Object.assign({}, pkg, { size, price: { same: round(cell.same), cross: round(cell.cross), crossIsland: cross, businessRate, lineTotal } });
     });
@@ -59,8 +83,8 @@
     const airportFee = service === 'business' ? 0 : round(rates.airport) * (airportCount ? (rules.airportFeePer === 'package' ? airportCount : 1) : 0);
     const cargoFee = service === 'business' ? 0 : round(rates.cargo) * (cargoCount ? (rules.cargoFeePer === 'order' ? 1 : cargoCount) : 0);
     if (airportFee) feeLines.push({ key: 'airport', label: 'Airport fee', amount: airportFee, reason: airportReasons[0] || '' });
-    if (cargoFee) feeLines.push({ key: 'cargo', label: 'Cargo fee' + (cargoCount > 1 && rules.cargoFeePer !== 'order' ? ' × ' + cargoCount : ''), amount: cargoFee, reason: cargoReasons[0] || '' });
-    if (shopping) feeLines.push({ key: 'shopping', label: 'Shopping fee ' + (Number(rates.shoppingPct) || 0) + '%', amount: shopping, reason: 'of the shopping budget' });
+    if (cargoFee) feeLines.push({ key: 'cargo', label: cargoLabel(cargoCount, rules), amount: cargoFee, reason: cargoReasons[0] || '' });
+    if (shopping) feeLines.push({ key: 'shopping', label: shoppingLabel(rates), amount: shopping, reason: 'of the shopping budget' });
 
     const fees = { cargo: cargoFee, airport: airportFee, shopping, adjustments: [] };
     const packagesTotal = packages.reduce((n, p) => n + p.price.lineTotal, 0);
@@ -90,12 +114,19 @@
     return order;
   }
 
-  // feeLines(order) → the fee rows to render for a stored order (same shape as quote().feeLines, plus adjustments as their own rows).
-  function feeLines(order) {
+  // feeLines(order, settings?) → the fee rows to render for a stored order (same shape as quote().feeLines, plus adjustments as their
+  // own rows). Amounts are the frozen order.fees, never recomputed; settings only shape the labels ('Cargo fee × 2', 'Shopping fee 10%')
+  // and the reasons name the saved meeting point or terminal ('drop-off at Arrivals hall').
+  function feeLines(order, settings) {
+    const s = settings || {}; const rates = s.rates || {}, rules = s.rules || {};
     const f = order.fees || {}; const out = [];
-    if (f.airport) out.push({ key: 'airport', label: 'Airport fee', amount: f.airport, reason: '' });
-    if (f.cargo) out.push({ key: 'cargo', label: 'Cargo fee', amount: f.cargo, reason: '' });
-    if (f.shopping) out.push({ key: 'shopping', label: 'Shopping fee', amount: f.shopping, reason: '' });
+    const ctx = feeContext(order.packages, order.service);
+    if (f.airport) out.push({ key: 'airport', label: 'Airport fee', amount: f.airport, reason: ctx.airportPlaces[0] || ctx.airportReasons[0] || '' });
+    if (f.cargo) out.push({ key: 'cargo', label: cargoLabel(ctx.cargoCount, rules), amount: f.cargo, reason: ctx.cargoPlaces[0] || ctx.cargoReasons[0] || '' });
+    if (f.shopping) {
+      const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0);
+      out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? 'of the receipt' : 'of the shopping budget' });
+    }
     (f.adjustments || []).forEach(a => out.push({ key: 'adjustment', id: a.id, label: a.label, amount: a.amount, reason: '', preset: a.preset }));
     return out;
   }
