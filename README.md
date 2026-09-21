@@ -8,7 +8,9 @@ clicked through end to end.
 
 | Surface | URL | Notes |
 | --- | --- | --- |
-| Home | `/` | Services, the client's rate card, how it works, coverage map |
+| Home | `/` | Marketing page: sign-in card, at-a-glance rates, services, how it works, coverage map |
+| Sign in | `/login/` | Customers by mobile number + one-time code (any 4 digits in the demo), riders by name + PIN, admin `admin` / `delivery` |
+| My orders | `/account/` | The signed-in customer's orders with pay/track actions and saved addresses |
 | Request a delivery | `/request/` | Pick & deliver / Shop & deliver, multi-package cart, schedule, review with live pricing |
 | Checkout | `/checkout/?order=…` | Bank transfer details, slip upload (image/PDF), submit for verification |
 | Track an order | `/track/?code=MDM-1038` | Live rider on the map, stops, ETA, timeline. MDM-1038 is always on the way (demo autopilot) |

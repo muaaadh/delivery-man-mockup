@@ -14,8 +14,9 @@
     { label: 'Track an order', href: 'track/' },
     { label: 'For businesses', href: 'business/' },
     { label: 'Rates', href: '#rates' },
-    { label: 'Rider console', href: 'driver/' },
-    { label: 'Admin', href: 'admin/' },
+    { label: 'Sign in', href: 'login/' },
+    { label: 'Rider sign-in', href: 'login/?as=rider' },
+    { label: 'Admin', href: 'login/?as=admin' },
   ];
   const ADMIN_NAV = [
     { view: 'overview', label: 'Overview', icon: 'dashboard' },
@@ -144,10 +145,16 @@
       if (item.page && item.page === page) a.setAttribute('aria-current', 'page');
       nav.appendChild(a);
     });
+    // Signed-in customers (localStorage mdm:me) get "My orders" where visitors get "Sign in".
+    let me = null; try { me = JSON.parse(localStorage.getItem('mdm:me') || 'null'); } catch (e) { me = null; }
+    const account = () => me && me.phone
+      ? el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href('account/'), 'aria-current': page === 'account' ? 'page' : null }, 'My orders')
+      : el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href('login/'), 'aria-current': page === 'login' ? 'page' : null }, 'Sign in');
+    nav.appendChild(account());
     nav.appendChild(el('a', { class: 'btn btn--primary site-nav__cta', href: MDM.href('request/') }, 'Request a delivery'));
     const toggle = el('button', { type: 'button', class: 'btn btn--ghost btn--icon site-header__toggle', 'aria-expanded': 'false', 'aria-controls': 'site-nav', 'aria-label': 'Menu' }, iconNode('menu', 20));
     const actions = el('div', { class: 'site-header__actions' },
-      el('a', { class: 'btn btn--primary', href: MDM.href('request/') }, 'Request a delivery'), toggle);
+      account(), el('a', { class: 'btn btn--primary', href: MDM.href('request/') }, 'Request a delivery'), toggle);
     header.appendChild(el('div', { class: 'container' }, brandLink(MDM.href('')), nav, actions));
 
     let open = false;

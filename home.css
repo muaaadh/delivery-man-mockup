@@ -2,9 +2,21 @@
 
 /* Headline block: max-width 640px, hours line under the buttons. The page-head's own bottom margin is dropped because
    the section gap already follows it. */
-body.page-home .home-top { max-width: 640px; }
-body.page-home .home-top .page-head { margin-bottom: 0; }
+body.page-home .home-hero { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 48px; align-items: start; padding-top: 56px; }
+body.page-home .home-hero__title { font-size: 36px; letter-spacing: -.015em; line-height: 1.15; max-width: 14ch; }
+body.page-home .home-hero__lead { margin-top: 16px; font-size: 17px; line-height: 1.5; color: var(--text-2); max-width: 46ch; }
+body.page-home .home-hero__actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
 body.page-home .home-hours { margin-top: 16px; min-height: 18px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-home .home-signin { margin-top: 4px; }
+body.page-home .home-signin__title { font-size: 17px; }
+body.page-home .home-signin__text { margin-top: 6px; margin-bottom: 16px; font-size: 14px; color: var(--text-2); }
+body.page-home .home-signin__btn { margin-top: 14px; }
+body.page-home .home-signin__links { margin-top: 14px; font-size: 13px; color: var(--text-2); }
+body.page-home .home-glance { margin-top: 48px; margin-bottom: 56px; }
+body.page-home .home-glance .kpi__value { font-size: 20px; }
+body.page-home .home-glance .kpi__note { white-space: normal; }
+body.page-home .home-glance + .section { margin-top: 0; }
+body.page-home .home-logins .home-service { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); grid-template-areas: "title body"; }
 
 /* "What we do": rows separated by 1px borders. Desktop: name | sentence and link | price. Mobile: name and price on one line,
    then the sentence. Same DOM at both widths, placed through grid areas. */
@@ -18,7 +30,7 @@ body.page-home .home-service__price { grid-area: price; text-align: right; white
 body.page-home .home-service__price small { display: block; font-weight: 400; color: var(--text-2); white-space: normal; }
 
 /* Rates: the label · value table reads best at a form-like width. */
-body.page-home .home-rates { max-width: 640px; }
+body.page-home .home-rates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 40px; align-items: start; }
 body.page-home .home-rates__note { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
 body.page-home .home-rates__note + .rate-table { margin-top: 12px; }
 
@@ -26,7 +38,16 @@ body.page-home .home-rates__note + .rate-table { margin-top: 12px; }
 body.page-home .map-legend i.corridor { width: 18px; height: 3px; border-radius: 0; background: var(--brand); opacity: .4; }
 body.page-home .home-coverage__text { margin-top: 12px; color: var(--text-2); }
 
+@media (max-width: 960px) {
+  body.page-home .home-hero { grid-template-columns: 1fr; gap: 32px; padding-top: 32px; }
+  body.page-home .home-signin { max-width: 440px; }
+  body.page-home .home-rates { grid-template-columns: 1fr; }
+}
 @media (max-width: 720px) {
+  body.page-home .home-hero__title { font-size: 28px; }
+  body.page-home .home-hero__lead { font-size: 15px; }
+  body.page-home .home-glance { margin-top: 32px; margin-bottom: 40px; }
+  body.page-home .home-logins .home-service { grid-template-columns: 1fr; grid-template-areas: "title" "body"; }
   body.page-home .home-service { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title price" "body body"; gap: 8px 16px; padding: 16px 0; }
   body.page-home .home-service__price small { text-align: right; }
 }

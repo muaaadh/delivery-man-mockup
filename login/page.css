@@ -1,0 +1,5 @@
+/* Sign-in page: one narrow column, the role switch above three small forms. */
+body.page-login .login-form { max-width: 420px; margin-top: 24px; }
+body.page-login .login-form .field + .field { margin-top: 16px; }
+body.page-login .login-actions { margin-top: 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+body.page-login .login-note { margin-top: 16px; }

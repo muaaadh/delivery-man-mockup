@@ -43,6 +43,11 @@
     setText('home-fee-business', fmt(rates.business) + ' per package');
 
     setText('home-review-time', ops.reviewText ? ', usually in ' + ops.reviewText : '');
+    setText('home-glance-bag', 'from ' + fmt(sizes.bag ? sizes.bag.same : 0));
+    setText('home-glance-box', 'from ' + fmt(sizes.box ? sizes.box.same : 0));
+    setText('home-glance-xl', 'from ' + fmt(sizes.xl ? sizes.xl.same : 0));
+    const mins = /(\d+\s*to\s*\d+)\s*minutes/.exec(ops.asapText || '');
+    setText('home-glance-time', mins ? mins[1] + ' min' : 'Same day');
   }
 
   // ---- Coverage map: zone labels as point markers, the Malé → Hulhumalé corridor at 35% opacity, fitted to the zones ------

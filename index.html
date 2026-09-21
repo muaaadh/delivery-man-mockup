@@ -33,17 +33,37 @@
 <main id="main">
   <div class="container">
 
-    <section id="top" class="section home-top" aria-labelledby="top-title">
-      <div class="page-head page-head--stack">
-        <h1 id="top-title">Delivery within Greater Malé</h1>
-        <p class="page-head__desc">Bags, boxes and shopping runs across Malé, Hulhumalé and the airport. Pay by bank transfer, then follow your rider live until it is delivered.</p>
-        <div class="page-head__actions">
-          <a class="btn btn--primary" href="./request/" data-testid="home-request">Request a delivery</a>
-          <a class="btn btn--secondary" href="./track/" data-testid="home-track">Track an order</a>
+    <section id="top" class="section home-hero" aria-labelledby="top-title">
+      <div class="home-hero__text">
+        <h1 id="top-title" class="home-hero__title">Delivery within Greater Malé</h1>
+        <p class="home-hero__lead">Bags, boxes and shopping runs across Malé, Hulhumalé and the airport. Pay by bank transfer, then follow your rider live until it is delivered.</p>
+        <div class="home-hero__actions">
+          <a class="btn btn--primary btn--lg" href="./request/" data-testid="home-request">Request a delivery</a>
+          <a class="btn btn--secondary btn--lg" href="./track/" data-testid="home-track">Track an order</a>
         </div>
         <p class="home-hours" data-testid="home-hours"></p>
       </div>
+      <form class="card home-signin" action="./login/" method="get" data-testid="home-signin">
+        <input type="hidden" name="as" value="customer">
+        <div class="card__body">
+          <h2 class="home-signin__title">Sign in</h2>
+          <p class="home-signin__text">Customers sign in with the mobile number they order with. We send a one-time code, no password needed.</p>
+          <div class="field">
+            <label for="home-phone">Mobile number</label>
+            <input class="input" id="home-phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="7XX XXXX" data-testid="home-signin-phone">
+          </div>
+          <button type="submit" class="btn btn--primary btn--block home-signin__btn" data-testid="home-signin-continue">Continue</button>
+          <p class="home-signin__links"><a href="./login/?as=rider">Rider sign-in</a> · <a href="./login/?as=admin">Admin sign-in</a></p>
+        </div>
+      </form>
     </section>
+
+    <div class="card kpi-row home-glance" data-testid="home-glance">
+      <div class="kpi"><div class="kpi__label">Bags</div><div class="kpi__value" data-testid="home-glance-bag"></div><div class="kpi__note">documents, food, small parcels</div></div>
+      <div class="kpi"><div class="kpi__label">Boxes</div><div class="kpi__value" data-testid="home-glance-box"></div><div class="kpi__note">cartons up to about 1 ft</div></div>
+      <div class="kpi"><div class="kpi__label">XL packages</div><div class="kpi__value" data-testid="home-glance-xl"></div><div class="kpi__note">price confirmed before pickup</div></div>
+      <div class="kpi"><div class="kpi__label">Delivery time</div><div class="kpi__value home-glance__time" data-testid="home-glance-time"></div><div class="kpi__note">in Malé and Hulhumalé</div></div>
+    </div>
 
     <section id="services" class="section" aria-labelledby="services-title">
       <div class="section-head">
@@ -83,6 +103,7 @@
         <p class="section-head__desc">By package size, within Malé and Hulhumalé.</p>
       </div>
       <div class="home-rates">
+        <div class="home-rates__col">
         <div class="rate-table" data-testid="home-rates">
           <div class="rate-table__row rate-table__row--head">Package size</div>
           <div class="rate-table__row">
@@ -99,6 +120,8 @@
           </div>
         </div>
         <p class="home-rates__note" data-testid="home-rates-note">Lower figure within one island, higher figure when we cross the bridge.</p>
+        </div>
+        <div class="home-rates__col">
         <div class="rate-table" data-testid="home-fees">
           <div class="rate-table__row rate-table__row--head">Fees</div>
           <div class="rate-table__row">
@@ -123,6 +146,7 @@
           </div>
         </div>
         <p class="home-rates__note">Prices in Maldivian Rufiyaa.</p>
+        </div>
       </div>
     </section>
 
@@ -159,6 +183,35 @@
       </div>
       <div class="map-legend" data-testid="home-map-legend"><span><i class="corridor"></i>Sinamalé Bridge corridor, Malé to Hulhumalé</span></div>
       <p class="home-coverage__text" data-testid="home-coverage-text">Malé, Hulhumalé Phase 1 and Phase 2 and Velana International Airport, plus Villimalé by ferry and any other island on request, both quoted before pickup.</p>
+    </section>
+
+    <section id="signin" class="section" aria-labelledby="signin-title">
+      <div class="section-head">
+        <h2 id="signin-title">Already with us? Sign in</h2>
+      </div>
+      <ul class="home-services home-logins">
+        <li class="home-service">
+          <h3 class="home-service__title">Customers</h3>
+          <div class="home-service__body">
+            <p class="home-service__text">See every order, pay a pending one and track the rider, with the mobile number you order with.</p>
+            <a class="home-service__link" href="./login/?as=customer">Sign in with your number</a>
+          </div>
+        </li>
+        <li class="home-service">
+          <h3 class="home-service__title">Riders</h3>
+          <div class="home-service__body">
+            <p class="home-service__text">Today's stops in route order, one tap per stop, live location shared with the office and the customer.</p>
+            <a class="home-service__link" href="./login/?as=rider">Rider sign-in</a>
+          </div>
+        </li>
+        <li class="home-service">
+          <h3 class="home-service__title">Office</h3>
+          <div class="home-service__body">
+            <p class="home-service__text">Verify transfers, assign riders, follow the live map, and invoice business accounts.</p>
+            <a class="home-service__link" href="./login/?as=admin">Admin sign-in</a>
+          </div>
+        </li>
+      </ul>
     </section>
 
   </div>
