@@ -90,7 +90,7 @@
     MDM.live.onPosition(o.driverId, p => { if (!demo.marker) demo.marker = MDM.map.driverMarker(map, p, demo.driver); else demo.marker.moveTo(p, 1000); updateEta(p); });
   }
 
-  // Scrubbed hero: as the page scrolls, the yellow stage widens to full width and the phone rises through it.
+  // Scrubbed hero: as the page scrolls, the red stage widens to full width and the phone rises through it.
   function heroScene() {
     const stage = document.querySelector('.hero__stage');
     if (!stage) return;

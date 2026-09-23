@@ -51,8 +51,9 @@
     node.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
   }
   function iconNode(name, size) { const s = el('span', { class: 'icon-wrap', html: MDM.icon(name, size || 16) }); return s.firstChild; }
-  // The mark: a yellow tile with the M drawn as a delivery route that ends in a drop-off dot.
-  const MARK = '<svg class="brand__mark" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false"><rect width="32" height="32" rx="8" fill="#FFD100"/><path d="M8.5 22.5V10.5l7.5 8 7.5-8v7.2" fill="none" stroke="#111114" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="23.5" cy="22.6" r="2.5" fill="#111114"/></svg>';
+  // The mark: the client's rider (traced from their logo) in white on a brand-red tile.
+  const RIDER = '<svg viewBox="226 99 640 520" aria-hidden="true" focusable="false"><g transform="translate(0,1080) scale(0.1,-0.1)" fill="currentColor"><path d="M5057 9556 c-239 -69 -387 -285 -349 -508 19 -107 94 -239 160 -279 28 -18 701 -199 763 -207 34 -4 38 -1 69 48 43 66 78 155 82 205 l3 40 -50 -3 c-119 -8 -301 62 -403 153 -54 49 -92 109 -77 124 8 8 409 51 470 51 23 0 18 35 -14 98 -58 114 -166 208 -299 259 -83 32 -275 42 -355 19z M3803 9365 c-90 -38 -243 -245 -243 -329 0 -18 2 -17 19 9 50 82 130 109 175 60 29 -31 38 -28 71 25 20 31 26 58 31 132 8 110 0 125 -53 103z M3832 9069 c-122 -170 -150 -215 -140 -224 24 -22 827 -565 835 -565 12 1 278 397 278 414 0 15 -773 575 -805 583 -10 3 -65 -66 -168 -208z M6300 8791 l-65 -6 -38 -75 c-64 -127 -97 -367 -68 -493 13 -53 13 -53 83 -22 433 190 461 200 540 185 177 -34 229 -229 85 -314 -44 -27 -67 -21 -67 16 0 36 -54 78 -100 78 -107 0 -161 -83 -108 -168 l22 -35 -27 -21 c-15 -12 -142 -77 -281 -145 l-255 -124 -377 113 -376 113 -90 -7 c-49 -4 -102 -9 -118 -12 -23 -5 -150 -104 -158 -124 -2 -6 42 -24 375 -150 223 -85 317 -179 316 -316 -1 -92 -31 -145 -206 -362 -86 -106 -159 -198 -163 -204 -10 -15 -32 -23 561 192 292 105 559 202 595 214 l65 23 17 72 c9 40 18 75 21 77 2 2 40 -14 84 -36 l81 -40 271 98 c149 53 271 100 271 104 0 3 -48 32 -107 64 -246 130 -393 217 -393 231 0 111 349 308 760 428 69 20 131 39 138 41 50 15 -124 226 -275 333 -289 206 -652 304 -1013 272z M3320 8694 c-129 -53 -390 -158 -580 -235 -190 -76 -345 -142 -344 -146 0 -5 34 -17 75 -28 89 -25 95 -38 44 -101 -21 -25 -35 -47 -32 -50 2 -3 161 68 353 157 192 89 400 184 461 212 l113 50 80 113 c79 111 87 125 73 123 -5 0 -114 -43 -243 -95z M3355 8408 l-139 -191 32 -27 c50 -42 810 -580 819 -580 4 0 24 24 44 53 19 28 79 116 133 194 53 79 95 147 92 152 -3 5 -104 78 -223 162 -120 84 -305 215 -412 291 -107 76 -197 138 -201 138 -4 0 -69 -86 -145 -192z M7465 7809 c-88 -13 -191 -46 -266 -85 -67 -35 -180 -120 -186 -140 -2 -5 81 -57 184 -113 l187 -104 66 16 c144 36 220 30 336 -28 375 -184 313 -734 -93 -840 -243 -63 -507 103 -552 347 -11 65 -13 66 -158 137 -70 34 -135 67 -143 72 -8 5 -31 18 -51 29 l-37 19 -7 -26 c-3 -14 -6 -71 -6 -127 -1 -625 657 -1034 1216 -757 524 259 637 938 227 1358 -176 179 -471 279 -717 242z M3920 7500 c-113 -20 -775 -128 -1008 -165 -160 -25 -192 -42 -192 -99 0 -74 -43 -55 999 -450 91 -35 169 -70 175 -78 9 -15 -103 -294 -195 -486 -17 -35 -29 -66 -26 -68 2 -3 47 11 98 30 52 19 202 74 334 121 132 47 260 93 285 102 53 19 70 37 70 73 0 94 35 147 299 450 l153 175 -234 6 c-128 3 -247 10 -263 16 -140 48 -237 149 -301 317 -33 89 -22 85 -194 56z M7218 7167 c-141 -51 -259 -95 -263 -98 -3 -4 127 -73 289 -155 329 -166 352 -172 444 -125 116 59 137 235 39 328 -36 35 -219 143 -239 142 -7 0 -129 -42 -270 -92z M6370 6865 c-36 -13 -263 -94 -505 -180 -615 -218 -719 -256 -728 -265 -5 -4 18 -44 51 -89 78 -105 88 -133 66 -197 -20 -60 -79 -154 -96 -154 -7 0 -121 61 -253 135 -132 74 -246 135 -253 135 -18 0 -1068 -371 -1100 -389 -26 -15 -111 -219 -112 -269 -1 -118 110 -215 247 -216 94 -1 119 24 223 224 l85 163 235 88 c129 49 245 88 257 89 12 0 105 -45 206 -100 100 -55 193 -100 205 -100 20 0 234 74 842 290 157 55 408 145 558 198 249 88 273 98 268 117 -2 11 -21 64 -40 118 -33 90 -64 228 -83 368 l-8 57 -65 -23z M3454 6440 c-541 -142 -814 -720 -574 -1216 195 -403 673 -589 1095 -425 271 105 475 354 531 649 25 131 6 368 -34 438 -6 10 -272 -78 -378 -125 -20 -9 -20 -11 -6 -82 37 -185 -61 -376 -237 -462 -98 -47 -263 -48 -361 -1 -298 143 -337 535 -71 734 29 22 70 45 92 51 21 7 45 19 52 28 15 17 187 406 187 421 0 18 -219 10 -296 -10z"/></g></svg>';
+  const MARK = '<span class="brand__mark">' + RIDER + '</span>';
   function logo() { return MARK + '<span class="brand__word">' + BRAND + '</span>'; }
   function brandLink(href) { return el('a', { class: 'brand', href, 'aria-label': BRAND + ', home', html: logo() }); }
 
@@ -133,6 +134,38 @@
     return 'Open today ' + open + ' to ' + close + ' · Malé and Hulhumalé';
   }
 
+  // ---- Theme: light / dark, remembered per device; the inline <head> snippet applies it before first paint ----------
+  const THEME_KEY = 'mdm:theme';
+  function storedTheme() { try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; } }
+  function systemTheme() { return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+  function currentTheme() { return document.documentElement.dataset.theme || storedTheme() || systemTheme(); }
+  function applyTheme(t, persist) {
+    document.documentElement.dataset.theme = t;
+    if (persist) { try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* private mode: applies for this page only */ } }
+    const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = t === 'dark' ? '#000000' : '#ffffff';
+    document.querySelectorAll('[data-theme-toggle]').forEach(syncToggle);
+    window.dispatchEvent(new CustomEvent('mdm:theme', { detail: { theme: t } }));
+  }
+  function syncToggle(btn) {
+    const dark = currentTheme() === 'dark';
+    btn.innerHTML = MDM.icon(dark ? 'sun' : 'moon', 18);
+    btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    btn.title = dark ? 'Light mode' : 'Dark mode';
+  }
+  function themeToggle(extraClass) {
+    const btn = el('button', { type: 'button', class: 'btn btn--ghost btn--icon theme-toggle' + (extraClass ? ' ' + extraClass : ''), 'data-theme-toggle': '', 'data-testid': 'theme-toggle',
+      on: { click: () => applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true) } });
+    syncToggle(btn);
+    return btn;
+  }
+  if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const follow = () => { if (!storedTheme()) applyTheme(systemTheme(), false); };
+    if (mq.addEventListener) mq.addEventListener('change', follow); else if (mq.addListener) mq.addListener(follow);
+  }
+  if (!document.documentElement.dataset.theme) document.documentElement.dataset.theme = currentTheme();
+
   // ---- Public header ------------------------------------------------------------------------------------------------------
   function renderHeader(header) {
     header.classList.add('site-header');
@@ -150,10 +183,10 @@
       ? el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href('account/'), 'aria-current': page === 'account' ? 'page' : null }, 'My orders')
       : el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href('login/'), 'aria-current': page === 'login' ? 'page' : null }, 'Sign in');
     nav.appendChild(account());
-    nav.appendChild(el('a', { class: 'btn btn--primary site-nav__cta', href: MDM.href('request/') }, 'Request a delivery'));
+    nav.appendChild(el('a', { class: 'btn btn--brand site-nav__cta', href: MDM.href('request/') }, 'Request a delivery'));
     const toggle = el('button', { type: 'button', class: 'btn btn--ghost btn--icon site-header__toggle', 'aria-expanded': 'false', 'aria-controls': 'site-nav', 'aria-label': 'Menu' }, iconNode('menu', 20));
     const actions = el('div', { class: 'site-header__actions' },
-      account(), el('a', { class: 'btn btn--primary', href: MDM.href('request/') }, 'Request a delivery'), toggle);
+      themeToggle(), account(), el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, 'Request a delivery'), toggle);
     header.appendChild(el('div', { class: 'container' }, brandLink(MDM.href('')), nav, actions));
 
     let open = false;
@@ -194,7 +227,7 @@
     if (c.viber) reach.appendChild(el('a', { class: 'btn btn--on-dark btn--sm', href: c.viber }, 'Viber'));
     if (c.tel) reach.appendChild(el('a', { class: 'btn btn--on-dark btn--sm', href: c.tel }, iconNode('phone', 16), c.display));
     const about = el('div', { class: 'site-footer__about' },
-      brandLink(MDM.href('')),
+      el('a', { class: 'site-footer__logo', href: MDM.href(''), 'aria-label': BRAND + ', home' }, el('img', { src: MDM.href('assets/logo-full.svg'), alt: BRAND, width: '88', height: '88' })),
       el('p', { class: 'site-footer__tagline' }, 'We pick & deliver, we shop & deliver, and we deliver for businesses across Malé, Hulhumalé and the airport.'),
       reach,
       el('p', { class: 'site-footer__hours', 'data-shell': 'hours' }, hoursLine(s)),
@@ -302,7 +335,7 @@
       iconNode('search', 16), search);
     admin.riders = el('a', { class: 'topbar__live', href: MDM.href('admin/#/live'), 'data-testid': 'topbar-riders' }, el('span', { class: 'topbar__dot', 'aria-hidden': 'true' }), el('span', { class: 'topbar__live-text' }, 'Riders'));
     const newOrder = el('button', { type: 'button', class: 'btn btn--primary topbar__new', 'data-testid': 'topbar-new-order', on: { click: openNewOrder } }, iconNode('plus', 16), el('span', { class: 'topbar__new-label' }, 'New order'));
-    admin.topbar = el('div', { class: 'topbar' }, admin.menu, admin.title, searchForm, el('div', { class: 'topbar__actions' }, admin.riders, newOrder));
+    admin.topbar = el('div', { class: 'topbar' }, admin.menu, admin.title, searchForm, el('div', { class: 'topbar__actions' }, admin.riders, themeToggle(), newOrder));
     const mainWrap = el('div', { class: 'admin__main' }, admin.topbar, main);
     root.textContent = '';
     root.appendChild(admin.sidebar);
@@ -355,6 +388,7 @@
   }
 
   MDM.logo = logo;
+  MDM.theme = { get: currentTheme, set: t => applyTheme(t, true), toggle: () => applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true), toggleButton: themeToggle };
   MDM.shell = { mount, refresh, contactLinks, hoursLine, phoneDisplay, phoneLinks, setTitle, setCounts, setActive, setChrome, setSidebarOpen, el, BRAND };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { mount(); });
   else mount();

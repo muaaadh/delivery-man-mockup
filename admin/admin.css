@@ -51,8 +51,8 @@ body.page-admin .file-pick__name { font-size: 13px; color: var(--text-2); }
 
 /* KPI tiles: six separate cards with an icon chip, 3 across on laptops, 2 on phones. */
 body.page-admin .kpi-row { display: grid; grid-auto-flow: row; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; background: none; border: 0; border-radius: 0; overflow: visible; }
-body.page-admin .kpi { position: relative; padding: 18px 20px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-lg); }
-body.page-admin .kpi__icon { position: absolute; top: 16px; right: 16px; width: 34px; height: 34px; border-radius: 10px; background: var(--yellow-soft); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; }
+body.page-admin .kpi { position: relative; padding: 18px 20px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+body.page-admin .kpi__icon { position: absolute; top: 16px; right: 16px; width: 34px; height: 34px; border-radius: 10px; background: var(--red-soft); color: var(--red); display: inline-flex; align-items: center; justify-content: center; }
 body.page-admin .kpi__label { padding-right: 40px; }
 body.page-admin .kpi__value { font-size: 28px; margin-top: 10px; letter-spacing: -.01em; }
 body.page-admin .page-head h1 { font-size: 28px; }

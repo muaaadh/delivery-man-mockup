@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>(function(){try{var t=localStorage.getItem('mdm:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Delivery in Malé, Hulhumalé and the airport · Mr. Delivery Man</title>
 <meta name="description" content="We pick & deliver, we shop & deliver, and we deliver for businesses across Greater Malé. From MVR 35, pay by bank transfer, follow your rider live.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23FFD100'/%3E%3Cpath d='M8.5 22.5V10.5l7.5 8 7.5-8v7.2' fill='none' stroke='%23111114' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='23.5' cy='22.6' r='2.5' fill='%23111114'/%3E%3C/svg%3E">
+<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
@@ -41,7 +43,7 @@
       <h1 id="top-title" class="hero__title" data-split>We pick it up.<br>We shop for it.<br><span class="hero__mark">We deliver it.</span></h1>
       <p class="hero__lead" data-reveal style="--d:450ms">Door-to-door across Malé, Hulhumalé and the airport, from <span data-testid="home-hero-from">MVR 35</span>. Pay by transfer, then watch your rider on the map.</p>
       <div class="hero__actions" data-reveal style="--d:600ms">
-        <a class="btn btn--primary btn--lg btn--pill" href="./request/" data-testid="home-request">Request a delivery</a>
+        <a class="btn btn--brand btn--lg btn--pill" href="./request/" data-testid="home-request">Request a delivery</a>
         <a class="btn btn--secondary btn--lg btn--pill" href="./track/" data-testid="home-track">Track an order</a>
       </div>
     </div>
@@ -181,7 +183,7 @@
           </div>
           <p class="tile__price"><span data-testid="home-service-price-shop">From MVR 35</span> <small>plus the fee</small></p>
         </article>
-        <article class="tile tile--yellow" data-reveal data-testid="home-service-business">
+        <article class="tile tile--red" data-reveal data-testid="home-service-business">
           <h3>For businesses</h3>
           <p>Daily pickups from your shop or office, one invoice a month.</p>
           <p class="tile__big mono"><span data-count data-testid="home-service-price-business">MVR 25</span></p>
@@ -236,7 +238,7 @@
         <div class="biz__text">
           <h2 id="business-title">Sending every day?</h2>
           <p>For shops, bakeries and offices in Malé and Hulhumalé. We collect in the window you choose and bill you once a month, <span data-testid="home-due-days">due in 14 days</span>.</p>
-          <a class="btn btn--primary btn--lg btn--pill" href="./business/">Request a business account</a>
+          <a class="btn btn--brand btn--lg btn--pill" href="./business/">Request a business account</a>
         </div>
         <div class="biz__num">
           <p class="biz__big mono"><span class="biz__cur">MVR</span><span data-count data-testid="home-fee-business">25</span></p>
@@ -291,7 +293,7 @@
       <h2 id="contact-title" class="finale__title" data-split>Send something today.</h2>
       <p class="finale__lead" data-reveal style="--d:300ms">Request online in a minute, or message us and we will set it up for you.</p>
       <div class="finale__actions" data-testid="home-contact" data-reveal style="--d:420ms">
-        <a class="btn btn--primary btn--lg btn--pill" href="./request/">Request a delivery</a>
+        <a class="btn btn--brand btn--lg btn--pill" href="./request/">Request a delivery</a>
         <a class="btn btn--secondary btn--lg btn--pill" href="./track/" data-contact="whatsapp">WhatsApp us</a>
         <a class="btn btn--secondary btn--lg btn--pill" href="./track/" data-contact="tel">Call us</a>
       </div>

@@ -2,7 +2,25 @@
 // Internal coordinates are [lat, lng]; MapLibre wants [lng, lat], so conversion happens only inside this file.
 // Production note: nothing here depends on the store; swap the style URL or the routing source without touching pages.
 (function (MDM) { 'use strict';
-  const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
+  // Light and dark basemaps follow the site theme; our own layers (routes) are carried across a style swap.
+  const STYLES = { light: 'https://tiles.openfreemap.org/styles/positron', dark: 'https://tiles.openfreemap.org/styles/dark' };
+  const STYLE_URL = STYLES.light;
+  const ROUTE_COLOR = '#D2002F';
+  const live = new Set();
+  const themeStyle = () => STYLES[document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'];
+  function restyle(map) {
+    const url = themeStyle();
+    if (map.__style === url) return;
+    map.__style = url;
+    const own = map.__own || new Set();
+    map.setStyle(url, { transformStyle: (prev, next) => {
+      if (!prev) return next;
+      const sources = Object.assign({}, next.sources);
+      Object.keys(prev.sources || {}).forEach(id => { if (own.has(id)) sources[id] = prev.sources[id]; });
+      return Object.assign({}, next, { sources, layers: next.layers.concat((prev.layers || []).filter(l => own.has(l.id))) });
+    } });
+  }
+  window.addEventListener('mdm:theme', () => live.forEach(m => { try { restyle(m); } catch (e) { /* a map mid-teardown */ } }));
   const ll = p => Array.isArray(p) ? [p[1], p[0]] : [p.lng, p.lat];
 
   // create(el, { interactive=true, center=[lat,lng], zoom=12.4 }) → Promise<map>; rejects if MapLibre is missing, the style errors, or 6 s pass.
@@ -14,13 +32,14 @@
       let map;
       try {
         map = new maplibregl.Map({
-          container: node, style: STYLE_URL, center: ll(opts.center || MDM.geo.CENTER), zoom: opts.zoom == null ? 12.4 : opts.zoom,
+          container: node, style: themeStyle(), center: ll(opts.center || MDM.geo.CENTER), zoom: opts.zoom == null ? 12.4 : opts.zoom,
           interactive: opts.interactive !== false, attributionControl: false, scrollZoom: false, dragRotate: false, pitchWithRotate: false, touchPitch: false,
         });
       } catch (e) { return reject(e); }
       map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
       if (opts.interactive !== false) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       map.touchZoomRotate.disableRotation();
+      map.__style = themeStyle(); map.__own = new Set(); live.add(map); map.on('remove', () => live.delete(map));
       // One settle path: a failed instance is torn down here (canvas, worker, tile requests), because the caller never gets a handle
       // to destroy it and only shows .map__fallback on rejection (SPEC §4.5).
       let settled = false;
@@ -81,8 +100,9 @@
     if (map.getSource(id)) map.getSource(id).setData(data());
     else {
       map.addSource(id, { type: 'geojson', data: data() });
+      if (map.__own) map.__own.add(id);
       map.addLayer({ id, type: 'line', source: id, layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: Object.assign({ 'line-color': opts.color || '#0f6fde', 'line-width': opts.width || 3, 'line-opacity': opacity(opts.active) }, opts.dashed ? { 'line-dasharray': [1.5, 2] } : {}) });
+        paint: Object.assign({ 'line-color': opts.color || ROUTE_COLOR, 'line-width': opts.width || 3, 'line-opacity': opacity(opts.active) }, opts.dashed ? { 'line-dasharray': [1.5, 2] } : {}) });
     }
     return {
       update(p) { pl = p || []; if (map.getSource(id)) map.getSource(id).setData(data()); },
