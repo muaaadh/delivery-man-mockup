@@ -732,6 +732,34 @@ body.page-home .radio, body.page-request .radio, body.page-checkout .radio, body
   :is(body.page-request, body.page-checkout, body.page-track, body.page-business, body.page-driver, body.page-login, body.page-account) main .page-head h1 { font-size: 28px; }
 }
 
+/* ---------- Motion (js/motion.js) ---------- */
+:root { --ease-out: cubic-bezier(.16, 1, .3, 1); }
+html.motion [data-reveal] { opacity: 0; transform: translateY(20px); transition: opacity .9s var(--ease-out), transform 1s var(--ease-out); transition-delay: var(--d, 0ms); }
+html.motion [data-reveal="fade"] { transform: none; }
+html.motion [data-reveal="scale"] { transform: scale(.94); }
+html.motion [data-reveal].is-in { opacity: 1; transform: none; }
+.w { display: inline-block; overflow: hidden; vertical-align: bottom; padding-bottom: .14em; margin-bottom: -.14em; }
+.wi { display: inline-block; }
+html.motion [data-split] .wi { transform: translateY(108%); transition: transform 1s var(--ease-out); transition-delay: calc(var(--i, 0) * 55ms + var(--d, 0ms)); }
+html.motion [data-split].is-in .wi { transform: none; }
+[data-fill] .fw { color: #C8C8CE; transition: color .26s ease; }
+[data-fill] .fw.is-on { color: inherit; }
+html.reduce-motion [data-reveal], html.reduce-motion [data-split] .wi { opacity: 1 !important; transform: none !important; transition: none !important; }
+/* Inner pages: the title band settles in on load. */
+@keyframes rise-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+:is(body.page-request, body.page-checkout, body.page-track, body.page-business, body.page-driver, body.page-login, body.page-account) main .page-head > * { animation: rise-in .8s var(--ease-out) both; }
+:is(body.page-request, body.page-checkout, body.page-track, body.page-business, body.page-driver, body.page-login, body.page-account) main .page-head > * + * { animation-delay: .08s; }
+@media (prefers-reduced-motion: reduce) { main .page-head > * { animation: none !important; } }
+
+/* Frosted header and pill buttons (public pages). */
+.site-header { background: rgba(255, 255, 255, .78); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border-bottom-color: rgba(17, 17, 20, .08); }
+.btn--pill { border-radius: 999px; padding: 0 22px; }
+.btn--pill.btn--lg { padding: 0 28px; }
+.site-header .btn--primary { border-radius: 999px; padding: 0 18px; }
+@media (hover: hover) { .btn--primary:hover:not(:disabled) { background: #2a2a30; } }
+.btn { transition: background-color .2s ease, border-color .2s ease, color .2s ease, transform .2s var(--ease-out); }
+.btn:active:not(:disabled) { transform: scale(.97); }
+
 /* Admin sign-in screen on ink, card on top. */
 .auth { background: var(--ink); }
 .auth .auth__card { border-radius: 16px; border: 0; }
