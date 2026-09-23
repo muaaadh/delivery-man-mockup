@@ -5,28 +5,25 @@
   const BRAND = 'Mr. Delivery Man';
   const PUBLIC_NAV = [
     { label: 'Services', href: '#services', page: null },
+    { label: 'How it works', href: '#how', page: null },
     { label: 'Rates', href: '#rates', page: null },
     { label: 'Business', href: 'business/', page: 'business' },
     { label: 'Track an order', href: 'track/', page: 'track' },
   ];
-  const FOOTER_LINKS = [
-    { label: 'Request a delivery', href: 'request/' },
-    { label: 'Track an order', href: 'track/' },
-    { label: 'For businesses', href: 'business/' },
-    { label: 'Rates', href: '#rates' },
-    { label: 'Sign in', href: 'login/' },
-    { label: 'Rider sign-in', href: 'login/?as=rider' },
-    { label: 'Admin', href: 'login/?as=admin' },
+  const FOOTER_COLUMNS = [
+    { title: 'Services', links: [{ label: 'Pick & deliver', href: 'request/' }, { label: 'Shop & deliver', href: 'request/' }, { label: 'For businesses', href: 'business/' }, { label: 'Rates', href: '#rates' }] },
+    { title: 'Your orders', links: [{ label: 'Request a delivery', href: 'request/' }, { label: 'Track an order', href: 'track/' }, { label: 'My orders', href: 'account/' }, { label: 'Questions', href: '#faq' }] },
+    { title: 'Team', links: [{ label: 'Customer sign-in', href: 'login/' }, { label: 'Rider sign-in', href: 'login/?as=rider' }, { label: 'Admin sign-in', href: 'login/?as=admin' }] },
   ];
   const ADMIN_NAV = [
-    { view: 'overview', label: 'Overview', icon: 'dashboard' },
-    { view: 'orders', label: 'Orders', icon: 'package' },
-    { view: 'live', label: 'Live map', icon: 'map' },
-    { view: 'drivers', label: 'Riders', icon: 'bike' },
-    { view: 'customers', label: 'Customers', icon: 'users' },
-    { view: 'business', label: 'Business', icon: 'building' },
-    { view: 'rates', label: 'Rates', icon: 'banknote' },
-    { view: 'settings', label: 'Settings', icon: 'settings' },
+    { view: 'overview', label: 'Overview', icon: 'dashboard', group: 'Operations' },
+    { view: 'orders', label: 'Orders', icon: 'package', group: 'Operations' },
+    { view: 'live', label: 'Live map', icon: 'map', group: 'Operations' },
+    { view: 'drivers', label: 'Riders', icon: 'bike', group: 'Operations' },
+    { view: 'customers', label: 'Customers', icon: 'users', group: 'Accounts' },
+    { view: 'business', label: 'Business', icon: 'building', group: 'Accounts' },
+    { view: 'rates', label: 'Rates', icon: 'banknote', group: 'Setup' },
+    { view: 'settings', label: 'Settings', icon: 'settings', group: 'Setup' },
   ];
   // Keys that are not sidebar views but count towards one: payment reviews and quotes are orders needing action, requests are business.
   const COUNT_ALIAS = { reviews: 'orders', quotes: 'orders', unassigned: 'orders', onHold: 'orders', requests: 'business', riders: 'live', online: 'live' };
@@ -54,8 +51,10 @@
     node.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
   }
   function iconNode(name, size) { const s = el('span', { class: 'icon-wrap', html: MDM.icon(name, size || 16) }); return s.firstChild; }
-  function logo() { return '<span class="brand__word">' + BRAND + '</span>'; }
-  function brandLink(href) { return el('a', { class: 'brand', href }, el('span', { class: 'brand__word' }, BRAND)); }
+  // The mark: a yellow tile with the M drawn as a delivery route that ends in a drop-off dot.
+  const MARK = '<svg class="brand__mark" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false"><rect width="32" height="32" rx="8" fill="#FFD100"/><path d="M8.5 22.5V10.5l7.5 8 7.5-8v7.2" fill="none" stroke="#111114" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="23.5" cy="22.6" r="2.5" fill="#111114"/></svg>';
+  function logo() { return MARK + '<span class="brand__word">' + BRAND + '</span>'; }
+  function brandLink(href) { return el('a', { class: 'brand', href, 'aria-label': BRAND + ', home', html: logo() }); }
 
   // ---- Settings helpers ---------------------------------------------------------------------------------------------------
   let settingsCache = null;
@@ -190,19 +189,21 @@
     footer.classList.add('site-footer');
     footer.textContent = '';
     const c = contactLinks();
-    const contact = el('p', { class: 'site-footer__contact' });
-    const parts = [];
-    if (c.tel) parts.push(el('a', { href: c.tel, class: 'mono' }, c.display));
-    if (c.whatsapp) parts.push(el('a', { href: c.whatsapp, target: '_blank', rel: 'noopener' }, 'WhatsApp'));
-    if (c.viber) parts.push(el('a', { href: c.viber }, 'Viber'));
-    if (c.mailto) parts.push(el('a', { href: c.mailto }, c.email));
-    parts.forEach((p, i) => { if (i) contact.appendChild(document.createTextNode(' · ')); contact.appendChild(p); });
-    const hours = el('p', { class: 'site-footer__hours', 'data-shell': 'hours' }, hoursLine(s));
-    const links = el('nav', { class: 'site-footer__links', 'aria-label': 'Site' });
-    FOOTER_LINKS.forEach((l, i) => { if (i) links.appendChild(document.createTextNode(' · ')); links.appendChild(el('a', { href: MDM.href(l.href) }, l.label)); });
+    const reach = el('div', { class: 'site-footer__reach' });
+    if (c.whatsapp) reach.appendChild(el('a', { class: 'btn btn--brand btn--sm', href: c.whatsapp, target: '_blank', rel: 'noopener' }, iconNode('message-circle', 16), 'WhatsApp'));
+    if (c.viber) reach.appendChild(el('a', { class: 'btn btn--on-dark btn--sm', href: c.viber }, 'Viber'));
+    if (c.tel) reach.appendChild(el('a', { class: 'btn btn--on-dark btn--sm', href: c.tel }, iconNode('phone', 16), c.display));
+    const about = el('div', { class: 'site-footer__about' },
+      brandLink(MDM.href('')),
+      el('p', { class: 'site-footer__tagline' }, 'We pick & deliver, we shop & deliver, and we deliver for businesses across Malé, Hulhumalé and the airport.'),
+      reach,
+      el('p', { class: 'site-footer__hours', 'data-shell': 'hours' }, hoursLine(s)),
+      c.mailto ? el('p', { class: 'site-footer__mail' }, el('a', { href: c.mailto }, c.email)) : null);
+    const cols = el('div', { class: 'site-footer__cols' }, FOOTER_COLUMNS.map(col => el('nav', { class: 'site-footer__col', 'aria-label': col.title },
+      el('h2', { class: 'site-footer__title' }, col.title), el('ul', null, col.links.map(l => el('li', null, el('a', { href: MDM.href(l.href) }, l.label)))))));
     footer.appendChild(el('div', { class: 'container' },
-      el('div', { class: 'site-footer__main' }, el('div', { class: 'site-footer__left' }, contact, hours), links),
-      el('p', { class: 'site-footer__bottom' }, BRAND + ' · Greater Malé · Prices in MVR')));
+      el('div', { class: 'site-footer__main' }, about, cols),
+      el('div', { class: 'site-footer__bottom' }, el('span', null, BRAND + ' · Greater Malé'), el('span', null, 'Prices in Maldivian Rufiyaa · Pay by bank transfer'))));
   }
 
   // ---- Admin shell --------------------------------------------------------------------------------------------------------
@@ -214,6 +215,7 @@
     admin.sidebar.querySelectorAll('.sidebar__nav a[data-view]').forEach(a => {
       if (a.dataset.view === view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
+    if (admin.root) admin.root.dataset.view = view;
     const item = ADMIN_NAV.find(n => n.view === view);
     if (item && admin.title && !admin.title.dataset.custom) admin.title.textContent = item.label;
   }
@@ -254,6 +256,22 @@
     admin.root.dataset.chrome = visible ? 'on' : 'off';
     if (!visible) setSidebarOpen(false);
   }
+  // "New order" lives in the orders view; from anywhere else, go there first and press its button once it has mounted.
+  function openNewOrder() {
+    if (!/^#\/orders(\?|$)/.test(location.hash)) location.hash = '#/orders';
+    const t0 = Date.now();
+    (function tryClick() { const b = document.querySelector('[data-testid="orders-new"]'); if (b) b.click(); else if (Date.now() - t0 < 4000) setTimeout(tryClick, 100); })();
+  }
+  async function updateRidersPill() {
+    if (!admin.riders || !MDM.store) return;
+    try {
+      const [drivers, positions] = await Promise.all([MDM.store.list('drivers'), MDM.store.list('positions')]);
+      const now = Date.now();
+      const online = drivers.filter(d => d.status !== 'offline' && positions.some(p => p.driverId === d.id && now - new Date(p.at).getTime() < 10 * 60000)).length;
+      admin.riders.querySelector('.topbar__live-text').textContent = online === 1 ? '1 rider online' : online + ' riders online';
+      admin.riders.classList.toggle('is-idle', !online);
+    } catch (e) { /* the pill is decorative; the live map has the real list */ }
+  }
   function renderAdmin(root) {
     if (root.dataset.shellMounted) return;
     root.dataset.shellMounted = '1';
@@ -261,20 +279,30 @@
     admin.root = root;
     const main = root.querySelector('main') || el('main', { id: 'main' });
     const nav = el('nav', { class: 'sidebar__nav', 'aria-label': 'Admin' });
+    let group = null;
     ADMIN_NAV.forEach(item => {
+      if (item.group !== group) { group = item.group; nav.appendChild(el('div', { class: 'sidebar__group' }, group)); }
       nav.appendChild(el('a', { href: MDM.href('admin/#/' + item.view), 'data-view': item.view },
         iconNode(item.icon, 16), el('span', { class: 'sidebar__label' }, item.label), el('span', { class: 'count', 'data-count': item.view, hidden: true })));
     });
-    const signout = el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'admin-signout',
-      on: { click: e => { e.currentTarget.dispatchEvent(new CustomEvent('mdm:signout', { bubbles: true })); } } }, iconNode('log-out', 16), 'Sign out');
+    const signout = el('button', { type: 'button', class: 'btn btn--icon btn--sm sidebar__signout', 'data-testid': 'admin-signout', 'aria-label': 'Sign out', title: 'Sign out',
+      on: { click: e => { e.currentTarget.dispatchEvent(new CustomEvent('mdm:signout', { bubbles: true })); } } }, iconNode('log-out', 16));
     admin.sidebar = el('aside', { class: 'sidebar', id: 'admin-sidebar' },
       el('div', { class: 'sidebar__brand' }, brandLink(MDM.href('admin/#/overview'))),
       nav,
-      el('div', { class: 'sidebar__foot' }, el('span', {}, 'Signed in as Admin'), signout));
+      el('div', { class: 'sidebar__foot' },
+        el('span', { class: 'sidebar__avatar', 'aria-hidden': 'true' }, 'A'),
+        el('span', { class: 'sidebar__who' }, el('span', { class: 'sidebar__name' }, 'Admin'), el('span', { class: 'sidebar__role' }, 'Office')),
+        signout));
     admin.menu = el('button', { type: 'button', class: 'btn btn--ghost btn--icon topbar__menu', 'aria-label': 'Menu', 'aria-expanded': 'false', 'aria-controls': 'admin-sidebar',
       on: { click: () => setSidebarOpen(!admin.open) } }, iconNode('menu', 20));
     admin.title = el('span', { class: 'topbar__title' }, 'Overview');
-    admin.topbar = el('div', { class: 'topbar' }, admin.menu, admin.title);
+    const search = el('input', { class: 'input topbar__search-input', type: 'search', placeholder: 'Search orders, names or phones', 'aria-label': 'Search orders', 'data-testid': 'topbar-search' });
+    const searchForm = el('form', { class: 'topbar__search', role: 'search', on: { submit: e => { e.preventDefault(); const q = search.value.trim(); location.hash = '#/orders' + (q ? '?q=' + encodeURIComponent(q) : ''); search.blur(); } } },
+      iconNode('search', 16), search);
+    admin.riders = el('a', { class: 'topbar__live', href: MDM.href('admin/#/live'), 'data-testid': 'topbar-riders' }, el('span', { class: 'topbar__dot', 'aria-hidden': 'true' }), el('span', { class: 'topbar__live-text' }, 'Riders'));
+    const newOrder = el('button', { type: 'button', class: 'btn btn--primary topbar__new', 'data-testid': 'topbar-new-order', on: { click: openNewOrder } }, iconNode('plus', 16), el('span', { class: 'topbar__new-label' }, 'New order'));
+    admin.topbar = el('div', { class: 'topbar' }, admin.menu, admin.title, searchForm, el('div', { class: 'topbar__actions' }, admin.riders, newOrder));
     const mainWrap = el('div', { class: 'admin__main' }, admin.topbar, main);
     root.textContent = '';
     root.appendChild(admin.sidebar);
@@ -286,6 +314,7 @@
     const onMq = () => { if (mq.matches && admin.open) setSidebarOpen(false); };
     if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
     setActive();
+    if (MDM.store && MDM.store.ready) MDM.store.ready.then(() => { updateRidersPill(); setInterval(updateRidersPill, 15000); });
   }
 
   // ---- Mount --------------------------------------------------------------------------------------------------------------

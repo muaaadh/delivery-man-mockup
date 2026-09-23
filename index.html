@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Delivery within Greater Malé · Mr. Delivery Man</title>
-<meta name="description" content="Same-day pickup, shopping runs and business deliveries in Malé, Hulhumalé and at Velana International Airport. Pay by bank transfer and follow your rider live.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23111114'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='Inter,system-ui,sans-serif' font-weight='600' font-size='18' fill='%23fff'%3EM%3C/text%3E%3C/svg%3E">
+<title>Delivery in Malé, Hulhumalé and the airport · Mr. Delivery Man</title>
+<meta name="description" content="We pick & deliver, we shop & deliver, and we deliver for businesses across Greater Malé. From MVR 35, pay by bank transfer, follow your rider live.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23FFD100'/%3E%3Cpath d='M8.5 22.5V10.5l7.5 8 7.5-8v7.2' fill='none' stroke='%23111114' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='23.5' cy='22.6' r='2.5' fill='%23111114'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" integrity="sha384-K282sW/zFjTkrjR/+yr1H+gCukuy4OEYrkXRybV88g7pk+kZZYpNV6SAV59NcgFg" crossorigin="anonymous">
 <link rel="stylesheet" href="./css/base.css">
 <link rel="stylesheet" href="./css/pages.css">
@@ -31,190 +31,240 @@
 <a class="sr-only" href="#main">Skip to content</a>
 <header data-shell="public"></header>
 <main id="main">
-  <div class="container">
 
-    <section id="top" class="section home-hero" aria-labelledby="top-title">
-      <div class="home-hero__text">
-        <h1 id="top-title" class="home-hero__title">Delivery within Greater Malé</h1>
-        <p class="home-hero__lead">Bags, boxes and shopping runs across Malé, Hulhumalé and the airport. Pay by bank transfer, then follow your rider live until it is delivered.</p>
-        <div class="home-hero__actions">
+  <!-- Hero -->
+  <section id="top" class="hero" aria-labelledby="top-title">
+    <div class="container hero__grid">
+      <div class="hero__text">
+        <p class="hero__status"><span class="hero__dot" aria-hidden="true"></span><span data-testid="home-hours">Open today · Malé and Hulhumalé</span></p>
+        <h1 id="top-title" class="hero__title">We pick it up.<br>We shop for it.<br><span class="hero__mark">We deliver it.</span></h1>
+        <p class="hero__lead">Door-to-door delivery across Malé, Hulhumalé and Velana airport, from <span data-testid="home-hero-from">MVR 35</span>. Pay by bank transfer and follow your rider live on the map until it is handed over.</p>
+        <div class="hero__actions">
           <a class="btn btn--primary btn--lg" href="./request/" data-testid="home-request">Request a delivery</a>
           <a class="btn btn--secondary btn--lg" href="./track/" data-testid="home-track">Track an order</a>
         </div>
-        <p class="home-hours" data-testid="home-hours"></p>
+        <ul class="hero__facts">
+          <li><strong data-testid="home-glance-time">60 to 90 min</strong><span>usual delivery time</span></li>
+          <li><strong data-testid="home-glance-bag">MVR 35</strong><span>bags within one island</span></li>
+          <li><strong>Live</strong><span>rider on the map</span></li>
+        </ul>
       </div>
-      <form class="card home-signin" action="./login/" method="get" data-testid="home-signin">
-        <input type="hidden" name="as" value="customer">
-        <div class="card__body">
-          <h2 class="home-signin__title">Sign in</h2>
-          <p class="home-signin__text">Customers sign in with the mobile number they order with. We send a one-time code, no password needed.</p>
-          <div class="field">
-            <label for="home-phone">Mobile number</label>
-            <input class="input" id="home-phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="7XX XXXX" data-testid="home-signin-phone">
-          </div>
-          <button type="submit" class="btn btn--primary btn--block home-signin__btn" data-testid="home-signin-continue">Continue</button>
-          <p class="home-signin__links"><a href="./login/?as=rider">Rider sign-in</a> · <a href="./login/?as=admin">Admin sign-in</a></p>
-        </div>
-      </form>
-    </section>
 
-    <div class="card kpi-row home-glance" data-testid="home-glance">
-      <div class="kpi"><div class="kpi__label">Bags</div><div class="kpi__value" data-testid="home-glance-bag"></div><div class="kpi__note">documents, food, small parcels</div></div>
-      <div class="kpi"><div class="kpi__label">Boxes</div><div class="kpi__value" data-testid="home-glance-box"></div><div class="kpi__note">cartons up to about 1 ft</div></div>
-      <div class="kpi"><div class="kpi__label">XL packages</div><div class="kpi__value" data-testid="home-glance-xl"></div><div class="kpi__note">price confirmed before pickup</div></div>
-      <div class="kpi"><div class="kpi__label">Delivery time</div><div class="kpi__value home-glance__time" data-testid="home-glance-time"></div><div class="kpi__note">in Malé and Hulhumalé</div></div>
+      <div class="hero__visual">
+        <div class="hero__panel" aria-hidden="true">
+          <svg class="hero__routes" viewBox="0 0 400 480" preserveAspectRatio="none" focusable="false"><path d="M-10 380 C 80 340, 120 250, 210 230 S 360 150, 420 60" /><path d="M-10 450 C 110 430, 170 360, 260 330 S 380 270, 420 250" /><path d="M30 -10 C 60 90, 20 170, 90 240 S 150 390, 120 500" /></svg>
+        </div>
+        <div class="phone" role="img" aria-label="Live tracking preview: a rider on the way from Malé to Hulhumalé" data-testid="home-phone">
+          <div class="phone__screen">
+            <div class="phone__top"><span class="phone__code" data-testid="home-phone-code">MDM-1038</span><span class="badge badge--info" data-testid="home-phone-status">On the way</span></div>
+            <div class="phone__map" id="hero-map"></div>
+            <div class="phone__sheet">
+              <div class="phone__eta"><span>Estimated arrival</span><strong class="mono" data-testid="home-phone-eta">--:--</strong></div>
+              <div class="phone__rider"><span class="phone__avatar" data-testid="home-phone-initials">AN</span><span class="phone__who"><span data-testid="home-phone-rider">Ahmed Nazim</span><small data-testid="home-phone-vehicle">Bike</small></span></div>
+              <ol class="phone__steps"><li class="is-done">Picked up</li><li class="is-current">On the way</li><li>Delivered</li></ol>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
+  </section>
 
-    <section id="services" class="section" aria-labelledby="services-title">
-      <div class="section-head">
-        <h2 id="services-title">What we do</h2>
+  <!-- Services -->
+  <section id="services" class="block" aria-labelledby="services-title">
+    <div class="container">
+      <div class="block__head">
+        <h2 id="services-title">Three ways we move things for you</h2>
+        <p>One rider network for Malé, Hulhumalé and the airport. Tell us what it is, we handle the rest.</p>
       </div>
-      <ul class="home-services">
-        <li class="home-service" data-testid="home-service-pick">
-          <h3 class="home-service__title">Pick &amp; deliver</h3>
-          <div class="home-service__body">
-            <p class="home-service__text">We collect from any address in Malé or Hulhumalé and bring it to the door the same day.</p>
-            <a class="home-service__link" href="./request/">Request a pickup</a>
+      <div class="services">
+        <article class="service service--main" data-testid="home-service-pick">
+          <span class="service__icon" aria-hidden="true" data-icon="package"></span>
+          <h3>Pick &amp; deliver</h3>
+          <p>We collect from any address and bring it to the door: documents, food, keys, parcels, things you forgot at home.</p>
+          <ul class="service__list">
+            <li>Malé, Hulhumalé Phase 1 and 2, the airport</li>
+            <li>Cargo boats and ferry terminals</li>
+            <li>Who received it, recorded at the door</li>
+          </ul>
+          <div class="route-demo" aria-hidden="true">
+            <div class="route-demo__stop"><span class="route-demo__pin route-demo__pin--from"></span><span><small>Pickup</small>M. Kaneerumaage, Malé</span></div>
+            <div class="route-demo__line"><span class="route-demo__bike" data-icon="bike"></span><span class="route-demo__tag">Across the bridge · <span data-testid="home-route-cross">MVR 45</span></span></div>
+            <div class="route-demo__stop"><span class="route-demo__pin route-demo__pin--to"></span><span><small>Drop-off</small>Amin Avenue, Hulhumalé Phase 1</span></div>
           </div>
-          <div class="home-service__price"><span class="mono" data-testid="home-service-price-pick"></span></div>
-        </li>
-        <li class="home-service" data-testid="home-service-shop">
-          <h3 class="home-service__title">Shop &amp; deliver</h3>
-          <div class="home-service__body">
-            <p class="home-service__text">Send us a shopping list and a budget. We buy it, show you the receipt and deliver it.</p>
-            <a class="home-service__link" href="./request/">Request a shopping run</a>
-          </div>
-          <div class="home-service__price"><span class="mono" data-testid="home-service-price-shop"></span><small data-testid="home-service-fee-shop"></small></div>
-        </li>
-        <li class="home-service" data-testid="home-service-business">
-          <h3 class="home-service__title">Delivery for businesses</h3>
-          <div class="home-service__body">
-            <p class="home-service__text">One flat rate per package for shops and offices in Malé and Hulhumalé, on a single monthly invoice.</p>
-            <a class="home-service__link" href="./business/">For businesses</a>
-          </div>
-          <div class="home-service__price"><span class="mono" data-testid="home-service-price-business"></span><small>per package</small></div>
-        </li>
-      </ul>
-    </section>
+          <div class="service__foot"><span class="service__price" data-testid="home-service-price-pick">From MVR 35</span><a class="btn btn--primary" href="./request/">Request a pickup</a></div>
+        </article>
+        <article class="service" data-testid="home-service-shop">
+          <span class="service__icon" aria-hidden="true" data-icon="shopping-bag"></span>
+          <h3>Shop &amp; deliver</h3>
+          <p>Send a list and a budget. We buy it, show you the receipt and deliver it.</p>
+          <div class="service__foot"><span class="service__price"><span data-testid="home-service-price-shop">From MVR 35</span> <small data-testid="home-service-fee-shop">plus a 10% shopping fee</small></span><a class="service__link" href="./request/">Start a shopping run</a></div>
+        </article>
+        <article class="service service--yellow" data-testid="home-service-business">
+          <span class="service__icon" aria-hidden="true" data-icon="building"></span>
+          <h3>For businesses</h3>
+          <p>Daily pickups from your shop or office and one invoice a month.</p>
+          <div class="service__foot"><span class="service__price"><span data-testid="home-service-price-business">MVR 25</span> <small>per package</small></span><a class="service__link" href="./business/">Open a business account</a></div>
+        </article>
+      </div>
+    </div>
+  </section>
 
-    <section id="rates" class="section" aria-labelledby="rates-title">
-      <div class="section-head">
-        <h2 id="rates-title">Rates</h2>
-        <p class="section-head__desc">By package size, within Malé and Hulhumalé.</p>
-      </div>
-      <div class="home-rates">
-        <div class="home-rates__col">
-        <div class="rate-table" data-testid="home-rates">
-          <div class="rate-table__row rate-table__row--head">Package size</div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">Bags<small data-testid="home-guide-bag"></small></div>
-            <div class="rate-table__value mono" data-testid="home-rate-bag"></div>
-          </div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">Box<small data-testid="home-guide-box"></small></div>
-            <div class="rate-table__value mono" data-testid="home-rate-box"></div>
-          </div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">XL packages<small data-testid="home-guide-xl"></small></div>
-            <div class="rate-table__value mono" data-testid="home-rate-xl"></div>
-          </div>
-        </div>
-        <p class="home-rates__note" data-testid="home-rates-note">Lower figure within one island, higher figure when we cross the bridge.</p>
-        </div>
-        <div class="home-rates__col">
-        <div class="rate-table" data-testid="home-fees">
-          <div class="rate-table__row rate-table__row--head">Fees</div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">Shopping fee<small>On shop &amp; deliver orders, worked out from the receipt</small></div>
-            <div class="rate-table__value mono" data-testid="home-fee-shopping"></div>
-          </div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">Cargo fee<small data-testid="home-fee-cargo-note"></small></div>
-            <div class="rate-table__value mono" data-testid="home-fee-cargo"></div>
-          </div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">Airport fee<small data-testid="home-fee-airport-note"></small></div>
-            <div class="rate-table__value mono" data-testid="home-fee-airport"></div>
-          </div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">Vehicle charge<small>When a package cannot go on a bike</small></div>
-            <div class="rate-table__value" data-testid="home-fee-vehicle">Confirmed before dispatch</div>
-          </div>
-          <div class="rate-table__row">
-            <div class="rate-table__label">Business rate<small>Malé and Hulhumalé Phase 1 &amp; 2, packages under 1 ft, invoiced monthly</small></div>
-            <div class="rate-table__value mono" data-testid="home-fee-business"></div>
-          </div>
-        </div>
-        <p class="home-rates__note">Prices in Maldivian Rufiyaa.</p>
-        </div>
-      </div>
-    </section>
-
-    <section id="how" class="section" aria-labelledby="how-title">
-      <div class="section-head">
+  <!-- How it works -->
+  <section id="how" class="block block--tint" aria-labelledby="how-title">
+    <div class="container">
+      <div class="block__head">
         <h2 id="how-title">How it works</h2>
+        <p>Four steps, and you can see every one of them on your phone.</p>
       </div>
-      <ol class="steps" data-testid="home-steps">
-        <li class="steps__item">
-          <div class="steps__head"><span class="steps__num mono">1</span><h3 class="steps__title">Request</h3></div>
-          <p class="steps__text">Tell us what to pick up, where it goes and when. You see the price before you send it.</p>
-        </li>
-        <li class="steps__item">
-          <div class="steps__head"><span class="steps__num mono">2</span><h3 class="steps__title">Transfer and upload your slip</h3></div>
-          <p class="steps__text">Pay by bank transfer and upload the slip. We check it and confirm your order<span data-testid="home-review-time"></span>.</p>
-        </li>
-        <li class="steps__item">
-          <div class="steps__head"><span class="steps__num mono">3</span><h3 class="steps__title">We pick up</h3></div>
-          <p class="steps__text">A rider collects the package and we message you on WhatsApp, Viber or SMS when it is on the way.</p>
-        </li>
-        <li class="steps__item">
-          <div class="steps__head"><span class="steps__num mono">4</span><h3 class="steps__title">Track it to the door</h3></div>
-          <p class="steps__text">Follow the rider on the map and see who received it once it is handed over.</p>
-        </li>
+      <ol class="how" data-testid="home-steps">
+        <li class="how__step"><span class="how__num">1</span><h3>Request</h3><p>Tell us what to pick up, where it goes and when. You see the price before you send it.</p></li>
+        <li class="how__step"><span class="how__num">2</span><h3>Transfer and upload the slip</h3><p>Pay by bank transfer to BML or MIB and upload the slip. We confirm it<span data-testid="home-review-time">, usually in about 30 minutes</span>.</p></li>
+        <li class="how__step"><span class="how__num">3</span><h3>We pick up</h3><p>A rider collects it and we message you on WhatsApp, Viber or SMS when it is on the way.</p></li>
+        <li class="how__step"><span class="how__num">4</span><h3>Track it to the door</h3><p>Follow the rider on the map and see who received it once it is handed over.</p></li>
       </ol>
-    </section>
+    </div>
+  </section>
 
-    <section id="coverage" class="section" aria-labelledby="coverage-title">
-      <div class="section-head">
-        <h2 id="coverage-title">Where we deliver</h2>
+  <!-- Live tracking -->
+  <section id="tracking" class="block block--ink" aria-labelledby="tracking-title">
+    <div class="container tracking">
+      <div class="tracking__text">
+        <h2 id="tracking-title">Follow your rider, stop by stop</h2>
+        <p>No app to install. Your tracking link opens in any browser and updates by itself while the rider moves.</p>
+        <ul class="ticks">
+          <li><strong>Live location</strong> on a real map of Malé and Hulhumalé</li>
+          <li><strong>Estimated arrival</strong> that updates as the rider crosses the bridge</li>
+          <li><strong>Every stop</strong>, from pickup to the name of the person who received it</li>
+          <li><strong>Share the link</strong> with whoever is waiting at the door</li>
+        </ul>
+        <a class="btn btn--brand btn--lg" href="./track/?code=MDM-1038" data-testid="home-try-tracking">See a live demo order</a>
       </div>
-      <div class="map map--short" id="coverage-map" data-testid="home-map">
-        <noscript><div class="map__fallback"><div class="alert alert--warn">Map unavailable without JavaScript. The zones we cover are listed below.</div></div></noscript>
+      <div class="tracking__card" data-testid="home-tracking-card">
+        <div class="tracking__card-head"><span class="mono" data-testid="home-track-code">MDM-1038</span><span class="badge badge--info" data-testid="home-track-status">On the way</span></div>
+        <ol class="tracking__timeline" data-testid="home-track-events">
+          <li class="is-done"><span>Order placed</span></li>
+          <li class="is-done"><span>Payment verified</span></li>
+          <li class="is-done"><span>Picked up</span></li>
+          <li class="is-current"><span>On the way</span></li>
+          <li><span>Delivered</span></li>
+        </ol>
       </div>
-      <div class="map-legend" data-testid="home-map-legend"><span><i class="corridor"></i>Sinamalé Bridge corridor, Malé to Hulhumalé</span></div>
-      <p class="home-coverage__text" data-testid="home-coverage-text">Malé, Hulhumalé Phase 1 and Phase 2 and Velana International Airport, plus Villimalé by ferry and any other island on request, both quoted before pickup.</p>
-    </section>
+    </div>
+  </section>
 
-    <section id="signin" class="section" aria-labelledby="signin-title">
-      <div class="section-head">
-        <h2 id="signin-title">Already with us? Sign in</h2>
+  <!-- Rates -->
+  <section id="rates" class="block" aria-labelledby="rates-title">
+    <div class="container">
+      <div class="block__head">
+        <h2 id="rates-title">Simple rates</h2>
+        <p>Priced by the size of the package. The lower figure is within one island, the higher one when we cross the bridge.</p>
       </div>
-      <ul class="home-services home-logins">
-        <li class="home-service">
-          <h3 class="home-service__title">Customers</h3>
-          <div class="home-service__body">
-            <p class="home-service__text">See every order, pay a pending one and track the rider, with the mobile number you order with.</p>
-            <a class="home-service__link" href="./login/?as=customer">Sign in with your number</a>
-          </div>
-        </li>
-        <li class="home-service">
-          <h3 class="home-service__title">Riders</h3>
-          <div class="home-service__body">
-            <p class="home-service__text">Today's stops in route order, one tap per stop, live location shared with the office and the customer.</p>
-            <a class="home-service__link" href="./login/?as=rider">Rider sign-in</a>
-          </div>
-        </li>
-        <li class="home-service">
-          <h3 class="home-service__title">Office</h3>
-          <div class="home-service__body">
-            <p class="home-service__text">Verify transfers, assign riders, follow the live map, and invoice business accounts.</p>
-            <a class="home-service__link" href="./login/?as=admin">Admin sign-in</a>
-          </div>
-        </li>
+      <div class="prices" data-testid="home-rates">
+        <article class="price">
+          <h3>Bags</h3>
+          <p class="price__range mono" data-testid="home-rate-bag">MVR 35 to 45</p>
+          <p class="price__guide" data-testid="home-guide-bag">Fits in a carrier bag: documents, food, small parcels</p>
+          <dl class="price__split"><div><dt>Same island</dt><dd class="mono" data-testid="home-rate-bag-same">MVR 35</dd></div><div><dt>Across the bridge</dt><dd class="mono" data-testid="home-rate-bag-cross">MVR 45</dd></div></dl>
+        </article>
+        <article class="price price--featured">
+          <h3>Box</h3>
+          <p class="price__range mono" data-testid="home-rate-box">MVR 45 to 60</p>
+          <p class="price__guide" data-testid="home-guide-box">A carton up to about 1 ft (30 cm) a side, strapped on the bike</p>
+          <dl class="price__split"><div><dt>Same island</dt><dd class="mono" data-testid="home-rate-box-same">MVR 45</dd></div><div><dt>Across the bridge</dt><dd class="mono" data-testid="home-rate-box-cross">MVR 60</dd></div></dl>
+        </article>
+        <article class="price">
+          <h3>XL packages</h3>
+          <p class="price__range mono" data-testid="home-rate-xl">from MVR 60</p>
+          <p class="price__guide" data-testid="home-guide-xl">Bigger than a box or needs two hands; may need a pickup, price confirmed first</p>
+          <dl class="price__split"><div><dt>Quote</dt><dd>Confirmed before pickup</dd></div></dl>
+        </article>
+      </div>
+      <ul class="fees" data-testid="home-fees">
+        <li><span>Shopping fee</span><strong class="mono" data-testid="home-fee-shopping">10% of the receipt</strong></li>
+        <li><span>Cargo fee <small data-testid="home-fee-cargo-note">per package at a terminal</small></span><strong class="mono" data-testid="home-fee-cargo">MVR 20</strong></li>
+        <li><span>Airport fee <small data-testid="home-fee-airport-note">once per order</small></span><strong class="mono" data-testid="home-fee-airport">MVR 40</strong></li>
+        <li><span>Vehicle charge <small>when it cannot go on a bike</small></span><strong data-testid="home-fee-vehicle">Confirmed first</strong></li>
       </ul>
-    </section>
+      <p class="fine" data-testid="home-rates-note">Prices in Maldivian Rufiyaa. Pay by bank transfer to Bank of Maldives or Maldives Islamic Bank.</p>
+    </div>
+  </section>
 
-  </div>
+  <!-- Business -->
+  <section id="business" class="block" aria-labelledby="business-title">
+    <div class="container">
+      <div class="biz">
+        <div class="biz__text">
+          <h2 id="business-title">Sending every day? <span class="nowrap"><span data-testid="home-fee-business">MVR 25</span> a package.</span></h2>
+          <p>For shops, bakeries and offices in Malé and Hulhumalé. We collect from you in the window you choose and bill you once a month.</p>
+          <a class="btn btn--primary btn--lg" href="./business/">Request a business account</a>
+        </div>
+        <ul class="biz__list">
+          <li><span class="biz__tick" aria-hidden="true"></span>Daily pickups from your shop or office</li>
+          <li><span class="biz__tick" aria-hidden="true"></span>Packages under 1 ft within Malé and Hulhumalé Phase 1 &amp; 2</li>
+          <li><span class="biz__tick" aria-hidden="true"></span>One itemised invoice a month, <span data-testid="home-due-days">due in 14 days</span></li>
+          <li><span class="biz__tick" aria-hidden="true"></span>A tracking link for every one of your customers</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Coverage -->
+  <section id="coverage" class="block block--tint" aria-labelledby="coverage-title">
+    <div class="container coverage">
+      <div class="coverage__text">
+        <h2 id="coverage-title">Where we deliver</h2>
+        <p>Everywhere the bridge and the roads reach in Greater Malé, plus the ferry to Villimalé.</p>
+        <ul class="zones" data-testid="home-coverage-text">
+          <li><strong>Malé</strong><span>All wards, harbours and jetties</span></li>
+          <li><strong>Hulhumalé Phase 1 and 2</strong><span>Flats, towers and the ferry terminal</span></li>
+          <li><strong>Velana International Airport</strong><span>Arrivals, departures, cargo, seaplane terminal</span></li>
+          <li><strong>Villimalé and other islands</strong><span>By ferry or cargo boat, quoted before pickup</span></li>
+        </ul>
+      </div>
+      <div class="map coverage__map" id="coverage-map" data-testid="home-map">
+        <noscript><div class="map__fallback"><div class="alert alert--warn">Map unavailable without JavaScript. The zones we cover are listed here.</div></div></noscript>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" class="block" aria-labelledby="faq-title">
+    <div class="container faq">
+      <div class="block__head">
+        <h2 id="faq-title">Questions</h2>
+        <p>Anything else, message us on WhatsApp or Viber.</p>
+      </div>
+      <div class="faq__list" data-testid="home-faq">
+        <details><summary>How do I pay?</summary><p>By bank transfer to our Bank of Maldives or Maldives Islamic Bank account, using your order code as the reference. Upload a screenshot of the slip on the payment page and we confirm it<span data-testid="home-faq-review">, usually in about 30 minutes</span>.</p></details>
+        <details><summary>How long does a delivery take?</summary><p data-testid="home-faq-asap">Usually within 60 to 90 minutes in Malé and Hulhumalé when you choose "as soon as possible". You can also pick a 2-hour window later today or another day.</p></details>
+        <details><summary>How is the price worked out?</summary><p>By size: bag, box or XL. Within one island you pay the lower figure; when we cross the Sinamalé Bridge you pay the higher one. Airport and cargo terminal runs add a fixed fee. You see the full price before you send the request.</p></details>
+        <details><summary>My package is big or heavy. Can you still take it?</summary><p>Yes. Tick "Too big or heavy for a bike" when you request. We confirm the vehicle charge with you first and you only pay once you have the final price.</p></details>
+        <details><summary>How does shop &amp; deliver work?</summary><p>You send a list and a budget and pay the budget plus the shopping fee up front. We show you the receipt; if it comes in under budget we refund the difference, if it is over we ask before paying more.</p></details>
+        <details><summary>Do you go to Villimalé or other islands?</summary><p>Villimalé by ferry, and other islands through the cargo boats at Malé harbour. These are quoted before pickup.</p></details>
+        <details><summary>What don't you carry?</summary><p data-testid="home-terms">We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.</p></details>
+        <details><summary>Can I cancel?</summary><p>Before you pay, cancel from your tracking page. After payment, message us and we will sort it out, including a refund if the rider has not been sent yet.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact / final CTA -->
+  <section id="contact" class="block" aria-labelledby="contact-title">
+    <div class="container">
+      <div class="cta">
+        <div class="cta__text">
+          <h2 id="contact-title">Send something today</h2>
+          <p>Request online in a minute, or message us and we will set it up for you.</p>
+        </div>
+        <div class="cta__actions" data-testid="home-contact">
+          <a class="btn btn--brand btn--lg" href="./request/">Request a delivery</a>
+          <a class="btn btn--on-dark btn--lg" href="./track/" data-contact="whatsapp">WhatsApp us</a>
+          <a class="btn btn--on-dark btn--lg" href="./track/" data-contact="tel">Call us</a>
+        </div>
+        <p class="cta__signin">Already with us? <a href="./login/" data-testid="home-signin-customer">Sign in to your orders</a> · <a href="./login/?as=rider">Rider sign-in</a> · <a href="./login/?as=admin">Admin sign-in</a></p>
+      </div>
+    </div>
+  </section>
+
 </main>
 <footer data-shell="public-footer"></footer>
 </body>

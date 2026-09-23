@@ -49,20 +49,19 @@ body.page-admin .file-pick { display: flex; align-items: center; gap: 12px; flex
 body.page-admin .file-pick__thumb { width: 56px; height: 56px; object-fit: cover; border: 1px solid var(--border); border-radius: var(--radius-xs); }
 body.page-admin .file-pick__name { font-size: 13px; color: var(--text-2); }
 
-/* Six KPIs: one row only when the main area is wide enough for the values, otherwise 3 + 3 (2 + 2 + 2 on phones, as base.css). */
-@media (max-width: 1400px) {
-  body.page-admin .kpi-row { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  body.page-admin .kpi:nth-child(3n + 1) { border-left: 0; }
-  body.page-admin .kpi:nth-child(n + 4) { border-top: 1px solid var(--border); }
-}
+/* KPI tiles: six separate cards with an icon chip, 3 across on laptops, 2 on phones. */
+body.page-admin .kpi-row { display: grid; grid-auto-flow: row; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; background: none; border: 0; border-radius: 0; overflow: visible; }
+body.page-admin .kpi { position: relative; padding: 18px 20px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-lg); }
+body.page-admin .kpi__icon { position: absolute; top: 16px; right: 16px; width: 34px; height: 34px; border-radius: 10px; background: var(--yellow-soft); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; }
+body.page-admin .kpi__label { padding-right: 40px; }
+body.page-admin .kpi__value { font-size: 28px; margin-top: 10px; letter-spacing: -.01em; }
+body.page-admin .page-head h1 { font-size: 28px; }
+@media (max-width: 1680px) { body.page-admin .kpi-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) { body.page-admin .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } body.page-admin .kpi { padding: 14px 16px; } body.page-admin .kpi__value { font-size: 22px; } }
 @media (max-width: 1100px) {
   body.page-admin .admin-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
-  body.page-admin .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  body.page-admin .kpi:nth-child(n + 1) { border-left: 1px solid var(--border); border-top: 0; }
-  body.page-admin .kpi:nth-child(2n + 1) { border-left: 0; }
-  body.page-admin .kpi:nth-child(n + 3) { border-top: 1px solid var(--border); }
 }
 @media (max-width: 960px) {
   body.page-admin .orders-filters { display: none; }

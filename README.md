@@ -8,7 +8,7 @@ clicked through end to end.
 
 | Surface | URL | Notes |
 | --- | --- | --- |
-| Home | `/` | Marketing page: sign-in card, at-a-glance rates, services, how it works, coverage map |
+| Home | `/` | Customer-facing one-pager: live tracking demo in the hero phone, services, how it works, tracking, rates, business, coverage map, FAQ, contact |
 | Sign in | `/login/` | Customers by mobile number + one-time code (any 4 digits in the demo), riders by name + PIN, admin `admin` / `delivery` |
 | My orders | `/account/` | The signed-in customer's orders with pay/track actions and saved addresses |
 | Request a delivery | `/request/` | Pick & deliver / Shop & deliver, multi-package cart, schedule, review with live pricing |
@@ -16,7 +16,7 @@ clicked through end to end.
 | Track an order | `/track/?code=MDM-1038` | Live rider on the map, stops, ETA, timeline. MDM-1038 is always on the way (demo autopilot) |
 | For businesses | `/business/` | MVR 25/package account request |
 | Rider console | `/driver/` | Choose a rider, Start route, Arrived / Picked up / Delivered, Simulate route or Use my GPS |
-| Admin | `/admin/` | Sign in with `admin` / `delivery`: overview, orders + verification drawer, live map, riders, customers, business accounts + invoices, rates, settings |
+| Admin | `/admin/` | Sign in with `admin` / `delivery`: dark grouped sidebar, top bar with order search, New order and riders online; overview, orders + verification drawer, live map, riders, customers, business accounts + invoices, rates, settings |
 
 Useful seeded orders: `MDM-1036` and `MDM-1037` are waiting for payment verification (with slips), `MDM-1034` needs a quote
 (Villimalé), `MDM-1035` is awaiting the customer's transfer, `MDM-1040` is on hold (no answer at the door), `MDM-1041`/`MDM-1042` are

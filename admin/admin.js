@@ -223,10 +223,13 @@
   }
 
   // ---- Overview view ---------------------------------------------------------------------------------------------------------
+  function greeting() { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; }
+  function todayLine() { return new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }); }
   function overviewView() {
     const v = { host: null, alive: false, unsubs: [], timer: null, map: null, mapEl: null, markers: Object.create(null), stopPos: null, staleTimer: null, fitted: false, slots: {} };
-    function kpi(label, value, note, testid) {
+    function kpi(label, value, note, testid, icon) {
       return el('div', { class: 'kpi', 'data-testid': 'kpi-' + testid },
+        icon ? el('span', { class: 'kpi__icon', 'aria-hidden': 'true' }, html(MDM.icon(icon, 18))) : null,
         el('div', { class: 'kpi__label' }, label),
         el('div', { class: 'kpi__value mono', 'data-testid': 'kpi-' + testid + '-value' }, String(value)),
         note ? el('div', { class: 'kpi__note' }, note) : null);
@@ -261,12 +264,12 @@
       const deliveredOn = day => live.filter(o => o.status === 'delivered' && MDM.ui.dayKey(deliveredAt(o)) === day).length;
       const verifiedToday = live.filter(o => o.payment && o.payment.verifiedAt && MDM.ui.dayKey(o.payment.verifiedAt) === today).reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0);
       v.slots.kpis.replaceChildren(
-        kpi('Orders today', createdOn(today), plural(createdOn(yesterday), 'order') + ' yesterday', 'orders-today'),
-        kpi('Awaiting verification', live.filter(o => o.payment && o.payment.status === 'review').length, 'payment slips to check', 'awaiting'),
-        kpi('Quotes to send', live.filter(o => o.status === 'quote_pending').length, 'waiting for a price', 'quotes'),
-        kpi('In transit', live.filter(o => MDM.ACTIVE_STATUSES.indexOf(o.status) >= 0).length, 'assigned to a rider', 'in-transit'),
-        kpi('Delivered today', deliveredOn(today), plural(deliveredOn(yesterday), 'delivery') + ' yesterday', 'delivered-today'),
-        kpi('Payments verified today', money(verifiedToday), 'bank transfers matched', 'verified-today'));
+        kpi('Orders today', createdOn(today), plural(createdOn(yesterday), 'order') + ' yesterday', 'orders-today', 'package'),
+        kpi('Awaiting verification', live.filter(o => o.payment && o.payment.status === 'review').length, 'payment slips to check', 'awaiting', 'receipt'),
+        kpi('Quotes to send', live.filter(o => o.status === 'quote_pending').length, 'waiting for a price', 'quotes', 'file'),
+        kpi('In transit', live.filter(o => MDM.ACTIVE_STATUSES.indexOf(o.status) >= 0).length, 'assigned to a rider', 'in-transit', 'bike'),
+        kpi('Delivered today', deliveredOn(today), plural(deliveredOn(yesterday), 'delivery') + ' yesterday', 'delivered-today', 'check-circle'),
+        kpi('Payments verified today', money(verifiedToday), 'bank transfers matched', 'verified-today', 'banknote'));
       v.slots.attention.replaceChildren(attention(orders, requests, drivers));
       const recent = live.slice(0, 10);
       const cols = ['code', 'customer', 'service', 'route', 'total', 'status', 'created'];
@@ -327,7 +330,7 @@
         const recentSec = section('recent', 'Recent orders', 'The 10 newest orders. Click a row to open it.', el('a', { href: '#/orders' }, 'See all orders'));
         recentSec.appendChild(v.slots.recent);
         host.append(
-          el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, 'Overview'), el('p', { class: 'page-head__desc' }, 'Today at a glance. Counts update as orders change.')),
+          el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, greeting()), el('p', { class: 'page-head__desc' }, todayLine() + ' · Here is what needs you today. Counts update as orders change.')),
           v.slots.kpis,
           el('div', { class: 'admin-grid' }, attentionSec, ridersSec),
           recentSec);
