@@ -1,0 +1,14 @@
+/* Customer invoice: a plain printable page (forced light). Print rules for body.page-invoice live in css/base.css. */
+body.page-order-invoice main { padding: 32px 0 64px; }
+body.page-order-invoice .invoice-brand { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-bottom: 20px; margin-bottom: 24px; border-bottom: 2px solid var(--red); }
+body.page-order-invoice .invoice-brand img { height: 40px; width: auto; }
+body.page-order-invoice .invoice-brand__meta { font-size: 13px; line-height: 1.5; color: var(--text-2); text-align: right; }
+body.page-order-invoice .invoice-parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+body.page-order-invoice .invoice-parties h2, body.page-order-invoice .invoice-block h2 { font-size: 15px; margin-bottom: 8px; }
+body.page-order-invoice .invoice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+body.page-order-invoice .invoice-foot { margin-top: 32px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+@media (max-width: 720px) {
+  body.page-order-invoice .invoice-parties { grid-template-columns: 1fr; }
+  body.page-order-invoice .invoice-brand__meta { text-align: left; }
+}
+@media print { body.page-order-invoice main { padding: 0; } }

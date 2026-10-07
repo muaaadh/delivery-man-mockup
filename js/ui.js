@@ -91,9 +91,11 @@
   const statusBadge = (status, opts) => MDM.badgeFor(status, opts);
   // The two non-order status badges, so pages share one wording. Payment has an admin label and a customer one ({ customer: true }).
   const INVOICE_STATUS = { draft: ['neutral', 'Draft'], sent: ['info', 'Sent'], paid: ['ok', 'Paid'] };
+  // Payment statuses (client requirements §4): pay after delivery by default, or upfront once the price is confirmed.
   const PAYMENT_STATUS = {
-    unpaid: ['warn', 'Unpaid', 'Not paid yet'], review: ['warn', 'In review', 'Checking your slip'], verified: ['ok', 'Verified', 'Verified'],
-    rejected: ['danger', 'Rejected', 'Could not match'], invoiced: ['neutral', 'Invoiced', 'On your monthly invoice'],
+    pending: ['neutral', 'Payment pending', 'Pay after delivery'], requested: ['warn', 'Payment requested', 'Payment due'],
+    received: ['info', 'Payment received', 'Checking your transfer'], paid: ['ok', 'Paid', 'Paid'], refunded: ['neutral', 'Refunded', 'Refunded'],
+    invoiced: ['neutral', 'Monthly invoice', 'On your monthly invoice'],
   };
   // invoiceBadge(status) / paymentBadge(status, { customer }) → HTML string like badge(); unknown values render neutral with the raw status.
   function invoiceBadge(status) { const s = INVOICE_STATUS[status] || ['neutral', String(status == null ? '' : status)]; return badge(s[0], s[1], { 'data-status': status }); }

@@ -1,13 +1,13 @@
-// Checkout: bank-transfer payment for one order (SPEC §3.3). Reads ?order=<id> (or ?code=), prints the bank details from settings,
-// takes the payer details plus the transfer slip and moves the order to payment_review. The slip goes into `files` the moment it is
-// chosen and `order.payment.slip` points at it, so a reload shows the same preview. No price arithmetic happens here.
+// Pay for an order (client requirements §4): bank transfer with a slip upload. Reads ?order=<id> (or ?code=), prints the bank
+// details from settings, takes the payer details plus the slip and calls MDM.store.submitPayment (payment → received). Payment is
+// open when it was requested (invoice after delivery, or upfront) or, optionally, as soon as our team confirmed the price.
+// The slip goes into `files` the moment it is chosen and `order.payment.slip` points at it, so a reload shows the same preview.
 (function (MDM) { 'use strict';
   const { el } = MDM.ui;
   const MB = 1024 * 1024;
   const MAX_RAW = 8 * MB, MAX_PDF = 1 * MB, MAX_JPEG = 1.2 * MB;
   const ACCEPT = 'image/jpeg,image/png,image/webp,application/pdf';
-  const AFTER_CONFIRMED = ['confirmed', 'assigned', 'picked_up', 'in_transit', 'on_hold', 'delivered', 'returned'];
-  const CHANNEL = { sms: 'by SMS', whatsapp: 'on WhatsApp', viber: 'on Viber' };
+  const CHANNEL = { sms: 'by SMS', whatsapp: 'on WhatsApp', viber: 'on Viber', email: 'by email' };
   const QUOTA_MSG = 'This browser is out of storage space for the demo. Reset demo data from the admin or use a smaller file.';
   const HEIC_MSG = 'Upload a JPG, PNG or PDF. On iPhone, take a screenshot of the transfer receipt instead.';
 
@@ -116,7 +116,7 @@
   }
   function validateAll() { return Object.keys(RULES).map(validateField).every(Boolean); }
 
-  // ---- Submit: payer details onto payment, then the status machine moves the order to payment_review ----
+  // ---- Submit: payer details and slip go to MDM.store.submitPayment (payment status → received) ----
   async function submit(form, btn) {
     if (state.busy) return;
     Object.keys(RULES).forEach(n => { state.draft.touched[n] = true; });
@@ -124,14 +124,13 @@
     state.busy = 'submit'; state.formError = null; MDM.ui.setLoading(btn, true);
     const d = state.draft;
     try {
-      await MDM.store.update('orders', state.orderId, cur => ({ payment: Object.assign({}, cur.payment, {
-        status: 'review', bank: d.bank, payerName: d.payerName.trim(), paidAmount: parseAmount(d.paidAmount), reference: d.reference.trim(), submittedAt: new Date().toISOString(), rejectReason: null }) }));
-      await MDM.store.transition(state.orderId, 'payment_review', { by: 'customer' });
+      const cur = await MDM.store.get('orders', state.orderId);
+      await MDM.store.submitPayment(state.orderId, { bank: d.bank, payerName: d.payerName.trim(), paidAmount: parseAmount(d.paidAmount), reference: d.reference.trim(), slip: cur && cur.payment ? cur.payment.slip : null, by: 'customer' });
       state.busy = false; state.focusPanel = true;
       await render();
     } catch (e) {
       state.busy = false; MDM.ui.setLoading(btn, false);
-      state.formError = e && e.code === 'quota' ? QUOTA_MSG : e && e.code === 'transition' ? 'This order can no longer be paid here. Check its status on the tracking page.' : 'We could not save your details. Try again.';
+      state.formError = e && e.code === 'quota' ? QUOTA_MSG : e && (e.code === 'transition' || e.code === 'validation') ? 'This order can no longer be paid here. Check its status on the tracking page.' : 'We could not save your details. Try again.';
       await render();
     }
   }
@@ -172,6 +171,7 @@
   }
   function summary(order, settings) {
     const lines = (order.packages || []).map(p => line(MDM.pricing.lineLabel(p, order.service), p.description, p.price ? p.price.lineTotal : 0));
+    (order.items || []).forEach(it => lines.unshift(line(it.qty + ' × ' + it.name, null, it.total)));
     if (order.totals.budget) lines.push(line('Shopping budget (paid up front)', null, order.totals.budget, true));
     MDM.pricing.feeLines(order, settings).forEach(f => lines.push(line(f.label, f.reason, f.amount, true)));
     return el('div', { class: 'summary checkout-summary' }, lines, el('div', { class: 'summary__rule' }),
@@ -179,8 +179,9 @@
   }
   function scheduleText(order) {
     const s = order.schedule || {};
+    if (s.type === 'advance' && s.collectDate) return [MDM.ui.fmtDate(s.collectDate, { dateOnly: true }) + (s.collectTime ? ', ' + s.collectTime : ''), el('small', null, 'Delivery ' + MDM.ui.fmtDate(s.deliverDate, { dateOnly: true }) + (s.deliverTime ? ', ' + s.deliverTime : ''))];
     if (s.type === 'slot' && s.date) return [MDM.ui.fmtDate(s.date, { dateOnly: true }), el('small', null, MDM.ui.window(s.window))];
-    return 'As soon as possible';
+    return order.serviceLevel === 'express' ? 'Express, as soon as possible' : 'As soon as possible';
   }
   function field(name, id, label, control, opts) {
     opts = opts || {};
@@ -208,7 +209,8 @@
       el('div', { class: 'rate-table' },
         row('Order code', el('span', { class: 'checkout-copy checkout-copy--end' }, el('span', { class: 'checkout-code mono', 'data-testid': 'checkout-code' }, order.code), copyButton(order.code, 'checkout-copy-code', 'order code'))),
         row('Customer', [c.name || '', el('small', { class: 'mono' }, MDM.ui.phone.format(c.phone))]),
-        row('Pickup', scheduleText(order))),
+        row('Status', [MDM.ui.html(MDM.badgeFor(order.status, { customer: true })), ' ', MDM.ui.html(MDM.payBadge(order.payment.status))]),
+        row('Collection', scheduleText(order))),
       summary(order, settings));
   }
   function bankSection(order, settings) {
@@ -294,6 +296,7 @@
       el('div', { class: 'section-head' }, el('h2', { id: 'co-details' }, 'Your transfer details')),
       form);
   }
+  function invoiceLink(order) { return el('a', { class: 'alert__action', href: '../invoice/?order=' + encodeURIComponent(order.code), 'data-testid': 'checkout-invoice-link' }, 'View invoice'); }
   function rejectedNotice(order) {
     const reason = String(order.payment.rejectReason || '').trim().replace(/\.$/, '');
     const c = MDM.shell.contactLinks({ text: 'Order ' + order.code + ': about my transfer' });
@@ -303,7 +306,9 @@
   }
   function renderForm(order, settings, slip) {
     const frag = document.createDocumentFragment();
-    if (order.payment && order.payment.status === 'rejected') frag.append(rejectedNotice(order));
+    const p = order.payment || {};
+    if (p.status === 'requested' && p.rejectReason) frag.append(rejectedNotice(order));
+    if (p.status === 'pending') frag.append(el('div', { class: 'checkout-notice' }, notice('info', 'info', 'Paying now is optional. Your price is confirmed, so you can pay upfront today or wait for the invoice after delivery.')));
     frag.append(orderSection(order, settings), bankSection(order, settings), formSection(order, settings, slip));
     return frag;
   }
@@ -313,14 +318,14 @@
     const review = (settings.ops && settings.ops.reviewText) || 'about 30 minutes';
     return el('section', { class: 'card checkout-panel', 'aria-labelledby': 'co-done', 'data-testid': 'checkout-confirmation' },
       el('div', { class: 'card__body' },
-        el('h2', { id: 'co-done', tabindex: '-1' }, 'Payment submitted'),
+        el('h2', { id: 'co-done', tabindex: '-1' }, 'Payment received, checking it'),
         el('div', { class: 'checkout-copy' }, el('span', { class: 'checkout-code mono', 'data-testid': 'checkout-code' }, order.code), copyButton(order.code, 'checkout-copy-code', 'order code')),
         el('p', null, 'We will message you ' + channel + ' at ' + MDM.ui.phone.format(c.phone) + '.'),
         el('h3', null, 'What happens next'),
         el('ol', { class: 'checkout-next' },
           el('li', null, 'We match your transfer to order ' + order.code + ', usually within ' + review + '.'),
-          el('li', null, 'We message you ' + channel + ' once it is confirmed and a rider is assigned.'),
-          el('li', null, 'Track the pickup and delivery with your order code.')),
+          el('li', null, 'We message you ' + channel + ' once the payment is verified.'),
+          el('li', null, 'Track the collection and delivery with your order code.')),
         el('a', { class: 'btn btn--primary', href: trackHref(order.id), 'data-testid': 'checkout-track-link' }, 'Track this order')));
   }
   function renderInvalid() {
@@ -352,21 +357,23 @@
     state.orderId = order ? order.id : null;
     const review = (settings.ops && settings.ops.reviewText) || 'about 30 minutes';
     if (!order || order.status === 'draft') { show(renderInvalid(), ''); return; }
-    if (order.status === 'cancelled') { show(notice('danger', 'alert-circle', 'This order was cancelled.', trackAction(order)), ''); return; }
-    // Business orders are invoiced monthly and never pass through payment, so the note wins over the status redirect.
-    if (order.service === 'business') { show(notice('info', 'info', 'No payment needed now. This order goes on your monthly invoice.', trackAction(order)), ''); return; }
-    if (AFTER_CONFIRMED.indexOf(order.status) >= 0) { location.replace(trackHref(order.id)); return; }
-    if (order.status === 'quote_pending') {
-      show(notice('info', 'info', "We're confirming your price. We'll message you the payment link " + channelOf(order.customer) + '.', trackAction(order)), '');
+    const pay = order.payment || {};
+    if (pay.status === 'refunded') { show(notice('info', 'info', 'Refunded ' + MDM.pricing.format((pay.refund || {}).amount || 0) + '. Nothing to pay.', trackAction(order)), ''); return; }
+    if (order.status === 'cancelled') { show(notice('danger', 'alert-circle', 'This order was cancelled. Nothing to pay.', trackAction(order)), ''); return; }
+    // Business orders are invoiced monthly and never pass through payment.
+    if (pay.method === 'invoice' || pay.status === 'invoiced') { show(notice('info', 'info', 'No payment needed now. This order goes on your monthly business invoice.', trackAction(order)), ''); return; }
+    if (pay.status === 'paid') { show(el('div', { class: 'stack-4', 'data-testid': 'checkout-paid' }, notice('ok', 'check-circle', 'Paid, thank you. Verified ' + MDM.ui.fmtDate(pay.verifiedAt) + '.', invoiceLink(order)), orderSection(order, settings)), ''); return; }
+    if (pay.status === 'pending' && !(order.pricing && order.pricing.status === 'confirmed')) {
+      show(notice('info', 'info', "We're confirming your price. Pay once it is confirmed, or after delivery. We'll message you " + channelOf(order.customer) + '.', trackAction(order)), '');
       return;
     }
-    if (order.status === 'payment_review') {
+    if (pay.status === 'received') {
       show(renderConfirmation(order, settings), 'Your slip is with us. We check it, usually within ' + review + '.');
       if (state.focusPanel) { state.focusPanel = false; window.scrollTo(0, 0); const h = root.querySelector('#co-done'); if (h) h.focus({ preventScroll: true }); }
       return;
     }
     if (!state.draft || state.draftFor !== order.id) initDraft(order);
-    show(renderForm(order, settings, slip), 'Transfer the amount due to one of our accounts, then upload your slip. We confirm it, usually within ' + review + '.');
+    show(renderForm(order, settings, slip), (pay.status === 'requested' ? 'Payment is due for ' + order.code + '. ' : '') + 'Transfer the amount to one of our accounts, then upload your slip. We confirm it, usually within ' + review + '.');
     validateAll();
   }
 

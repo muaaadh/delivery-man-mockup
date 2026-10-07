@@ -7,27 +7,43 @@
     { label: 'Services', href: '#services', page: null },
     { label: 'How it works', href: '#how', page: null },
     { label: 'Rates', href: '#rates', page: null },
+    { label: 'Store', href: 'store/', page: 'store' },
     { label: 'Business', href: 'business/', page: 'business' },
-    { label: 'Track an order', href: 'track/', page: 'track' },
+    { label: 'Track', href: 'track/', page: 'track' },
   ];
   const FOOTER_COLUMNS = [
-    { title: 'Services', links: [{ label: 'Pick & deliver', href: 'request/' }, { label: 'Shop & deliver', href: 'request/' }, { label: 'For businesses', href: 'business/' }, { label: 'Rates', href: '#rates' }] },
-    { title: 'Your orders', links: [{ label: 'Request a delivery', href: 'request/' }, { label: 'Track an order', href: 'track/' }, { label: 'My orders', href: 'account/' }, { label: 'Questions', href: '#faq' }] },
-    { title: 'Team', links: [{ label: 'Customer sign-in', href: 'login/' }, { label: 'Rider sign-in', href: 'login/?as=rider' }, { label: 'Admin sign-in', href: 'login/?as=admin' }] },
+    { title: 'Services', links: [{ label: 'Home delivery', href: 'request/?type=home' }, { label: 'Shop & deliver', href: 'request/?type=shop_buy' }, { label: 'Postal & courier', href: 'request/?type=postal' }, { label: 'Airport & baggage', href: 'request/?type=airport' }, { label: 'Office assistance', href: 'request/?type=office' }, { label: 'E-store', href: 'store/' }] },
+    { title: 'Your orders', links: [{ label: 'Request a delivery', href: 'request/' }, { label: 'Track an order', href: 'track/' }, { label: 'My orders', href: 'account/' }, { label: 'For businesses', href: 'business/' }, { label: 'Questions', href: '#faq' }] },
+    { title: 'Team', links: [{ label: 'Customer sign-in', href: 'login/' }, { label: 'Business sign-in', href: 'login/?as=business' }, { label: 'Driver sign-in', href: 'login/?as=driver' }, { label: 'Staff portal', href: 'login/?as=staff' }, { label: 'Office sign-in', href: 'login/?as=admin' }] },
   ];
   const ADMIN_NAV = [
     { view: 'overview', label: 'Overview', icon: 'dashboard', group: 'Operations' },
     { view: 'orders', label: 'Orders', icon: 'package', group: 'Operations' },
+    { view: 'bulk', label: 'Bulk orders', icon: 'list', group: 'Operations' },
     { view: 'live', label: 'Live map', icon: 'map', group: 'Operations' },
-    { view: 'drivers', label: 'Riders', icon: 'bike', group: 'Operations' },
+    { view: 'drivers', label: 'Drivers', icon: 'bike', group: 'Operations' },
     { view: 'customers', label: 'Customers', icon: 'users', group: 'Accounts' },
     { view: 'business', label: 'Business', icon: 'building', group: 'Accounts' },
+    { view: 'store', label: 'E-store', icon: 'store', group: 'Accounts' },
+    { view: 'team', label: 'Team & HR', icon: 'clock', group: 'Team' },
+    { view: 'reports', label: 'Reports', icon: 'sliders', group: 'Insights' },
+    { view: 'notifications', label: 'Notifications', icon: 'bell', group: 'Insights' },
+    { view: 'activity', label: 'Activity log', icon: 'history', group: 'Insights' },
+    { view: 'zones', label: 'Zones', icon: 'route', group: 'Setup' },
     { view: 'rates', label: 'Rates', icon: 'banknote', group: 'Setup' },
     { view: 'settings', label: 'Settings', icon: 'settings', group: 'Setup' },
   ];
+  // Role permissions (client requirements §21): operators run the day, office staff handle customers and payments, admin sees everything.
+  const ROLE_VIEWS = {
+    admin: ADMIN_NAV.map(n => n.view),
+    operator: ['overview', 'orders', 'bulk', 'live', 'drivers', 'customers', 'business', 'store', 'reports', 'notifications', 'zones'],
+    office: ['overview', 'orders', 'customers', 'business', 'store', 'notifications'],
+  };
+  function session() { try { return JSON.parse(localStorage.getItem('mdm:session') || 'null'); } catch (e) { return null; } }
+  function allowedViews() { const s = session(); return ROLE_VIEWS[(s && s.role) || 'admin'] || ROLE_VIEWS.admin; }
   // Keys that are not sidebar views but count towards one: payment reviews and quotes are orders needing action, requests are business.
-  const COUNT_ALIAS = { reviews: 'orders', quotes: 'orders', unassigned: 'orders', onHold: 'orders', requests: 'business', riders: 'live', online: 'live' };
-  const HOT_VIEWS = { orders: true, business: true };
+  const COUNT_ALIAS = { reviews: 'orders', quotes: 'orders', unassigned: 'orders', onHold: 'orders', failed: 'orders', cancels: 'orders', priority: 'orders', requests: 'business', riders: 'live', online: 'live', leaves: 'team', batches: 'bulk' };
+  const HOT_VIEWS = { orders: true, business: true, team: true, bulk: true };
 
   // Minimal DOM builder: el(tag, { class, id, dataset, on:{ event: fn }, any attribute }, ...children) where children are Node | string | array | null.
   function el(tag, attrs) {
@@ -313,7 +329,8 @@
     const main = root.querySelector('main') || el('main', { id: 'main' });
     const nav = el('nav', { class: 'sidebar__nav', 'aria-label': 'Admin' });
     let group = null;
-    ADMIN_NAV.forEach(item => {
+    const allowed = allowedViews();
+    ADMIN_NAV.filter(item => allowed.indexOf(item.view) >= 0).forEach(item => {
       if (item.group !== group) { group = item.group; nav.appendChild(el('div', { class: 'sidebar__group' }, group)); }
       nav.appendChild(el('a', { href: MDM.href('admin/#/' + item.view), 'data-view': item.view },
         iconNode(item.icon, 16), el('span', { class: 'sidebar__label' }, item.label), el('span', { class: 'count', 'data-count': item.view, hidden: true })));
@@ -324,8 +341,8 @@
       el('div', { class: 'sidebar__brand' }, brandLink(MDM.href('admin/#/overview'))),
       nav,
       el('div', { class: 'sidebar__foot' },
-        el('span', { class: 'sidebar__avatar', 'aria-hidden': 'true' }, 'A'),
-        el('span', { class: 'sidebar__who' }, el('span', { class: 'sidebar__name' }, 'Admin'), el('span', { class: 'sidebar__role' }, 'Office')),
+        el('span', { class: 'sidebar__avatar', 'aria-hidden': 'true' }, ((session() || {}).name || 'Admin').charAt(0)),
+        el('span', { class: 'sidebar__who' }, el('span', { class: 'sidebar__name' }, (session() || {}).name || 'Admin'), el('span', { class: 'sidebar__role' }, { admin: 'Admin', operator: 'Operator', office: 'Office staff' }[(session() || {}).role] || 'Admin')),
         signout));
     admin.menu = el('button', { type: 'button', class: 'btn btn--ghost btn--icon topbar__menu', 'aria-label': 'Menu', 'aria-expanded': 'false', 'aria-controls': 'admin-sidebar',
       on: { click: () => setSidebarOpen(!admin.open) } }, iconNode('menu', 20));
@@ -389,7 +406,7 @@
 
   MDM.logo = logo;
   MDM.theme = { get: currentTheme, set: t => applyTheme(t, true), toggle: () => applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true), toggleButton: themeToggle };
-  MDM.shell = { mount, refresh, contactLinks, hoursLine, phoneDisplay, phoneLinks, setTitle, setCounts, setActive, setChrome, setSidebarOpen, el, BRAND };
+  MDM.shell = { ADMIN_NAV, ROLE_VIEWS, session, allowedViews, mount, refresh, contactLinks, hoursLine, phoneDisplay, phoneLinks, setTitle, setCounts, setActive, setChrome, setSidebarOpen, el, BRAND };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { mount(); });
   else mount();
 })(window.MDM);

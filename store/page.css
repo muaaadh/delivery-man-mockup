@@ -1,0 +1,63 @@
+/* E-store: catalogue grid, cart drawer lines and checkout. Components come from css/base.css. */
+body.page-store .btn:not(.btn--sm), body.page-store .input, body.page-store .select, body.page-store .segmented > label, body.page-store .checkbox { min-height: 44px; }
+body.page-store .btn--sm { position: relative; }
+body.page-store .btn--sm::after { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
+body.page-store main { padding-bottom: 64px; }
+
+.store-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.store-chips .chip { min-height: 36px; }
+.store-chips .chip .count { margin-left: 2px; color: inherit; opacity: .6; }
+.store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.store-card { display: flex; flex-direction: column; overflow: hidden; }
+.store-card__art { height: 132px; display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--text); border-bottom: 1px solid var(--border); }
+.store-card__art .icon { width: 44px; height: 44px; stroke-width: 1.5; }
+.store-card.is-out .store-card__art { color: var(--text-3); }
+.store-card__body { flex: 1 1 auto; display: flex; flex-direction: column; padding: 16px; }
+.store-card__cat { font-size: 12px; color: var(--text-3); }
+.store-card__name { margin-top: 2px; font-size: 16px; }
+.store-card__desc { margin-top: 6px; font-size: 14px; line-height: 1.45; color: var(--text-2); flex: 1 1 auto; }
+.store-card__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.store-card__pricebox { min-width: 0; }
+.store-card__price { font-size: 17px; font-weight: 600; white-space: nowrap; }
+.store-card__unit { font-size: 13px; font-weight: 400; color: var(--text-2); }
+.store-stock { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+.store-stock--low { color: var(--warn); font-weight: 500; }
+.store-stock--out { color: var(--danger); font-weight: 500; }
+
+.qty { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.qty__value { min-width: 24px; text-align: center; font-weight: 600; font-size: 15px; }
+.store-lines .list__item { align-items: flex-start; }
+.store-line__aside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
+.store-drawer-foot { width: 100%; justify-content: space-between; }
+.store-how { margin-top: 56px; }
+
+.store-checkout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 40px; align-items: start; }
+.store-form { max-width: none; }
+.store-form__h { padding-top: 12px; }
+.store-checkout__aside { position: sticky; top: calc(var(--header-h) + 16px); }
+.store-checkout__aside h2 { margin-bottom: 12px; }
+@media (max-width: 960px) {
+  .store-checkout { grid-template-columns: 1fr; gap: 24px; }
+  .store-checkout__aside { position: static; order: -1; }
+}
+@media (max-width: 720px) {
+  .store-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .store-card__art { height: 96px; }
+  .store-card__body { padding: 12px; }
+  .store-card__desc { display: none; }
+  .store-card__foot { flex-direction: column; align-items: stretch; gap: 10px; }
+  .store-card__foot .btn { width: 100%; }
+  .store-card__foot .qty { justify-content: space-between; }
+}
+@media (max-width: 360px) { .store-grid { grid-template-columns: 1fr; } }
+
+/* Same page-title band and entrance as the other public inner pages (css/base.css scopes those rules to their body classes). */
+body.page-store main .page-head { padding-bottom: 32px; margin-bottom: 36px; background: var(--band); box-shadow: 0 0 0 100vmax var(--band); clip-path: inset(0 -100vmax); }
+body.page-store main .page-head h1 { font-size: 36px; font-weight: 700; letter-spacing: -.025em; }
+body.page-store main .page-head > * { animation: rise-in .8s var(--ease-out) both; }
+body.page-store main .page-head > * + * { animation-delay: .08s; }
+@media (max-width: 720px) {
+  body.page-store main .page-head { padding-bottom: 24px; margin-bottom: 28px; }
+  body.page-store main .page-head h1 { font-size: 28px; }
+}
+@media (prefers-reduced-motion: reduce) { body.page-store main .page-head > * { animation: none; } }

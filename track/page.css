@@ -35,3 +35,12 @@ body.page-track .stop__title, body.page-track .stop__meta { display: block; }
 
 /* Timeline of public events plus what happens next. */
 body.page-track .timeline__item.is-upcoming .timeline__label { font-weight: 400; }
+
+/* Progress (status flow + payment), proof photos, documents */
+body.page-track .track-progress .timeline__label .badge { margin-left: 6px; vertical-align: 1px; }
+body.page-track .track-progress .track-step--stop::before { background: var(--danger); box-shadow: none; }
+body.page-track .track-proof-list .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-xs); border: 1px solid var(--border); }
+body.page-track .track-file { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: var(--radius-xs); border: 1px solid var(--border); font-size: 12px; font-weight: 500; color: var(--text-2); background: var(--surface); }
+body.page-track .track-proof-list .list__item { gap: 12px; }
+body.page-track .track-invoice { margin-top: 12px; }
+body.page-track .track-pay-row { margin-top: 16px; }

@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<script>(function(){try{var t=localStorage.getItem('mdm:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();</script>
+<script>document.documentElement.dataset.theme='light';</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>For businesses · Mr. Delivery Man</title>
-<meta name="description" content="Delivery for shops and offices in Malé and Hulhumalé: one rate per package, bulk orders by spreadsheet, priority requests, printable labels and one invoice a month.">
+<title>Shipping labels · Mr. Delivery Man</title>
+<meta name="description" content="Printable 100 × 150 mm shipping labels for Mr. Delivery Man packages, with tracking QR codes, zone and recipient.">
+<meta name="robots" content="noindex">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,6 +15,7 @@
 <link rel="stylesheet" href="../css/base.css">
 <link rel="stylesheet" href="../css/pages.css">
 <link rel="stylesheet" href="./page.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1" crossorigin="anonymous"></script>
 <script defer src="../js/mdm.js"></script>
 <script defer src="../js/icons.js"></script>
 <script defer src="../js/store.js"></script>
@@ -27,12 +29,11 @@
 <script defer src="../js/seed.js"></script>
 <script defer src="./page.js"></script>
 </head>
-<body class="page-business" data-page="business">
+<body class="page-labels" data-page="labels">
 <a class="sr-only" href="#main">Skip to content</a>
-<header data-shell="public"></header>
 <main id="main">
-  <div data-slot="app"></div>
+  <div class="labels-toolbar no-print" data-slot="toolbar"></div>
+  <div class="labels-sheet" data-slot="labels" data-testid="labels-sheet"></div>
 </main>
-<footer data-shell="public-footer"></footer>
 </body>
 </html>

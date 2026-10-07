@@ -11,7 +11,16 @@
     airport:      { key: 'airport',      label: 'Velana International Airport', short: 'Airport', island: 'hulhule',   center: [4.1915, 73.5285], radius: 0.0015, airport: true },
     villimale:    { key: 'villimale',    label: 'Villimalé',                  short: 'Villimalé', island: 'villimale', center: [4.1736, 73.4845], radius: 0.0015, ferry: true, quote: true },
   };
-  const ZONE_LIST = Object.values(ZONES);
+  let ZONE_LIST = Object.values(ZONES);
+  // Admin-managed zones (store collection `zones`) extend or relabel these at runtime: { key, name, short, island, center, radius, active }.
+  function registerZones(list) {
+    (list || []).forEach(z => {
+      if (!z || !z.key) return;
+      const base = ZONES[z.key] || { key: z.key, island: z.island || z.key, center: z.center || [4.1750, 73.5100], radius: z.radius || 0.003 };
+      ZONES[z.key] = Object.assign({}, base, { label: z.name || base.label || z.key, short: z.short || base.short || z.name || z.key, island: z.island || base.island, center: z.center || base.center, radius: z.radius || base.radius, active: z.active !== false, airport: !!(z.airport || base.airport), areas: z.areas || base.areas || [] });
+    });
+    ZONE_LIST = Object.values(ZONES).filter(z => z.active !== false);
+  }
   const CENTER = [4.1990, 73.5270];
   // Bridge + Hulhulé link road: fast segments for ETA and simulation.
   const HIGHWAY_BBOX = { minLat: 4.1690, maxLat: 4.2060, minLng: 73.5160, maxLng: 73.5420 };
@@ -29,6 +38,8 @@
     { value: 'cargo', label: 'MACL cargo terminal', point: [4.1880, 73.5300] },
     { value: 'seaplane', label: 'Seaplane terminal', point: [4.1965, 73.5290] },
     { value: 'hotel', label: 'Hulhulé Island Hotel', point: [4.1855, 73.5290] },
+    { value: 'domestic', label: 'Domestic terminal', point: [4.1935, 73.5284] },
+    { value: 'baggage', label: 'Baggage services and lost and found', point: [4.1918, 73.5276] },
   ];
   const MEET_AT = [
     { value: 'door', label: 'Door' },
@@ -178,7 +189,7 @@
   }
 
   MDM.geo = {
-    ZONES, ZONE_LIST, CENTER, HIGHWAY_BBOX, TERMINALS, AIRPORT_POINTS, MEET_AT,
+    ZONES, get ZONE_LIST() { return ZONE_LIST; }, registerZones, CENTER, HIGHWAY_BBOX, TERMINALS, AIRPORT_POINTS, MEET_AT,
     zone: k => ZONES[k] || null,
     zoneLabel: k => k === 'other' ? "Other (we'll confirm)" : ((ZONES[k] || {}).label || k),
     zoneShort: k => k === 'other' ? 'Other' : ((ZONES[k] || {}).short || k),

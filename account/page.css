@@ -1,4 +1,19 @@
-/* My orders: identity row, then the order list. */
+/* My orders: identity row, tabs, then the order table (stacked cards below 720px), messages and addresses. */
+body.page-account main { padding-bottom: 48px; }
 body.page-account .account-id { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-body.page-account .account-orders .list__aside { min-width: 96px; }
-body.page-account .account-cta { margin-top: 24px; margin-bottom: 48px; display: flex; gap: 12px; flex-wrap: wrap; }
+body.page-account .account-id .row { gap: 8px; }
+body.page-account .tabs { margin-bottom: 20px; }
+body.page-account .tab .count { margin-left: 2px; }
+body.page-account .filters__chips { display: flex; flex-wrap: wrap; gap: 8px; }
+body.page-account .account-table .table td { vertical-align: top; }
+body.page-account .account-table .table__address { display: block; max-width: 220px; overflow-wrap: anywhere; }
+body.page-account .account-table tr.is-clickable { cursor: pointer; }
+body.page-account .account-table tr.is-clickable:focus-visible { outline: none; box-shadow: inset var(--focus); }
+body.page-account .account-messages .list__item { align-items: flex-start; }
+body.page-account .account-messages .list__aside { text-align: right; white-space: nowrap; }
+body.page-account .btn:not(.btn--sm), body.page-account .tab, body.page-account .chip { min-height: 44px; }
+.account-h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+.account-drawer-actions { gap: 8px; }
+@media (max-width: 720px) { body.page-account .account-table .table__address { max-width: none; } }
+body.page-account .account-table .table__primary, body.page-account .account-table td.num { white-space: nowrap; }
+body.page-account .account-table .table__primary .table__sub { white-space: normal; }

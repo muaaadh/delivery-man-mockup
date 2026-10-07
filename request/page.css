@@ -1,38 +1,71 @@
-/* Request a delivery: page layout only. Components come from css/base.css and are not restyled here. */
+/* Request a delivery: page layout only. Components come from css/base.css; the pieces below are the request type cards,
+   the per-size quantity rows, the estimate line and the upload lists. Every rule is scoped to body.page-request. */
 body.page-request .request-form { min-width: 0; }
-body.page-request .request-step .form { margin-top: 0; }
+body.page-request .request-step > * + * { margin-top: 20px; }
+body.page-request .request-step > .section-head + * { margin-top: 16px; }
+body.page-request .request-step .form-actions { margin-top: 28px; }
+body.page-request .stepper { min-height: 44px; flex-wrap: nowrap; overflow: hidden; }
 
-/* Package cart rows (one card per saved package) */
-body.page-request .pkg-list > * + * { margin-top: 12px; }
-body.page-request .pkg-list { margin-bottom: 16px; }
-body.page-request .pkg-list:empty { display: none; }
-body.page-request .pkg-row__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-body.page-request .pkg-row__main { flex: 1 1 auto; min-width: 0; }
-body.page-request .pkg-row__label { font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-body.page-request .pkg-row__title { font-size: 15px; font-weight: 500; margin-top: 2px; overflow-wrap: anywhere; }
-body.page-request .pkg-row__desc { font-size: 15px; margin-top: 2px; overflow-wrap: anywhere; }
-body.page-request .pkg-row__line { font-size: 13px; line-height: 1.4; color: var(--text); margin-top: 6px; overflow-wrap: anywhere; }
-body.page-request .pkg-row__line + .pkg-row__line { margin-top: 2px; }
-body.page-request .pkg-row__flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-body.page-request .pkg-row__price { flex: none; font-size: 15px; font-weight: 500; white-space: nowrap; }
-body.page-request .pkg-row__actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 -6px -10px; }
+/* Request type cards (a radio group) */
+body.page-request .request-types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+body.page-request .request-type { position: relative; display: flex; flex-direction: column; gap: 4px; min-height: 92px; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--card); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+body.page-request .request-type__label { font-size: 15px; font-weight: 600; line-height: 1.3; }
+body.page-request .request-type__hint { font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-request .request-type.is-selected, body.page-request .request-type:has(> input:checked) { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); }
+body.page-request .request-type:has(> input:focus-visible) { box-shadow: var(--focus); }
+@media (hover: hover) { body.page-request .request-type:hover { border-color: var(--text-3); } body.page-request .request-type.is-selected:hover { border-color: var(--red); } }
+@media (max-width: 720px) { body.page-request .request-types { grid-template-columns: repeat(2, minmax(0, 1fr)); } body.page-request .request-type { min-height: 84px; padding: 12px; } }
 
-/* Step 1 packages heading sits between the service control and the list */
-body.page-request .request-step .section-head { margin-top: 8px; }
-body.page-request .request-step .section-head:first-child { margin-top: 0; }
-body.page-request .request-step .form > .section-head { margin-bottom: 12px; }
+/* Grouped fields inside a step */
+body.page-request .request-group { padding-top: 20px; border-top: 1px solid var(--border); }
+body.page-request .request-group > * + * { margin-top: 16px; }
+body.page-request .request-group__title { font-size: 15px; font-weight: 600; }
+body.page-request .request-group .grid-2 > .field + .field { margin-top: 0; }
 
-/* Review step: the Edit action sits in each group heading row, so value rows stay plain text */
-body.page-request .review__edit { margin: -6px -10px -6px 0; }
+/* Package sizes: one row per size with a quantity stepper, details open when the count is above 0 */
+body.page-request .request-sizes > .request-size + .request-size { border-top: 1px solid var(--border); }
+body.page-request .request-sizes { border: 1px solid var(--border); border-radius: var(--radius); padding: 0 16px; background: var(--card); }
+body.page-request .request-size { padding: 14px 0; }
+body.page-request .request-size__row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+body.page-request .request-size__main { min-width: 0; }
+body.page-request .request-size__label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 16px; font-weight: 600; }
+body.page-request .request-size__price { font-size: 13px; font-weight: 500; color: var(--text-2); }
+body.page-request .request-size__hint { margin-top: 2px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-request .request-size__detail { margin-top: 14px; padding: 14px; border-radius: var(--radius-sm); background: var(--surface); }
+body.page-request .request-size__detail > * + * { margin-top: 12px; }
+body.page-request .request-size__detail .field + .field { margin-top: 0; }
+body.page-request .request-dims.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+body.page-request .request-qty { flex: none; display: flex; align-items: center; gap: 6px; }
+body.page-request .request-qty__value { min-width: 28px; text-align: center; font-size: 17px; font-weight: 600; }
+body.page-request .request-qty .btn--sm { width: 40px; height: 40px; }
+body.page-request .request-sizes > .field__error { padding-bottom: 12px; }
 
-/* Sticky panel */
-body.page-request .request-panel__foot { padding: 6px 0 4px; }
-body.page-request .request-panel__foot .btn { margin-left: -10px; }
-body.page-request .request-layout__panel .summary > p { margin: 4px 0 6px; }
+/* Estimate line under the sizes */
+body.page-request .request-estimate { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--surface); }
+body.page-request .request-estimate__label { font-size: 14px; color: var(--text-2); }
+body.page-request .request-estimate__value { font-size: 18px; font-weight: 600; }
+body.page-request .request-flags { gap: 4px 24px; }
+body.page-request .request-flags .field + .field { margin-top: 0; }
 
-/* Mobile bar contents */
+/* Upload lists and saved addresses */
+body.page-request .request-doc { padding: 14px; }
+body.page-request .request-doc > .stack-2 + .request-doc__pick { margin-top: 12px; }
+body.page-request .request-doc__pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+body.page-request .request-doc__pick .btn { margin-top: 0; }
+body.page-request .request-photo .btn { margin-top: 2px; }
+body.page-request .request-saved .row { gap: 8px; margin-top: 6px; }
+body.page-request .request-saved .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 36px; }
+
+/* Review */
+body.page-request .review__edit { justify-self: end; margin: -6px -10px -6px 0; }
+body.page-request .request-review__group .rate-table__value { overflow-wrap: anywhere; white-space: pre-line; }
+
+/* Sticky panel and mobile bar */
+body.page-request .request-layout__panel .summary > p { margin: 4px 0 8px; }
 body.page-request .mobile-bar__info { min-width: 0; }
 body.page-request .mobile-bar .btn { flex: none; }
-
-/* Stepper items stay level when done steps become 44px buttons */
-body.page-request .stepper { min-height: 44px; }
+@media (max-width: 480px) {
+  body.page-request .request-dims.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  body.page-request .request-size__detail { padding: 12px; }
+}
+body.page-request .request-size__caption { font-size: 13px; line-height: 1.4; color: var(--text-2); }

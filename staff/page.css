@@ -1,0 +1,35 @@
+/* Staff portal: punch clock, attendance, leave. Components come from css/base.css. */
+body.page-staff .btn:not(.btn--sm), body.page-staff .input, body.page-staff .select, body.page-staff .checkbox { min-height: 44px; }
+body.page-staff main { padding-bottom: 64px; }
+.staff-signin { max-width: 520px; }
+.staff-punchcard__body { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.staff-clock { font-size: 44px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; margin: 6px 0 4px; }
+.staff-since { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+.staff-punchcard__action { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; text-align: right; }
+.staff-punch { min-width: 220px; }
+.staff-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.staff-grid .card > .list > .list__item { padding-left: 16px; padding-right: 16px; }
+.staff-grid .card > .empty { padding-left: 16px; padding-right: 16px; }
+.staff-leave { align-items: flex-start; }
+@media (min-width: 720px) { .staff-grid .card > .list > .list__item, .staff-grid .card > .empty { padding-left: 20px; padding-right: 20px; } }
+@media (max-width: 960px) { .staff-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  .staff-clock { font-size: 36px; }
+  .staff-punchcard__action { align-items: stretch; text-align: left; width: 100%; }
+  .staff-punch { width: 100%; min-width: 0; }
+  .kpi-row[data-testid="staff-kpis"] .kpi:last-child { grid-column: 1 / -1; }
+}
+.staff-att td { vertical-align: top; }
+.staff-att__note { margin-top: 4px; }
+@media (max-width: 480px) { .staff-att th, .staff-att td { padding-left: 8px; padding-right: 8px; font-size: 14px; } }
+
+/* Same page-title band and entrance as the other public inner pages (css/base.css scopes those rules to their body classes). */
+body.page-staff main .page-head { padding-bottom: 32px; margin-bottom: 36px; background: var(--band); box-shadow: 0 0 0 100vmax var(--band); clip-path: inset(0 -100vmax); }
+body.page-staff main .page-head h1 { font-size: 36px; font-weight: 700; letter-spacing: -.025em; }
+body.page-staff main .page-head > * { animation: rise-in .8s var(--ease-out) both; }
+body.page-staff main .page-head > * + * { animation-delay: .08s; }
+@media (max-width: 720px) {
+  body.page-staff main .page-head { padding-bottom: 24px; margin-bottom: 28px; }
+  body.page-staff main .page-head h1 { font-size: 28px; }
+}
+@media (prefers-reduced-motion: reduce) { body.page-staff main .page-head > * { animation: none; } }

@@ -1,3 +1,67 @@
-/* For businesses: page layout only. Components (rate-table, steps, form, card, alert) come from css/base.css unchanged. */
+/* For businesses: public page + business portal. Components (rate-table, steps, form, card, alert, kpi, table, tabs) come from css/base.css. */
 body.page-business .business-note { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
 body.page-business .business-received { max-width: 640px; }
+body.page-business .biz-signin { margin-bottom: 48px; }
+body.page-business .biz-signin .form { max-width: 420px; }
+
+/* Portal chrome */
+body.page-business .biz-head h1 { overflow-wrap: anywhere; }
+body.page-business .biz-tabs { margin-bottom: 24px; scrollbar-width: none; }
+body.page-business .biz-tabs::-webkit-scrollbar { display: none; }
+body.page-business .biz-tabs .tab { text-decoration: none; }
+body.page-business .biz-tabs .tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--brand); }
+body.page-business .biz-panel { padding-bottom: 64px; }
+body.page-business .biz-two { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
+body.page-business .biz-two > .card:last-child { min-width: 0; }
+body.page-business .biz-aside { position: sticky; top: calc(var(--header-h) + 16px); }
+body.page-business .biz-form > * + * { margin-top: 16px; }
+body.page-business .biz-form .form-actions { flex-wrap: wrap; }
+body.page-business .biz-done { max-width: 720px; }
+body.page-business .biz-overview { align-items: start; }
+body.page-business .biz-status { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+@media (min-width: 721px) { body.page-business .biz-status { justify-content: flex-start; } }
+body.page-business .biz-tag--priority { border-color: var(--brand); color: var(--brand); font-weight: 500; }
+body.page-business .biz-row-actions { white-space: nowrap; text-align: right; }
+body.page-business .biz-row-actions .row { justify-content: flex-end; }
+body.page-business .list__item--top { align-items: flex-start; }
+body.page-business .biz-plist .list__item, body.page-business .biz-plist .empty { padding-left: 16px; padding-right: 16px; }
+@media (min-width: 720px) { body.page-business .biz-plist .list__item, body.page-business .biz-plist .empty { padding-left: 20px; padding-right: 20px; } }
+body.page-business .biz-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Batch progress */
+body.page-business .biz-progress { height: 4px; margin-top: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; max-width: 320px; }
+body.page-business .biz-progress > span { display: block; height: 100%; background: var(--text); border-radius: inherit; }
+
+/* Label picker */
+body.page-business .biz-pick { padding: 4px 16px 8px; }
+body.page-business .biz-pick__all { border-bottom: 1px solid var(--border); padding-bottom: 8px; font-weight: 500; }
+body.page-business .biz-pick__item + .biz-pick__item { border-top: 1px solid var(--border); }
+body.page-business a.btn[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+
+/* Bulk editor: a header row and one grid row per package on wide screens; stacked cells with labels on phones. */
+body.page-business .bulk-head, body.page-business .bulk-row { display: grid; grid-template-columns: 24px minmax(0, 1.2fr) minmax(0, .9fr) minmax(0, 1.6fr) minmax(0, .9fr) minmax(0, .7fr) minmax(0, 1.2fr) minmax(0, .9fr) 32px; gap: 8px; align-items: center; }
+body.page-business .bulk-head { padding-bottom: 6px; font-size: 12px; font-weight: 500; color: var(--text-2); }
+body.page-business .bulk-row { padding: 6px 0; border-top: 1px solid var(--border); }
+body.page-business .bulk-row__num { font-size: 12px; color: var(--text-3); text-align: center; }
+body.page-business .bulk-cell { display: block; min-width: 0; }
+body.page-business .bulk-cell__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+body.page-business .bulk-row .input--sm, body.page-business .bulk-row .select { height: 34px; min-height: 0; font-size: 13px; }
+body.page-business .bulk-row .select { padding-right: 28px; background-position: right 8px center; }
+body.page-business .bulk-row .is-invalid { border-color: var(--danger); }
+@media (max-width: 960px) {
+  body.page-business .biz-two { grid-template-columns: 1fr; }
+  body.page-business .biz-aside { position: static; }
+  body.page-business .bulk-head { display: none; }
+  body.page-business .bulk-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; padding: 40px 0 12px; position: relative; }
+  body.page-business .bulk-row__num { position: absolute; top: 14px; left: 0; text-align: left; font-weight: 500; color: var(--text-2); }
+  body.page-business .bulk-row__num::before { content: "Package "; }
+  body.page-business .bulk-cell--wide { grid-column: 1 / -1; }
+  body.page-business .bulk-cell__label { position: static; width: auto; height: auto; clip: auto; display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500; color: var(--text-2); }
+  body.page-business .bulk-row__remove { position: absolute; top: 6px; right: 0; }
+  body.page-business .bulk-row .input--sm, body.page-business .bulk-row .select { height: 40px; font-size: 16px; }
+}
+@media (max-width: 720px) {
+  body.page-business .biz-batch { flex-wrap: wrap; }
+  body.page-business .biz-batch .list__main { flex: 1 1 100%; }
+  body.page-business .biz-batch .list__aside { justify-content: flex-start; }
+}

@@ -1,5 +1,19 @@
-/* Sign-in page: one narrow column, the role switch above three small forms. */
-body.page-login .login-form { max-width: 420px; margin-top: 24px; }
+/* Sign-in page: one narrow column, a role picker above one small form. */
+body.page-login .login-form { max-width: 440px; margin-top: 24px; }
 body.page-login .login-form .field + .field { margin-top: 16px; }
+body.page-login .login-form > .alert + .field, body.page-login .login-form > .login-sub + .field { margin-top: 16px; }
 body.page-login .login-actions { margin-top: 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-body.page-login .login-note { margin-top: 16px; }
+body.page-login .login-sub { font-size: 18px; font-weight: 600; margin: 0 0 12px; }
+body.page-login .login-roles { border: 0; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+body.page-login .login-role { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 12px; border: 1px solid var(--border-control); border-radius: var(--radius-sm); background: var(--card); cursor: pointer; min-height: 88px; transition: border-color .15s ease, background-color .15s ease; }
+body.page-login .login-role:hover { border-color: var(--text-3); }
+body.page-login .login-role__icon { color: var(--text-2); display: inline-flex; margin-bottom: 6px; }
+body.page-login .login-role__label { font-weight: 600; font-size: 15px; color: var(--text); }
+body.page-login .login-role__hint { font-size: 12px; line-height: 1.35; color: var(--text-3); }
+body.page-login .login-role:has(> input:checked) { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+body.page-login .login-role:has(> input:checked) .login-role__icon { color: var(--brand); }
+body.page-login .login-role:has(> input:focus-visible) { box-shadow: 0 0 0 2px var(--brand); }
+@media (max-width: 720px) {
+  body.page-login .login-roles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.page-login .login-role:last-child { grid-column: 1 / -1; min-height: 0; }
+}

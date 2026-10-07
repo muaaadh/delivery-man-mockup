@@ -5,7 +5,7 @@
 <script>(function(){try{var t=localStorage.getItem('mdm:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Request a delivery · Mr. Delivery Man</title>
-<meta name="description" content="Request a pickup or a shopping run in Malé, Hulhumalé and the airport. Add your packages, pick a time, pay by bank transfer and track the rider to the door.">
+<meta name="description" content="Request a home delivery, a shop run, a postal or courier collection, an airport or baggage job, or an office errand in Malé, Hulhumalé and the airport.">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,7 +24,6 @@
 <script defer src="../js/live.js"></script>
 <script defer src="../js/ui.js"></script>
 <script defer src="../js/shell.js"></script>
-<script defer src="../js/package-editor.js"></script>
 <script defer src="../js/seed.js"></script>
 <script defer src="./page.js"></script>
 </head>
@@ -35,7 +34,7 @@
   <div class="container">
     <div class="page-head">
       <h1>Request a delivery</h1>
-      <p class="page-head__desc">Tell us what to pick up and where it goes. You pay by bank transfer, then track the rider to the door.</p>
+      <p class="page-head__desc">Tell us what to collect and where it goes. You see an estimated price now, our team confirms the final price, and you pay after delivery or upfront.</p>
     </div>
     <div class="request-layout">
       <form data-testid="request-form" class="request-form" novalidate autocomplete="on">
@@ -44,6 +43,8 @@
         <section class="request-step" id="request-step-2" data-step="2" aria-labelledby="request-step-2-title" hidden></section>
         <section class="request-step" id="request-step-3" data-step="3" aria-labelledby="request-step-3-title" hidden></section>
         <section class="request-step" id="request-step-4" data-step="4" aria-labelledby="request-step-4-title" hidden></section>
+        <section class="request-step" id="request-step-5" data-step="5" aria-labelledby="request-step-5-title" hidden></section>
+        <section class="request-step" id="request-step-6" data-step="6" aria-labelledby="request-step-6-title" hidden></section>
       </form>
       <aside class="request-layout__panel" aria-label="Your request" data-testid="request-panel"></aside>
     </div>

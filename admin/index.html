@@ -5,7 +5,7 @@
 <script>(function(){try{var t=localStorage.getItem('mdm:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Admin · Mr. Delivery Man</title>
-<meta name="description" content="Admin portal for Mr. Delivery Man: orders, payments, riders, live map, business accounts, rates and settings.">
+<meta name="description" content="Office portal for Mr. Delivery Man: orders, payments, drivers, bulk orders, zones, team and leave, reports, e-store, rates and settings.">
 <meta name="robots" content="noindex">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="../css/base.css">
 <link rel="stylesheet" href="../css/pages.css">
 <link rel="stylesheet" href="./admin.css">
+<link rel="stylesheet" href="./ops.css">
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js" integrity="sha384-KKgyz2mG25bKJ1O2PyqTJPlAF8Kw2BpDmsLTNBXslICOBvhTAyF5F0XhLWF2ZovY" crossorigin="anonymous"></script>
 <script defer src="../js/mdm.js"></script>
 <script defer src="../js/icons.js"></script>
@@ -32,6 +33,7 @@
 <script defer src="./admin.js"></script>
 <script defer src="./orders.js"></script>
 <script defer src="./views.js"></script>
+<script defer src="./ops.js"></script>
 </head>
 <body class="page-admin" data-page="admin">
 <a class="sr-only" href="#main">Skip to content</a>

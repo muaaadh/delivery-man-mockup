@@ -338,6 +338,7 @@
   // `mdm:simlease` refreshed every 2 s, another tab takes over when the lease is missing or older than 6 s, and the lease is released
   // on pagehide. Positions only, source 'sim', never a status change. Yields as soon as a driver page simulates or shares GPS.
   let auto = null;
+  const MOVING = ['on_the_way', 'arrived', 'collected', 'out_for_delivery'];
   function autopilot() {
     if (auto) return auto.promise;
     auto = { timer: null, sim: null, orderId: null, code: null, driverId: null, enabled: false, busy: false, idle: 0 };
@@ -361,7 +362,7 @@
       if (!writeLease('autopilot')) { autoYield(); return; }
       if (auto.sim) {
         const o = await MDM.store.get('orders', auto.orderId);
-        if (!o || o.status !== 'in_transit' || o.driverId !== auto.driverId) autoStopSim();
+        if (!o || MOVING.indexOf(o.status) < 0 || o.driverId !== auto.driverId) autoStopSim();
         return;
       }
       // While idle, look for a drivable order every 5th tick (10 s) rather than on every lease refresh.
@@ -369,7 +370,7 @@
     } finally { auto.busy = false; }
   }
   async function autoStart() {
-    const list = await MDM.store.list('orders', { where: { status: 'in_transit' } });
+    const list = await MDM.store.list('orders', { where: { status: MOVING } });
     const ok = list.filter(o => o && o.driverId && o.route && Array.isArray(o.route.polyline) && o.route.polyline.length >= 2);
     const order = ok.find(o => o.code === AUTOPILOT_CODE) || ok[0];
     if (!order) return;

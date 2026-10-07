@@ -155,5 +155,26 @@
     return (size === 'xl' ? 'from ' : '') + format(v);
   }
 
-  MDM.pricing = { quote, recalc, feeLines, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
+  // estimateRange(packages, settings, service) → { min, max, exact }: the customer sees a range until the operator confirms the price.
+  // min prices every package at the same-island rate, max at the across-the-bridge rate; exact uses the zones already chosen.
+  function estimateRange(packages, settings, service) {
+    const s = settings || {};
+    const pk = packages || [];
+    const exact = quote({ service: service || 'pick', packages: pk }, s).totals.total;
+    if (service === 'business') return { min: exact, max: exact, exact };
+    const sizes = (s.rates || {}).sizes || {};
+    const fees = quote({ service: service || 'pick', packages: pk }, s).totals;
+    const extra = fees.fees + (fees.budget || 0);
+    const min = pk.reduce((n, p) => n + round((sizes[p.size] || {}).same), 0) + extra;
+    const max = pk.reduce((n, p) => n + round((sizes[p.size] || {}).cross), 0) + extra;
+    return { min: Math.min(min, exact), max: Math.max(max, exact), exact };
+  }
+  // countsRange({ bag, box, xl }, settings) → { min, max } for the quantity steppers, before any address is known.
+  function countsRange(counts, settings) {
+    const sizes = ((settings || {}).rates || {}).sizes || {};
+    let min = 0, max = 0;
+    Object.keys(SIZES).forEach(k => { const n = Number(counts[k]) || 0; min += n * round((sizes[k] || {}).same); max += n * round((sizes[k] || {}).cross); });
+    return { min, max };
+  }
+  MDM.pricing = { estimateRange, countsRange, quote, recalc, feeLines, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
 })(window.MDM);

@@ -34,7 +34,7 @@
     setText('home-fee-business', String(Math.round(Number(rates.business) || 0)));
     setText('home-due-days', 'due in ' + (Number(s.invoiceDueDays) || 14) + ' days');
 
-    setKey('bag-cross', fmt(bag.cross));
+    setKey('bag-cross', fmt(bag.cross)); setKey('bag-same', fmt(bag.same)); setKey('bag-cross-num', String(bag.cross));
     const bank = (s.banks || [])[0]; if (bank) { setKey('bank-name', bank.name); setKey('bank-no', bank.accountNo); }
     setKey('review', ops.reviewText ? ', usually in ' + ops.reviewText : '');
     if (ops.asapText) setText('home-faq-asap', ops.asapText + ' when you choose "as soon as possible". You can also pick a 2-hour window later today or another day.');
@@ -61,7 +61,7 @@
   async function loadDemo() {
     let order = await MDM.store.orderByCode(DEMO_CODE);
     if (!order || !order.driverId || !(order.route && (order.route.polyline || []).length)) {
-      order = (await MDM.store.list('orders', { where: { status: ['in_transit', 'picked_up', 'assigned'] } })).find(o => o.driverId && o.route && (o.route.polyline || []).length) || null;
+      order = (await MDM.store.list('orders', { where: { status: ['out_for_delivery', 'collected', 'on_the_way', 'arrived', 'dispatched'] } })).find(o => o.driverId && o.route && (o.route.polyline || []).length) || null;
     }
     demo.order = order; demo.settings = await MDM.store.settings();
     if (!order) return;

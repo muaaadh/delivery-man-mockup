@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<script>(function(){try{var t=localStorage.getItem('mdm:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();</script>
+<script>document.documentElement.dataset.theme='light';</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>For businesses · Mr. Delivery Man</title>
-<meta name="description" content="Delivery for shops and offices in Malé and Hulhumalé: one rate per package, bulk orders by spreadsheet, priority requests, printable labels and one invoice a month.">
+<title>Invoice · Mr. Delivery Man</title>
+<meta name="description" content="Printable invoice for a Mr. Delivery Man order.">
+<meta name="robots" content="noindex">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,12 +28,8 @@
 <script defer src="../js/seed.js"></script>
 <script defer src="./page.js"></script>
 </head>
-<body class="page-business" data-page="business">
+<body class="page-invoice page-order-invoice" data-page="invoice">
 <a class="sr-only" href="#main">Skip to content</a>
-<header data-shell="public"></header>
-<main id="main">
-  <div data-slot="app"></div>
-</main>
-<footer data-shell="public-footer"></footer>
+<main id="main"><div class="container container--narrow" data-slot="invoice"><div class="page-head"><h1>Invoice</h1></div><div class="skeleton" style="height: 240px"></div></div></main>
 </body>
 </html>

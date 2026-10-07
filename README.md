@@ -1,30 +1,36 @@
 # Mr. Delivery Man — web app mockup
 
-A working mockup of the customer site, checkout, live tracking, rider console and admin portal for Mr. Delivery Man, a delivery
-service in Greater Malé. Static HTML/CSS/JS, no build step; everything runs in the browser on demo data so the whole product can be
+A working mockup of the customer site, ordering, tracking, business portal, e-store, driver console, staff portal and office portal
+for Mr. Delivery Man, a delivery service in Greater Malé. Static HTML/CSS/JS, no build step; everything runs in the browser on demo data so the whole product can be
 clicked through end to end.
 
 ## Demo walkthrough
 
 | Surface | URL | Notes |
 | --- | --- | --- |
-| Home | `/` | Customer-facing one-pager: live tracking demo in the hero phone, services, how it works, tracking, rates, business, coverage map, FAQ, contact |
-| Sign in | `/login/` | Customers by mobile number + one-time code (any 4 digits in the demo), riders by name + PIN, admin `admin` / `delivery` |
-| My orders | `/account/` | The signed-in customer's orders with pay/track actions and saved addresses |
-| Request a delivery | `/request/` | Pick & deliver / Shop & deliver, multi-package cart, schedule, review with live pricing |
-| Checkout | `/checkout/?order=…` | Bank transfer details, slip upload (image/PDF), submit for verification |
-| Track an order | `/track/?code=MDM-1038` | Live rider on the map, stops, ETA, timeline. MDM-1038 is always on the way (demo autopilot) |
-| For businesses | `/business/` | MVR 25/package account request |
-| Rider console | `/driver/` | Choose a rider, Start route, Arrived / Picked up / Delivered, Simulate route or Use my GPS |
-| Admin | `/admin/` | Sign in with `admin` / `delivery`: dark grouped sidebar, top bar with order search, New order and riders online; overview, orders + verification drawer, live map, riders, customers, business accounts + invoices, rates, settings |
+| Home | `/` | Customer one-pager: live order in the hero phone, how it works, every service (home, shop, postal & courier, airport & baggage, office assistance, e-store), normal / express / advance, rates, business, coverage, FAQ |
+| Sign in | `/login/` | Five roles. Customer and Business by mobile + one-time code (any 4 digits); Driver and Staff by name + PIN; Office by username + password (`admin`, `operator`, `lamya`, password `delivery`) with "Forgot password" |
+| Request a delivery | `/request/?type=postal` | Six request types with their own fields (carriers and collection codes, airport flight and baggage, office documents, shop invoice), service level, collection, Bag/Box/XL quantities with an estimated range, photo and dimensions, delivery, pay after delivery or upfront |
+| Track an order | `/track/?code=MDM-1038` | Status timeline with who and when, payment step, price estimate vs confirmed, cancellation request, proofs, documents, invoice link, live driver on the map |
+| Pay | `/checkout/?code=MDM-1032` | Bank transfer and slip upload once payment is requested (or optional upfront after confirmation) |
+| Invoice | `/invoice/?order=MDM-1031` | Printable customer invoice |
+| My orders | `/account/` | History with payment and delivery status, order detail, cancellation request, messages, saved addresses |
+| Business portal | `/business/` | Sign in with 780 1122 (Kandu Books) or 763 3221 (Fonu): single orders, bulk orders with CSV, order tracking, priority requests, invoices, labels |
+| Labels | `/labels/?batch=blk_seed_1001` | 100 × 150 mm shipping labels with QR, one per package (`?order=`, `?orders=`, `?code=`, `?batch=`) |
+| E-store | `/store/` | Packaging, supplies and delivery bundles; cart and checkout into a normal delivery order |
+| Staff portal | `/staff/` | Punch in / out, attendance, leave requests |
+| Driver console | `/driver/` | Punch in, own and zone jobs, Start → Arrived → Collected (photo, size) → Out for delivery → Delivered (photo, recipient), report a problem with reason and photo, leave request, GPS or simulation |
+| Office portal | `/admin/` | Role-based (admin / operator / office). Overview KPIs and action queues; orders with price confirmation, payments, assignment, failures, cancellations, priority, change history; bulk orders by zone; live map; drivers; customers; business; e-store; team & HR; reports with CSV; notifications; activity log; zones; rates; settings |
 
-Useful seeded orders: `MDM-1036` and `MDM-1037` are waiting for payment verification (with slips), `MDM-1034` needs a quote
-(Villimalé), `MDM-1035` is awaiting the customer's transfer, `MDM-1040` is on hold (no answer at the door), `MDM-1041`/`MDM-1042` are
-confirmed and need a rider, `MDM-1039` is assigned to Ibrahim Shiyam. Admin → Settings → "Reset demo data" restores everything; the
-demo also re-seeds itself after 12 hours if nothing was changed.
+Useful seeded orders: `MDM-1035` (XL with a package photo) and `MDM-1034`, `MDM-1048`, `MDM-1055` need the price confirmed;
+`MDM-1036` and `MDM-1037` have slips to verify; `MDM-1040` failed (recipient unavailable) and waits for a decision; `MDM-1051` has a
+cancellation request; `MDM-1049` (business) and `MDM-1048` (express) have priority requests; `MDM-1032` is delivered and waiting
+for payment; `MDM-1038` is out for delivery and always moving (demo autopilot); `BLK-1001` is a bulk order being delivered by zone and
+`BLK-1002` is waiting for collection. Admin → Settings → "Reset demo data" restores everything; the demo also re-seeds itself after
+12 hours if nothing was changed.
 
-The whole flow to try: request two packages → checkout with any image as the slip → admin verifies and assigns a rider → rider
-console (choose that rider, Start route, Simulate route) → the tracking page follows the rider to the door.
+The whole flow to try: request a delivery → office confirms the price, assigns and dispatches → driver console (choose that driver,
+punch in, run the job with photos) → the customer pays the invoice from the tracking page → office verifies the payment.
 
 ## Pricing as modelled
 

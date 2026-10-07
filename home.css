@@ -162,6 +162,20 @@ body.page-home .tile__big { margin-top: auto !important; padding-top: 24px; font
 body.page-home .tile__sub { margin-top: 4px !important; font-size: 17px; }
 body.page-home .tile__link { margin-top: 20px; align-self: flex-start; color: inherit; font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 5px; }
 
+body.page-home .tile--sm { min-height: 300px; padding: 36px; }
+body.page-home .tile--sm h3 { font-size: 26px; }
+body.page-home .tile--sm .tile__link { margin-top: auto; padding-top: 20px; }
+body.page-home .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+body.page-home .chips li { padding: 6px 12px; border-radius: 999px; background: var(--tint); font-size: 13px; color: var(--text-2); }
+body.page-home .tile--ink .chips li { background: rgba(255, 255, 255, .1); color: rgba(255, 255, 255, .8); }
+body.page-home .tile--ink .tile__link { color: #fff; }
+body.page-home .levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 56px; }
+body.page-home .level { padding: 4px 32px; }
+body.page-home .level + .level { border-left: 1px solid var(--border); }
+body.page-home .level h3 { font-size: 19px; font-weight: 600; }
+body.page-home .level p { margin-top: 6px; font-size: 15px; color: var(--text-2); }
+body.page-home .biz__actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
 /* ---------- Rates ---------- */
 body.page-home .rates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 body.page-home .rate { padding: 8px 36px 12px; text-align: center; }
@@ -226,6 +240,10 @@ body.page-home .finale__signin a { color: var(--text); text-decoration: underlin
   body.page-home .tile--wide { grid-column: auto; grid-template-columns: 1fr; gap: 24px; }
   body.page-home .tile { min-height: 0; padding: 32px; border-radius: 26px; }
   body.page-home .rates { grid-template-columns: 1fr; gap: 0; }
+  body.page-home .levels { grid-template-columns: 1fr; margin-top: 36px; }
+  body.page-home .level { padding: 18px 0; }
+  body.page-home .level + .level { border-left: 0; border-top: 1px solid var(--border); }
+  body.page-home .tile--sm { padding: 28px; }
   body.page-home .rate { padding: 28px 0; }
   body.page-home .rate + .rate { border-left: 0; border-top: 1px solid var(--border); }
   body.page-home .biz { grid-template-columns: 1fr; padding: 44px 32px; border-radius: 30px; gap: 28px; }

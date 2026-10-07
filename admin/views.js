@@ -337,60 +337,84 @@
   MDM.admin.views.drivers = (function () {
     let ctx = null, root = null, body = null;
     const VEHICLE_OPTIONS = [{ value: 'bike', label: 'Bike' }, { value: 'car', label: 'Car' }, { value: 'pickup', label: 'Pickup' }];
+    const by = () => (MDM.admin.by ? MDM.admin.by() : 'admin');
     async function mount(host) {
       ctx = context(); root = host;
       body = el('div', null, el('div', { class: 'skeleton', style: 'height: 96px' }));
       root.replaceChildren(
-        pageHead('Riders', 'Every rider, their vehicle and the stops on their route right now.',
-          [el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'drivers-add', on: { click: addRider } }, icon('plus'), 'Add rider')]),
+        pageHead('Drivers', 'Every driver, the zones they cover, whether they are on duty, today\'s deliveries and where they were last seen.',
+          [el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'drivers-add', on: { click: addRider } }, icon('plus'), 'Add driver')]),
         card(null, body, { 'data-testid': 'drivers-card' }));
-      ctx.sub('drivers', () => ctx.schedule(render));
-      ctx.sub('orders', () => ctx.schedule(render));
+      ['drivers', 'orders', 'zones', 'attendance', 'staff', 'positions'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
+      ctx.every(30000, () => ctx.schedule(render));
       await render();
     }
     function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; body = null; }
     async function render() {
-      const drivers = await MDM.store.list('drivers');
-      const routes = {};
-      for (const d of drivers) routes[d.id] = await MDM.store.driverRoute(d.id);
+      const [drivers, zones, attendance, orders, positions] = await Promise.all([MDM.store.list('drivers', { order: 'name' }), MDM.store.list('zones', { order: 'createdAt' }), MDM.store.list('attendance'), MDM.store.list('orders'), MDM.store.list('positions')]);
       if (!ctx || !ctx.alive) return;
-      if (!drivers.length) { body.replaceChildren(empty('Nothing here yet.', 'Add a rider to start assigning orders.')); return; }
+      if (!drivers.length) { body.replaceChildren(empty('Nothing here yet.', 'Add a driver to start assigning orders.')); return; }
+      const today = MDM.ui.dayKey(new Date());
+      const zonesOf = d => zones.filter(z => (z.driverIds || []).indexOf(d.id) >= 0 || (d.zones || []).indexOf(z.key) >= 0);
+      const shift = d => attendance.find(a => a.staffId === d.staffId && !a.outAt);
+      const deliveredToday = d => orders.filter(o => o.driverId === d.id && o.status === 'delivered' && MDM.ui.dayKey(deliveredAt(o)) === today).length;
+      const activeJobs = d => orders.filter(o => o.driverId === d.id && ['assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery', 'failed'].indexOf(o.status) >= 0).length;
+      const pos = d => positions.find(p => p.driverId === d.id);
       const cols = [
-        { label: 'Name', primary: true, render: d => el('span', null, d.name) },
+        { label: 'Name', primary: true, render: d => el('span', null, d.name, el('span', { class: 'table__sub' }, (VEHICLES[d.vehicle] || d.vehicle) + (d.vehicleNote ? ' · ' + d.vehicleNote : ''))) },
         { label: 'Phone', nowrap: true, render: d => telLink(d.phone) },
-        { label: 'Vehicle', render: d => el('span', null, VEHICLES[d.vehicle] || d.vehicle, d.vehicleNote ? el('span', { class: 'table__sub' }, d.vehicleNote) : null) },
+        { label: 'Zones', render: d => { const zs = zonesOf(d); return zs.length ? el('span', { class: 'chip-list' }, zs.map(z => el('span', { class: 'tag' }, z.short || z.name))) : el('span', { class: 'subtle' }, 'No zone'); } },
+        { label: 'Duty', nowrap: true, render: d => { const s = shift(d); return s ? el('span', null, html(MDM.ui.badge('ok', 'On duty', { 'data-duty': 'on' })), el('span', { class: 'table__sub' }, 'since ' + MDM.ui.fmtTime(s.inAt))) : html(MDM.ui.badge('neutral', 'Off duty', { 'data-duty': 'off' })); } },
         { label: 'Status', primary: true, render: d => badge(DRIVER_STATUS, d.status) },
-        { label: 'Stops today', num: true, render: d => { const st = routes[d.id].stops; const done = st.filter(s => s.status === 'done').length; return el('span', null, String(st.length), done ? el('span', { class: 'table__sub' }, done + ' done') : null); } },
+        { label: 'Today', num: true, render: d => el('span', null, String(deliveredToday(d)) + ' delivered', el('span', { class: 'table__sub' }, plural(activeJobs(d), 'active job'))) },
+        { label: 'Last seen', nowrap: true, render: d => { const p = pos(d); return p ? el('a', { href: '#/live?driver=' + encodeURIComponent(d.id), on: { click: e => { e.preventDefault(); navigate('#/live?driver=' + encodeURIComponent(d.id)); } } }, MDM.ui.timeAgo(p.at)) : el('span', { class: 'subtle' }, 'No location'); } },
         { label: 'Actions', actions: true, render: d => actionsRow(
-          el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'drivers-edit', on: { click: () => editRider(d) } }, 'Edit'),
+          el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'drivers-edit', on: { click: () => editRider(d, zones) } }, 'Edit'),
           el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'drivers-toggle', on: { click: () => toggle(d) } }, d.status === 'offline' ? 'Set online' : 'Set offline')) },
       ];
       body.replaceChildren(table(cols, drivers.map(d => ({ data: d, attrs: { 'data-testid': 'drivers-row', 'data-driver-id': d.id, 'data-status': d.status } })), { testid: 'drivers-table' }));
     }
-    function riderFields(d) {
+    function riderFields(d, zones) {
       d = d || {};
+      const mine = z => (z.driverIds || []).indexOf(d.id) >= 0 || (d.zones || []).indexOf(z.key) >= 0;
       return [
         { name: 'name', label: 'Name', type: 'text', required: true, value: d.name || '', autocomplete: 'off' },
         { name: 'phone', label: 'Mobile number', type: 'tel', required: true, value: d.phone ? phone.format(d.phone) : '', placeholder: '7XX XXXX' },
         { name: 'vehicle', label: 'Vehicle', type: 'select', required: true, value: d.vehicle || 'bike', options: VEHICLE_OPTIONS },
         { name: 'vehicleNote', label: 'Vehicle note', type: 'text', value: d.vehicleNote || '', placeholder: 'Honda Wave' },
-      ];
+      ].concat(zones.map(z => ({ name: 'zone_' + z.key, label: 'Covers ' + z.name, type: 'checkbox', value: d.id ? mine(z) : false })));
+    }
+    async function saveZones(driverId, v, zones) {
+      const keys = zones.filter(z => v['zone_' + z.key]).map(z => z.key);
+      await MDM.store.update('drivers', driverId, { zones: keys });
+      for (const z of zones) {
+        const has = (z.driverIds || []).indexOf(driverId) >= 0, want = keys.indexOf(z.key) >= 0;
+        if (has !== want) await MDM.store.update('zones', z.id, { driverIds: want ? (z.driverIds || []).concat([driverId]) : (z.driverIds || []).filter(x => x !== driverId) });
+      }
     }
     async function addRider() {
-      const v = await MDM.ui.dialog({ title: 'Add rider', fields: riderFields(null), okLabel: 'Add rider' });
+      const zones = await MDM.store.list('zones', { order: 'createdAt' });
+      const v = await MDM.ui.dialog({ title: 'Add driver', message: 'The driver signs in with this mobile number and appears on the team list for attendance and leave.', fields: riderFields(null, zones), okLabel: 'Add driver' });
       if (!v) return;
       try {
-        await MDM.store.insert('drivers', { name: v.name, phone: phone.normalize(v.phone), vehicle: v.vehicle, vehicleNote: v.vehicleNote || '', status: 'offline' });
-        toast(v.name + ' added as a rider');
+        const ph = phone.normalize(v.phone);
+        const staff = await MDM.store.insert('staff', { name: v.name, role: 'driver', title: v.vehicle === 'pickup' ? 'Driver (pickup truck)' : 'Rider', phone: ph, username: ph, status: 'active', joinedAt: MDM.ui.dayKey(new Date()), leaveBalance: { annual: 30, sick: 30 } });
+        const d = await MDM.store.insert('drivers', { name: v.name, phone: ph, vehicle: v.vehicle, vehicleNote: v.vehicleNote || '', status: 'offline', staffId: staff.id, zones: [] });
+        await MDM.store.update('staff', staff.id, { driverId: d.id });
+        await saveZones(d.id, v, zones);
+        await MDM.store.audit('driver_added', v.name + ' added as a driver', by());
+        toast(v.name + ' added as a driver');
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
-    async function editRider(d) {
-      const v = await MDM.ui.dialog({ title: 'Edit rider', fields: riderFields(d), okLabel: 'Save rider' });
+    async function editRider(d, zones) {
+      const v = await MDM.ui.dialog({ title: 'Edit driver', fields: riderFields(d, zones), okLabel: 'Save driver' });
       if (!v) return;
       try {
         await MDM.store.update('drivers', d.id, { name: v.name, phone: phone.normalize(v.phone), vehicle: v.vehicle, vehicleNote: v.vehicleNote || '' });
-        toast('Rider updated');
+        if (d.staffId) await MDM.store.update('staff', d.staffId, { name: v.name, phone: phone.normalize(v.phone) });
+        await saveZones(d.id, v, zones);
+        toast('Driver updated');
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function toggle(d) {
@@ -398,7 +422,7 @@
       try { await MDM.store.update('drivers', d.id, { status: next }); toast(d.name + ' is now ' + DRIVER_STATUS[next].label.toLowerCase()); }
       catch (e) { toast(storeMessage(e), 'danger'); }
     }
-    return { title: 'Riders', mount, unmount };
+    return { title: 'Drivers', mount, unmount };
   })();
 
   // ==== #/customers ============================================================================================================
@@ -407,7 +431,7 @@
     async function mount(host) {
       ctx = context(); root = host;
       body = el('div', null, el('div', { class: 'skeleton', style: 'height: 96px' }));
-      root.replaceChildren(pageHead('Customers', 'Everyone who has placed an order. Open a customer to see their orders.'), card(null, body));
+      root.replaceChildren(pageHead('Customers', 'Everyone who has placed an order, with payments still due. Open a customer to see their order history.'), card(null, body));
       ctx.sub('customers', () => ctx.schedule(render));
       ctx.sub('orders', () => ctx.schedule(render));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
@@ -419,8 +443,8 @@
       if (!ctx || !ctx.alive) return;
       if (!customers.length) { body.replaceChildren(empty('Nothing here yet.', 'Customers appear here after their first order.')); return; }
       const stats = {};
-      orders.forEach(o => { if (o.status === 'draft') return; const s = stats[o.customerId] || (stats[o.customerId] = { count: 0, last: null }); s.count += 1; if (!s.last || o.createdAt > s.last) s.last = o.createdAt; });
-      const rows = customers.map(c => { const s = stats[c.id] || { count: c.orderCount || 0, last: c.lastOrderAt || null }; return { c, count: s.count, last: s.last || c.lastOrderAt || null }; })
+      orders.forEach(o => { if (o.status === 'draft') return; const s = stats[o.customerId] || (stats[o.customerId] = { count: 0, last: null, unpaid: 0 }); s.count += 1; if (!s.last || o.createdAt > s.last) s.last = o.createdAt; if (o.payment && (o.payment.status === 'requested' || o.payment.status === 'received')) s.unpaid += o.totals.total; });
+      const rows = customers.map(c => { const s = stats[c.id] || { count: c.orderCount || 0, last: c.lastOrderAt || null, unpaid: 0 }; return { c, count: s.count, last: s.last || c.lastOrderAt || null, unpaid: s.unpaid || 0 }; })
         .sort((a, b) => (b.last || '') < (a.last || '') ? -1 : (b.last || '') > (a.last || '') ? 1 : a.c.name.localeCompare(b.c.name));
       const target = c => '#/orders?customer=' + encodeURIComponent(c.id);
       const cols = [
@@ -428,6 +452,7 @@
         { label: 'Phone', nowrap: true, render: r => telLink(r.c.phone) },
         { label: 'Orders', num: true, render: r => String(r.count) },
         { label: 'Last order', nowrap: true, render: r => r.last ? fmtDate(r.last) : 'No orders yet' },
+        { label: 'Unpaid', num: true, render: r => r.unpaid ? money(r.unpaid) : '' },
       ];
       body.replaceChildren(table(cols, rows.map(r => ({ data: r, attrs: { class: 'is-clickable', 'data-testid': 'customers-row', 'data-customer-id': r.c.id, on: { click: e => { if (e.target.closest('a')) return; navigate(target(r.c)); } } } })), { testid: 'customers-table' }));
     }
@@ -543,7 +568,9 @@
       const month = thisMonth(), mine = monthOrders(orders, account.id, month);
       const generate = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'business-generate-invoice', on: { click: () => generateInvoice(account, mine, invoices, month) } }, icon('receipt'), 'Generate invoice');
       const back = el('a', { class: 'btn btn--ghost', href: '#/business?tab=accounts', on: { click: e => { e.preventDefault(); navigate('#/business?tab=accounts'); } } }, 'All accounts');
-      const head = pageHead(account.name, 'Business account since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · ' + money(account.ratePerPackage) + ' per package, invoiced monthly.', [back, generate]);
+      const allOrders = el('a', { class: 'btn btn--secondary', href: '#/orders?account=' + encodeURIComponent(account.id), 'data-testid': 'business-all-orders' }, 'Order history');
+      const bulk = el('a', { class: 'btn btn--secondary', href: '#/bulk?account=' + encodeURIComponent(account.id), 'data-testid': 'business-bulk' }, 'Bulk orders');
+      const head = pageHead(account.name, 'Business account since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · ' + money(account.ratePerPackage) + ' per package, invoiced monthly' + (account.priorityAllowed ? ' · may request priority' : '') + '.', [back, allOrders, bulk, generate]);
       ui.head.replaceWith(head); ui.head = head;
       const l = phone.links(account.phone);
       fill(ui.details,
@@ -724,7 +751,7 @@
     let ctx = null, root = null, ui = null, dirty = false;
     async function mount(host) {
       ctx = context(); root = host; dirty = false; ui = {};
-      root.replaceChildren(pageHead('Settings', 'Contact details, the public notice bar, the demo switches and your data.'), el('div', { class: 'skeleton', style: 'height: 96px' }));
+      root.replaceChildren(pageHead('Settings', 'Contact details, payments, notifications, staff hours, the e-store, the public notice, the demo switches and your data.'), el('div', { class: 'skeleton', style: 'height: 96px' }));
       ctx.sub('settings', () => { if (!dirty) ctx.schedule(render); });
       ctx.sub('*', m => { if (m && m.op === 'reset') { dirty = false; ctx.schedule(render); } });
       await render();
@@ -743,6 +770,28 @@
         field('Notice text', textarea('noticeText', notice.text, { rows: 2, 'data-testid': 'settings-notice-text' }), { hint: 'One line under the website header, for closures and delays' }),
         checkbox('noticeActive', notice.active, 'Show the notice on the public site'),
         el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'settings-save-notice' }, 'Save notice')));
+      const rules = s.rules || {}, notif = s.notifications || {}, chans = notif.channels || {}, hr = s.hr || {}, st = s.store || {};
+      const saveBtn = (testid, text) => el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': testid }, text));
+      const payForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-payment-form', on: { submit: savePayment, input: () => { dirty = true; } } },
+        field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, the invoice goes out automatically' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping orders are always paid before we buy. Business accounts are invoiced monthly.' }),
+        checkbox('upfrontOptional', rules.upfrontOptional !== false, 'Customers may pay upfront', 'Shows "Pay now" on the tracking page as soon as the price is confirmed'),
+        field('Express handling fee, MVR', numInput('expressFee', (s.rates || {}).express || 0), { hint: 'Suggested when you confirm the price of an express order' }),
+        saveBtn('settings-save-payment', 'Save payment settings'));
+      const notifyForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-notify-form', on: { submit: saveNotify, input: () => { dirty = true; } } },
+        checkbox('notifEnabled', notif.enabled !== false, 'Send customer notifications', 'Submitted, confirmed, price confirmed, driver assigned, collected, out for delivery, delivered or failed, payments, priority and cancellations'),
+        field('Send by', select('notifChannel', notif.channel || 'customer', [{ value: 'customer', label: 'What each customer chose' }, { value: 'sms', label: 'SMS for everyone' }, { value: 'whatsapp', label: 'WhatsApp for everyone' }, { value: 'viber', label: 'Viber for everyone' }, { value: 'email', label: 'Email for everyone' }])),
+        el('div', { class: 'stack-2' }, el('span', { class: 'field__label' }, 'Channels connected'), [['sms', 'SMS'], ['whatsapp', 'WhatsApp'], ['viber', 'Viber'], ['email', 'Email']].map(c => checkbox('ch_' + c[0], chans[c[0]] !== false, c[1]))),
+        field('Sender name', input('senderName', notif.senderName || 'MrDelivery'), { hint: 'Shown as the SMS sender. The mockup logs messages under Notifications; sending needs an SMS or WhatsApp provider.' }),
+        saveBtn('settings-save-notify', 'Save notification settings'));
+      const hrForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-hr-form', on: { submit: saveHr, input: () => { dirty = true; } } },
+        el('div', { class: 'grid-2' }, field('Shift starts', input('shiftStart', hr.shiftStart || '08:00', { inputmode: 'numeric', placeholder: '08:00' })), field('Shift ends', input('shiftEnd', hr.shiftEnd || '17:00', { inputmode: 'numeric', placeholder: '17:00' }))),
+        el('div', { class: 'grid-3' }, field('Late after, minutes', numInput('graceMinutes', hr.graceMinutes != null ? hr.graceMinutes : 10)), field('Annual leave, days', numInput('annualLeaveDays', hr.annualLeaveDays || 30)), field('Sick leave, days', numInput('sickLeaveDays', hr.sickLeaveDays || 30))),
+        saveBtn('settings-save-hr', 'Save staff settings'));
+      const storeForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-store-form', on: { submit: saveStore, input: () => { dirty = true; } } },
+        checkbox('storeOpen', st.open !== false, 'The e-store is open', 'When closed, the store page shows the catalogue without the checkout'),
+        el('div', { class: 'grid-2' }, field('Store address', input('storeAddress', st.address || ''), { hint: 'Where drivers collect store orders' }), field('Zone', select('storeZone', st.zone || 'male', MDM.geo.zoneOptions()))),
+        field('Note on the store page', input('storeNote', st.note || '')),
+        saveBtn('settings-save-store', 'Save store settings'));
       ui.autopilot = el('input', { type: 'checkbox', id: 'settings-autopilot', 'data-testid': 'settings-autopilot', checked: !!demo.autopilot, on: { change: saveAutopilot } });
       const demoBody = el('div', { class: 'stack-4' },
         el('label', { class: 'checkbox', for: 'settings-autopilot' }, ui.autopilot, el('span', null, 'Demo autopilot', el('span', { class: 'hint' }, 'Keeps the sample rider on MDM-1038 moving so the tracking demo is never static. Off in production.'))),
@@ -760,6 +809,10 @@
         ui.importError);
       const content = el('div', { class: 'stack-6' },
         el('section', { 'aria-labelledby': 'set-contact' }, sectionHead('set-contact', 'Contact details'), card(null, el('div', { class: 'card__body' }, contactForm))),
+        el('section', { 'aria-labelledby': 'set-payment' }, sectionHead('set-payment', 'Payments'), card(null, el('div', { class: 'card__body' }, payForm))),
+        el('section', { 'aria-labelledby': 'set-notify' }, sectionHead('set-notify', 'Notifications'), card(null, el('div', { class: 'card__body' }, notifyForm))),
+        el('section', { 'aria-labelledby': 'set-hr' }, sectionHead('set-hr', 'Staff hours and leave'), card(null, el('div', { class: 'card__body' }, hrForm))),
+        el('section', { 'aria-labelledby': 'set-store' }, sectionHead('set-store', 'E-store'), card(null, el('div', { class: 'card__body' }, storeForm))),
         el('section', { 'aria-labelledby': 'set-notice' }, sectionHead('set-notice', 'Public notice'), card(null, el('div', { class: 'card__body' }, noticeForm))),
         el('section', { 'aria-labelledby': 'set-demo' }, sectionHead('set-demo', 'Demo'), card(null, el('div', { class: 'card__body' }, demoBody))),
         el('section', { 'aria-labelledby': 'set-data' }, sectionHead('set-data', 'Your data'), card(null, el('div', { class: 'card__body' }, dataBody))));
@@ -784,6 +837,38 @@
       MDM.ui.setError(form.elements.noticeText, null);
       try { await MDM.store.saveSettings({ notice: { text, active } }); dirty = false; toast(active ? 'Notice is showing on the public site' : 'Notice saved and hidden'); }
       catch (err) { toast(storeMessage(err), 'danger'); }
+    }
+    async function saveSection(patch, msg) {
+      try { await MDM.store.saveSettings(patch); dirty = false; toast(msg); }
+      catch (err) { toast(storeMessage(err), 'danger'); }
+    }
+    async function savePayment(e) {
+      e.preventDefault();
+      const form = e.currentTarget;
+      const r = MDM.ui.validate(form, { expressFee: v => /^\d+$/.test(v) ? null : 'Enter a whole number, 0 or more' });
+      if (!r.ok) { MDM.ui.focusFirstInvalid(form); return; }
+      await saveSection({ rules: { paymentTiming: val(form, 'paymentTiming'), upfrontOptional: val(form, 'upfrontOptional') }, rates: { express: Number(r.values.expressFee) } }, 'Payment settings saved');
+    }
+    async function saveNotify(e) {
+      e.preventDefault();
+      const form = e.currentTarget;
+      const channels = {}; ['sms', 'whatsapp', 'viber', 'email'].forEach(k => { channels[k] = val(form, 'ch_' + k); });
+      await saveSection({ notifications: { enabled: val(form, 'notifEnabled'), channel: val(form, 'notifChannel'), channels, senderName: val(form, 'senderName') || 'MrDelivery' } }, 'Notification settings saved');
+    }
+    async function saveHr(e) {
+      e.preventDefault();
+      const form = e.currentTarget;
+      const time = v => MDM.ui.parseHHMM(v) == null ? 'Use the 24 h clock, like 08:00' : null, int = v => /^\d+$/.test(v) ? null : 'Enter a whole number';
+      const r = MDM.ui.validate(form, { shiftStart: time, shiftEnd: time, graceMinutes: int, annualLeaveDays: int, sickLeaveDays: int });
+      if (!r.ok) { MDM.ui.focusFirstInvalid(form); return; }
+      await saveSection({ hr: { shiftStart: r.values.shiftStart, shiftEnd: r.values.shiftEnd, graceMinutes: Number(r.values.graceMinutes), annualLeaveDays: Number(r.values.annualLeaveDays), sickLeaveDays: Number(r.values.sickLeaveDays) } }, 'Staff settings saved');
+    }
+    async function saveStore(e) {
+      e.preventDefault();
+      const form = e.currentTarget;
+      const r = MDM.ui.validate(form, { storeAddress: v => v ? null : 'Enter the store address' });
+      if (!r.ok) { MDM.ui.focusFirstInvalid(form); return; }
+      await saveSection({ store: { open: val(form, 'storeOpen'), address: r.values.storeAddress, zone: val(form, 'storeZone'), note: val(form, 'storeNote') } }, 'Store settings saved');
     }
     async function saveAutopilot() {
       const on = ui.autopilot.checked;
