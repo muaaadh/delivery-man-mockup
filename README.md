@@ -8,19 +8,19 @@ clicked through end to end.
 
 | Surface | URL | Notes |
 | --- | --- | --- |
-| Home | `/` | Customer one-pager: live order in the hero phone, how it works, every service (home, shop, postal & courier, airport & baggage, office assistance, e-store), normal / express / advance, rates, business, coverage, FAQ |
+| Home | `/` | Customer one-pager: live order in the hero phone, the three service categories (Pick & Deliver: home, shop or godown, postal & courier, administrative services · Shop & Deliver · Business Delivery), delivery methods, rates as ranges, how it works, coverage, FAQ |
 | Sign in | `/login/` | Five roles. Customer and Business by mobile + one-time code (any 4 digits); Driver and Staff by name + PIN; Office by username + password (`admin`, `operator`, `lamya`, password `delivery`) with "Forgot password" |
-| Request a delivery | `/request/?type=postal` | Six request types with their own fields (carriers and collection codes, airport flight and baggage, office documents, shop invoice), service level, collection, Bag/Box/XL quantities with an estimated range, photo and dimensions, delivery, pay after delivery or upfront |
+| Request a delivery | `/request/?category=pick` | Pick a category, then the request type (home collection; shop or godown with invoice or quotation and payment slip; postal & courier with location and tracking number; administrative services; shop & deliver with an item list). Saved addresses with labels (Home, Wife's home, Office…), order again from recent and frequent orders, Bag / Box / XL with a photo (no measurements), extra vehicle for more than one box or XL, delivery method (home, boat / ferry / speedboat, Maldivian Cargo, airport resort counter), pay after delivery or upfront |
 | Track an order | `/track/?code=MDM-1038` | Status timeline with who and when, payment step, price estimate vs confirmed, cancellation request, proofs, documents, invoice link, live driver on the map |
 | Pay | `/checkout/?code=MDM-1032` | Bank transfer and slip upload once payment is requested (or optional upfront after confirmation) |
 | Invoice | `/invoice/?order=MDM-1031` | Printable customer invoice |
 | My orders | `/account/` | History with payment and delivery status, order detail, cancellation request, messages, saved addresses |
-| Business portal | `/business/` | Sign in with 780 1122 (Kandu Books) or 763 3221 (Fonu): single orders, bulk orders with CSV, order tracking, priority requests, invoices, labels |
+| Business portal | `/business/` | Sign in with 780 1122 (Kandu Books) or 763 3221 (Fonu): size categories at the business's agreed rates, single orders, bulk orders by rows or Excel import (template, checks, review), collection points with a preferred time, boat details update, cancel one order inside a bulk order, cash on delivery, invoices, labels. New businesses apply with a typical package photo |
 | Labels | `/labels/?batch=blk_seed_1001` | 100 × 150 mm shipping labels with QR, one per package (`?order=`, `?orders=`, `?code=`, `?batch=`) |
 | E-store | `/store/` | Packaging, supplies and delivery bundles; cart and checkout into a normal delivery order |
-| Staff portal | `/staff/` | Punch in / out, attendance, leave requests |
-| Driver console | `/driver/` | Punch in, own and zone jobs, Start → Arrived → Collected (photo, size) → Out for delivery → Delivered (photo, recipient), report a problem with reason and photo, leave request, GPS or simulation |
-| Office portal | `/admin/` | Role-based (admin / operator / office). Overview KPIs and action queues; orders with price confirmation, payments, assignment, failures, cancellations, priority, change history; bulk orders by zone; live map; drivers; customers; business; e-store; team & HR; reports with CSV; notifications; activity log; zones; rates; settings |
+| Staff portal | `/staff/` | Punch in / out, attendance, leave requests, accumulated off days |
+| Driver console | `/driver/` | Punch in, own and zone jobs, Start → Arrived → Collected (photo, size, naalu) → Out for delivery → Delivered (photo, recipient, naalu, packing charge, cash collected), boat changed or missed, returns, report a problem with reason and photo, leave requests (collapsible) with accumulated off days, GPS or simulation |
+| Office portal | `/admin/` | Role-based (admin / operator / office). Overview KPIs and action queues; orders with price confirmation, package category change, extra vehicle charge, other charges, payments, assignment, failures, cancellations, priority, change history; bulk orders by zone; Cash & COD (driver cash handover, payment to businesses, naalu and charges to reimburse); live map; drivers; customers; business accounts and agreed rates; e-store; team & HR with off days; reports with CSV; notifications; activity log; zones; rates; settings |
 
 Useful seeded orders: `MDM-1035` (XL with a package photo) and `MDM-1034`, `MDM-1048`, `MDM-1055` need the price confirmed;
 `MDM-1036` and `MDM-1037` have slips to verify; `MDM-1040` failed (recipient unavailable) and waits for a decision; `MDM-1051` has a
@@ -29,14 +29,33 @@ for payment; `MDM-1038` is out for delivery and always moving (demo autopilot); 
 `BLK-1002` is waiting for collection. Admin → Settings → "Reset demo data" restores everything; the demo also re-seeds itself after
 12 hours if nothing was changed.
 
+Orders that show the 11 October 2026 updates (full data contract in `docs/UPDATES-2026-10-11.md`):
+
+| Update | Orders |
+| --- | --- |
+| Boat delivery, naalu, boat changed | `MDM-1030` (dhoni, naalu 20), `MDM-1067` (speedboat swapped, naalu 10), `MDM-1062` (bulk, speedboat to Thulusdhoo) |
+| Maldivian Cargo (fee only on this method) | `MDM-1068`, `MDM-1066` (bulk) |
+| Airport delivery to a resort counter | `MDM-1069`, `MDM-1050`, `MDM-1048` |
+| Extra vehicle (2 XL) | `MDM-1070` |
+| Packing charge on delivery / other charge | `MDM-1032`, `MDM-1054` |
+| Shop & Deliver item list | `MDM-1071`, `MDM-1026`, `MDM-1033` |
+| Business size categories + cash on delivery | `MDM-1072` (Fonu, medium, COD 890), `BLK-1001` (COD at each stage), `MDM-1046` (paid to the business) |
+| Business cancels one order after dispatch | `MDM-1060` (return to sender) |
+| Collection points + preferred time | Kandu (Shop, Godown), Fonu (Warehouse, Showroom); `BLK-1002` |
+| Account request with a package photo | Shifa's Cakes (Admin → Business) |
+| Labelled saved addresses, order again | Mohamed Rilwan (777 8901): Home / Wife's home / Office; `MDM-1073` and `MDM-1039` make his most frequent order |
+| Accumulated off days | Ahmed Nazim, Ibrahim Shiyam, Hassan Rasheed (Team & HR, driver console, staff portal) |
+
 The whole flow to try: request a delivery → office confirms the price, assigns and dispatches → driver console (choose that driver,
 punch in, run the job with photos) → the customer pays the invoice from the tracking page → office verifies the payment.
 
 ## Pricing as modelled
 
-From the client's brief: Bags MVR 35 to 45 · Box MVR 45 to 60 · XL from MVR 60 · shopping fee 10% · cargo fee MVR 20 · airport
-fee MVR 40 · business MVR 25 per package under 1 ft. The mockup reads the lower figure as "within one island" and the higher as
-"across the bridge", treats the airport fee as covering the airport leg, and marks XL, vehicle and Villimalé jobs as "quote first".
+Shown to customers as ranges: Bag MVR 35 to 45 · Box MVR 45 to 60 · XL MVR 60++ (the lower figure is "within one island", the higher
+"across the bridge"). Shopping fee 10% · Maldivian Cargo fee MVR 20, charged once and only when that delivery method is chosen ·
+airport fee MVR 40. Business accounts are priced by size category (Small / Medium / Large, starting at MVR 25 / 35 / 60) and each
+business can have its own agreed rates (Kandu and Fonu are seeded with different ones). Naalu paid by drivers is reimbursed to
+them and not billed to the customer unless the office marks it billable. XL, extra vehicle and Villimalé jobs are "quote first".
 All of it is editable in Admin → Rates and labelled as an assumption to confirm with the client.
 
 ## Running locally

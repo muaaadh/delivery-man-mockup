@@ -5,7 +5,7 @@
 <script>(function(){try{var t=localStorage.getItem('mdm:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Delivery in Malé, Hulhumalé and the airport · Mr. Delivery Man</title>
-<meta name="description" content="We pick & deliver, we shop & deliver, and we deliver for businesses across Greater Malé. From MVR 35, pay by bank transfer, follow your rider live.">
+<meta name="description" content="Pick & Deliver, Shop & Deliver and Business Delivery across Greater Malé: to a door, a boat, Maldivian Cargo or the airport. Bag MVR 35 to 45, pay by bank transfer, follow your rider live.">
 <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -71,7 +71,7 @@
   <!-- Statement -->
   <section class="statement" aria-label="What we do">
     <div class="container">
-      <p class="statement__text" data-fill>Documents, lunch, keys, a Redbox parcel, luggage for the airport, a box for the cargo boat. Anything you need moved in Greater Malé. We collect it, you follow every step, and you pay when it arrives.</p>
+      <p class="statement__text" data-fill>Documents, keys, a Redbox parcel, a shopping list, a box for the island speedboat, a parcel for a resort counter at the airport. Anything you need moved in Greater Malé. We collect it, you follow every step, and you pay when it arrives.</p>
     </div>
   </section>
 
@@ -92,7 +92,7 @@
                 <div class="scr__seg"><span class="is-on">Bag × 1</span><span>Box</span><span>XL</span></div>
                 <div class="scr__row"><i class="pin pin--from"></i><span><small>Collection</small>M. Kaneerumaage, Malé</span></div>
                 <div class="scr__row"><i class="pin pin--to"></i><span><small>Delivery</small>Amin Avenue, Hulhumalé Phase 1</span></div>
-                <div class="scr__row"><i class="pin pin--time"></i><span><small>Service</small>Normal, as soon as possible</span></div>
+                <div class="scr__row"><i class="pin pin--time"></i><span><small>Delivery method</small>Home delivery, normal</span></div>
                 <div class="scr__total"><span>Estimate</span><strong class="mono"><span data-k="bag-same">MVR 35</span>–<span data-k="bag-cross-num">45</span></strong></div>
                 <div class="scr__btn">Send request</div>
               </div>
@@ -138,8 +138,8 @@
           </div>
         </div>
         <ol class="story__steps">
-          <li class="story__step is-active" data-step="1"><span class="story__num">01</span><h3>Tell us what and where.</h3><p>Pick the kind of run, count your bags, boxes and XL items, add the collection and delivery details. You see an estimated price straight away.</p></li>
-          <li class="story__step" data-step="2"><span class="story__num">02</span><h3>We confirm the price.</h3><p>Add a photo of the package, or our driver photographs it at collection. Our team confirms the exact price<span data-k="review">, usually in about 30 minutes</span>. Pay after delivery, or upfront if you prefer.</p></li>
+          <li class="story__step is-active" data-step="1"><span class="story__num">01</span><h3>Tell us what and where.</h3><p>Choose Pick &amp; Deliver or Shop &amp; Deliver, count your bags, boxes and XL packages, and choose how we deliver: to a door, a boat, Maldivian Cargo or the airport. You see an estimated price range straight away.</p></li>
+          <li class="story__step" data-step="2"><span class="story__num">02</span><h3>We confirm the price.</h3><p>No measuring: add a photo of the package, or our driver photographs it at collection. Our team confirms the exact price, with any cargo or airport fee and any extra vehicle<span data-k="review">, usually in about 30 minutes</span>. Pay after delivery, or upfront if you prefer.</p></li>
           <li class="story__step" data-step="3"><span class="story__num">03</span><h3>Follow every step.</h3><p>Driver assigned, on the way, collected, out for delivery. Each update is on your tracking page and sent to you by SMS or WhatsApp. No app to install.</p></li>
           <li class="story__step" data-step="4"><span class="story__num">04</span><h3>See who received it.</h3><p>Every handover is recorded with a photo: who took it, where and when. The invoice is ready on the same page.</p></li>
         </ol>
@@ -147,74 +147,61 @@
     </div>
   </section>
 
-  <!-- Services -->
+  <!-- Services: the three service categories, then the delivery methods and the service levels -->
   <section id="services" class="section-pad section-pad--tint" aria-labelledby="services-title">
     <div class="container">
       <div class="head head--center" data-reveal>
-        <h2 id="services-title">Every kind of run.</h2>
-        <p>One team of drivers for Malé, Hulhumalé, Villimalé and the airport.</p>
+        <h2 id="services-title">Three ways we deliver.</h2>
+        <p>One team of drivers for Malé, Hulhumalé, Villimalé and the airport, and the boats to every other island.</p>
       </div>
-      <div class="bento" data-reveal-group>
-        <article class="tile tile--ink tile--wide" data-reveal data-testid="home-service-pick">
+      <div class="bento" data-reveal-group data-testid="home-services">
+        <article class="tile tile--ink tile--wide" data-reveal data-testid="home-service-pick" data-category="pick">
           <div class="tile__text">
-            <h3>Pick &amp; deliver</h3>
-            <p>We collect from any address and bring it to the door. Documents, food, keys, parcels, cargo for the boats.</p>
+            <h3 data-cat-label="pick">Pick &amp; Deliver</h3>
+            <p data-cat-hint="pick">We collect from a home, a shop or godown, a post or courier office, or a government office, and deliver it.</p>
             <p class="tile__price"><span data-testid="home-service-price-pick">From MVR 35</span></p>
-            <a class="btn btn--brand btn--pill" href="./request/?type=home">Request a pickup</a>
+            <a class="btn btn--brand btn--pill" href="./request/?category=pick" data-testid="home-pick-request">Request a pickup</a>
           </div>
-          <div class="tile__art" aria-hidden="true">
-            <svg class="draw" viewBox="0 0 420 220" preserveAspectRatio="xMidYMid meet" focusable="false">
-              <path class="draw__base" d="M30 180 C 120 180, 150 120, 210 110 S 330 60, 390 40"/>
-              <path class="draw__line" d="M30 180 C 120 180, 150 120, 210 110 S 330 60, 390 40"/>
-              <rect class="draw__from" x="22" y="172" width="16" height="16" rx="4"/>
-              <circle class="draw__to" cx="390" cy="40" r="9"/>
-            </svg>
-            <div class="tile__labels"><span>M. Kaneerumaage, Malé</span><span>Amin Avenue, Hulhumalé</span></div>
-          </div>
+          <ul class="pick-list" aria-label="What we collect" data-testid="home-pick-types">
+            <li><a href="./request/?type=home" data-testid="home-pick-home"><span class="pick-list__label" data-type-label="home">Home collection</span><span class="pick-list__hint">From a home address and the contact you name</span></a></li>
+            <li><a href="./request/?type=shop_collect" data-testid="home-pick-shop_collect"><span class="pick-list__label" data-type-label="shop_collect">Shop or godown collection</span><span class="pick-list__hint">Items you bought from a shop or warehouse: upload the invoice or quotation and the payment slip</span></a></li>
+            <li><a href="./request/?type=postal" data-testid="home-pick-postal"><span class="pick-list__label" data-type-label="postal">Postal &amp; courier collection</span><span class="pick-list__hint">Redbox, Pikpost, Post Office, DHL, FedEx and other couriers, with the tracking number or code</span></a></li>
+            <li><a href="./request/?type=office" data-testid="home-pick-office"><span class="pick-list__label" data-type-label="office">Administrative services</span><span class="pick-list__hint">Documents and packages from government offices, administrative offices and ministries</span></a></li>
+          </ul>
         </article>
-        <article class="tile" data-reveal data-testid="home-service-shop">
-          <h3>Shop &amp; deliver</h3>
-          <p>Send a list and a budget. We buy it, show you the receipt and deliver it.</p>
+        <article class="tile" data-reveal data-testid="home-service-shop" data-category="shop">
+          <h3 data-cat-label="shop">Shop &amp; Deliver</h3>
+          <p>Tell us the shop or supplier and list the items with details, quantities and any special instructions. We buy them and deliver to your address.</p>
           <div class="receipt" aria-hidden="true">
-            <div><span>Rice 2 kg</span><span class="mono">MVR 58</span></div>
-            <div><span>Eggs, 12</span><span class="mono">MVR 42</span></div>
-            <div><span>Cooking oil 1 L</span><span class="mono">MVR 36</span></div>
+            <div><span>Basmati rice 5 kg × 1</span><span class="mono">MVR 58</span></div>
+            <div><span>Fresh milk 1 L × 4</span><span class="mono">MVR 42</span></div>
+            <div><span>Eggs, tray of 30 × 1</span><span class="mono">MVR 36</span></div>
             <div class="receipt__fee"><span data-testid="home-service-fee-shop">Shopping fee 10%</span><span class="mono">MVR 14</span></div>
           </div>
-          <p class="tile__price"><span data-testid="home-service-price-shop">From MVR 35</span> <small>plus the fee</small></p>
-          <a class="tile__link" href="./request/?type=shop_collect">Already paid in a shop? We collect it</a>
+          <p class="tile__price"><span data-testid="home-service-price-shop">From MVR 35</span> <small>delivery, plus the shopping fee, paid upfront</small></p>
+          <a class="tile__link" href="./request/?type=shop_buy" data-testid="home-shop-request">Start a shopping order</a>
         </article>
-        <article class="tile tile--red" data-reveal data-testid="home-service-business">
-          <h3>For businesses</h3>
-          <p>Daily pickups, bulk uploads, printed labels and priority runs, on one invoice a month.</p>
-          <p class="tile__big mono"><span data-count data-testid="home-service-price-business">MVR 25</span></p>
-          <p class="tile__sub">per package</p>
-          <a class="tile__link" href="./business/">Open a business account</a>
+        <article class="tile tile--red" data-reveal data-testid="home-service-business" data-category="business">
+          <h3 data-cat-label="business">Business Delivery</h3>
+          <p>A fixed delivery rate for each package size you agree with us, bulk orders from a form or a spreadsheet, cash on delivery and one monthly invoice.</p>
+          <ul class="tiers" data-testid="home-business-tiers" aria-label="Business starting rates by package size">
+            <li data-tier="small"><span>Small, bag size</span><strong class="mono"><span class="tiers__from">from</span> MVR 25</strong></li>
+            <li data-tier="medium"><span>Medium, box size</span><strong class="mono"><span class="tiers__from">from</span> MVR 35</strong></li>
+            <li data-tier="large"><span>Large, XL size</span><strong class="mono"><span class="tiers__from">from</span> MVR 60</strong></li>
+          </ul>
+          <p class="tiers__note" data-testid="home-business-rates-note">Starting rates. Each business gets its own agreed rates.</p>
+          <p class="tile__sub">Apply with a photo of a typical package. We use it to agree your size categories and rates.</p>
+          <a class="tile__link" href="./business/" data-testid="home-business-request">Request a business account</a>
         </article>
-        <article class="tile tile--sm" data-reveal data-testid="home-service-postal">
-          <h3>Postal &amp; courier</h3>
-          <p>Give us the collection code or tracking number and we bring the parcel home.</p>
-          <ul class="chips" aria-label="Carriers"><li>Redbox</li><li>Pikpost</li><li>Post Office</li><li>DHL</li><li>FedEx</li><li>UPS</li><li>Aramex</li><li>CPEX</li><li>PDU</li></ul>
-          <a class="tile__link" href="./request/?type=postal">Collect a parcel</a>
-        </article>
-        <article class="tile tile--sm" data-reveal data-testid="home-service-airport">
-          <h3>Airport &amp; baggage</h3>
-          <p>Collections from arrivals, drop-offs at departures, cargo and seaplane terminals, and luggage to check-in.</p>
-          <ul class="chips" aria-label="Airport areas"><li>Arrivals</li><li>Departures</li><li>Domestic</li><li>Cargo</li><li>Seaplane</li></ul>
-          <a class="tile__link" href="./request/?type=airport">Book an airport run</a>
-        </article>
-        <article class="tile tile--sm" data-reveal data-testid="home-service-office">
-          <h3>Office assistance</h3>
-          <p>We submit and collect documents and handle routine applications at ministries, banks and offices.</p>
-          <ul class="chips" aria-label="Office tasks"><li>Submissions</li><li>Collections</li><li>Applications</li></ul>
-          <a class="tile__link" href="./request/?type=office">Send an errand</a>
-        </article>
-        <article class="tile tile--sm tile--ink" data-reveal data-testid="home-service-store">
-          <h3>E-store</h3>
-          <p>Boxes, mailers, tape and prepaid delivery bundles, delivered with your next order or on their own.</p>
-          <ul class="chips chips--ink" aria-label="Store categories"><li>Packaging</li><li>Supplies</li><li>Delivery bundles</li></ul>
-          <a class="tile__link" href="./store/">Open the store</a>
-        </article>
+      </div>
+      <div class="methods" data-reveal data-testid="home-methods">
+        <h3 class="methods__title">Delivery methods</h3>
+        <div class="methods__grid">
+          <div class="method" data-testid="home-method-home"><h4 data-method-label="home">Home delivery</h4><p>To an address in Malé, Hulhumalé or Villimalé, with the receiver's name and number.</p></div>
+          <div class="method" data-testid="home-method-boat"><h4 data-method-label="boat">Boat, ferry or speedboat</h4><p>Handed to the vessel at the harbour or jetty for another island. The boat, departure time and receiver go on the label.</p></div>
+          <div class="method" data-testid="home-method-cargo"><h4 data-method-label="cargo">Maldivian Cargo</h4><p>Delivered to the Maldivian Cargo counter at the main bus terminal.</p><p class="method__fee">Maldivian Cargo fee <strong class="mono" data-testid="home-method-cargo-fee">MVR 20</strong></p></div>
+          <div class="method" data-testid="home-method-airport"><h4 data-method-label="airport">Airport delivery</h4><p>To a resort counter or meeting point at Velana Airport, with the resort speedboat details.</p><p class="method__fee">Airport fee <strong class="mono" data-testid="home-method-airport-fee">MVR 40</strong></p></div>
+        </div>
       </div>
       <div class="levels" data-reveal>
         <div class="level"><h3>Normal</h3><p>On our regular schedule, usually within 60 to 90 minutes in Malé and Hulhumalé.</p></div>
@@ -224,38 +211,39 @@
     </div>
   </section>
 
-  <!-- Rates -->
+  <!-- Rates (§4: ranges per size) -->
   <section id="rates" class="section-pad" aria-labelledby="rates-title">
     <div class="container">
       <div class="head head--center" data-reveal>
         <h2 id="rates-title">Simple rates.</h2>
-        <p>Priced by size, within one island. Crossing the bridge costs a little more, and you always see the price before you send.</p>
+        <p>Priced by package size. The lower figure is within one island, the higher one across the bridge. No measuring: choose the size and our team confirms it.</p>
       </div>
       <div class="rates" data-testid="home-rates" data-reveal-group>
         <div class="rate" data-reveal>
-          <h3>Bags</h3>
-          <p class="rate__num mono" data-count data-testid="home-rate-bag">MVR 35</p>
-          <p class="rate__cross"><span class="mono" data-testid="home-rate-bag-cross">MVR 45</span> across the bridge</p>
-          <p class="rate__guide" data-testid="home-guide-bag">Fits in a carrier bag: documents, food, small parcels</p>
+          <h3>Bag</h3>
+          <p class="rate__num mono" data-count data-testid="home-rate-bag">MVR 35–45</p>
+          <p class="rate__cross">Within one island to across the bridge</p>
+          <p class="rate__guide" data-testid="home-guide-bag">Fits in a bag, under about 1 ft (30 cm): documents, food, small parcels</p>
         </div>
         <div class="rate" data-reveal>
           <h3>Box</h3>
-          <p class="rate__num mono" data-count data-testid="home-rate-box">MVR 45</p>
-          <p class="rate__cross"><span class="mono" data-testid="home-rate-box-cross">MVR 60</span> across the bridge</p>
-          <p class="rate__guide" data-testid="home-guide-box">A carton up to about 1 ft (30 cm) a side, strapped on the bike</p>
+          <p class="rate__num mono" data-count data-testid="home-rate-box">MVR 45–60</p>
+          <p class="rate__cross">Within one island to across the bridge</p>
+          <p class="rate__guide" data-testid="home-guide-box">A box up to about 2 ft (60 cm), strapped on the bike</p>
         </div>
         <div class="rate" data-reveal>
-          <h3>XL packages</h3>
-          <p class="rate__num mono" data-count data-testid="home-rate-xl">MVR 60</p>
-          <p class="rate__cross">and up, quoted before pickup</p>
+          <h3>XL-size package</h3>
+          <p class="rate__num mono" data-count data-testid="home-rate-xl">MVR 60++</p>
+          <p class="rate__cross">Confirmed by our team before pickup</p>
           <p class="rate__guide" data-testid="home-guide-xl">Bigger than a box or needs two hands</p>
         </div>
       </div>
       <ul class="fees" data-testid="home-fees" data-reveal>
-        <li>Shopping fee <strong class="mono" data-testid="home-fee-shopping">10% of the receipt</strong></li>
-        <li>Cargo fee <strong class="mono" data-testid="home-fee-cargo">MVR 20</strong></li>
-        <li>Airport fee <strong class="mono" data-testid="home-fee-airport">MVR 40</strong></li>
-        <li>Vehicle charge <strong data-testid="home-fee-vehicle">confirmed first</strong></li>
+        <li data-testid="home-fee-cargo-pill">Maldivian Cargo fee <strong class="mono" data-testid="home-fee-cargo">MVR 20</strong> <span class="fees__note" data-testid="home-fee-cargo-note">only for Maldivian Cargo deliveries</span></li>
+        <li>Airport fee <strong class="mono" data-testid="home-fee-airport">MVR 40</strong> <span class="fees__note" data-testid="home-fee-airport-note">airport deliveries</span></li>
+        <li>Shopping fee <strong class="mono" data-testid="home-fee-shopping">10% of the budget</strong></li>
+        <li>Business rates <strong class="mono" data-testid="home-fee-business-from">from MVR 25</strong></li>
+        <li>Extra vehicle <strong data-testid="home-fee-vehicle">confirmed first</strong></li>
       </ul>
       <p class="fine" data-testid="home-rates-note" data-reveal>Prices in Maldivian Rufiyaa. Pay by bank transfer to Bank of Maldives or Maldives Islamic Bank.</p>
     </div>
@@ -267,12 +255,12 @@
       <div class="biz" data-reveal>
         <div class="biz__text">
           <h2 id="business-title">Sending every day?</h2>
-          <p>For shops, online sellers and offices in Malé and Hulhumalé. Upload a whole day of orders at once, print the labels, request priority when it matters, and get one invoice a month, <span data-testid="home-due-days">due in 14 days</span>.</p>
+          <p>For shops, online sellers and offices in Malé and Hulhumalé. Apply with a photo of a typical package and we agree a fixed rate for each of your package sizes. Upload a whole day of orders at once, print the labels, collect cash on delivery from your customers, and get one invoice a month, <span data-testid="home-due-days">due in 14 days</span>.</p>
           <div class="biz__actions"><a class="btn btn--brand btn--lg btn--pill" href="./business/">Request a business account</a><a class="btn btn--secondary btn--lg btn--pill" href="./login/?as=business">Business sign-in</a></div>
         </div>
         <div class="biz__num">
           <p class="biz__big mono"><span class="biz__cur">MVR</span><span data-count data-testid="home-fee-business">25</span></p>
-          <p class="biz__per">a package, under 1 ft</p>
+          <p class="biz__per" data-testid="home-biz-per">per small package; each size has its own rate</p>
         </div>
       </div>
     </div>
@@ -307,12 +295,14 @@
       <div class="faq__list" data-testid="home-faq" data-reveal>
         <details><summary>How do I pay?</summary><div class="faq__a"><p>By bank transfer to our Bank of Maldives or Maldives Islamic Bank account, after delivery: your invoice is on the tracking page. If you prefer, pay upfront once we confirm the price. Upload a screenshot of the slip and we verify it<span data-k="review">, usually in about 30 minutes</span>.</p></div></details>
         <details><summary>How long does a delivery take?</summary><div class="faq__a"><p data-testid="home-faq-asap">Usually within 60 to 90 minutes in Malé and Hulhumalé on a normal order. Choose Express to jump the queue (we confirm it first), or an Advance order to book the collection and delivery days ahead.</p></div></details>
-        <details><summary>How is the price worked out?</summary><div class="faq__a"><p>By size: bag, box or XL. Within one island you pay the lower figure; when we cross the Sinamalé Bridge you pay the higher one. Airport and cargo terminal runs add a fixed fee. You see an estimated range when you book; our team confirms the exact price after checking your package photo, or the driver's photo at collection.</p></div></details>
+        <details><summary>How is the price worked out?</summary><div class="faq__a"><p data-testid="home-faq-price">By size: bag <span data-k="range-bag">MVR 35–45</span>, box <span data-k="range-box">MVR 45–60</span>, XL-size package <span data-k="range-xl">MVR 60++</span>. Within one island you pay the lower figure; when we cross the Sinamalé Bridge you pay the higher one. Maldivian Cargo deliveries add a cargo fee of <span data-k="fee-cargo">MVR 20</span>, and airport deliveries an airport fee of <span data-k="fee-airport">MVR 40</span>; boat and home deliveries have no extra fee. No measuring: you choose the size and can add a photo, and our team confirms the exact price after checking it, or the driver's photo at collection.</p></div></details>
         <details><summary>Can you collect my Redbox, Pikpost or post office parcel?</summary><div class="faq__a"><p>Yes. Choose Postal &amp; courier, pick the carrier and add the collection code or tracking number from your SMS. For the post office without a code, send your ID details to the post collections desk and we do the rest. DHL needs the collection document, which you upload with the request.</p></div></details>
-        <details><summary>Do you do airport runs and luggage?</summary><div class="faq__a"><p>Yes: collections from arrivals, drop-offs at departures, the cargo and seaplane terminals, and luggage to check-in. Add the flight number and the passenger's name so the driver can find them.</p></div></details>
-        <details><summary>My package is big or heavy. Can you still take it?</summary><div class="faq__a"><p>Yes. Tick "Too big or heavy for a bike" when you request. We confirm the vehicle charge with you first and you only pay once you have the final price.</p></div></details>
-        <details><summary>How does shop &amp; deliver work?</summary><div class="faq__a"><p>You send a list and a budget and pay the budget plus the shopping fee up front. We show you the receipt; if it comes in under budget we refund the difference, if it is over we ask before paying more.</p></div></details>
-        <details><summary>Do you go to Villimalé or other islands?</summary><div class="faq__a"><p>Villimalé by ferry, and other islands through the cargo boats at Malé harbour. These are quoted before pickup.</p></div></details>
+        <details><summary>Do you deliver to the airport and resort counters?</summary><div class="faq__a"><p data-testid="home-faq-airport">Yes. Choose Airport delivery and we hand it to a resort counter or a meeting point at Velana Airport. Add the receiver, the resort or destination, and the resort speedboat and its departure time if there is one. The airport fee of <span data-k="fee-airport">MVR 40</span> is added to the price.</p></div></details>
+        <details><summary>My package is big or heavy. Can you still take it?</summary><div class="faq__a"><p>Yes. Choose XL-size package. With more than one box or more than one XL package you can ask for an extra vehicle; our team confirms the vehicle charge before you pay. If a package does not match the size you chose, our team changes it and you see the new price first.</p></div></details>
+        <details><summary>How does Shop &amp; Deliver work?</summary><div class="faq__a"><p>Tell us the shop or supplier, list each item with its details, quantity and any special instructions, and set a budget. You pay the budget, the shopping fee and the delivery charge upfront; the charges are shown before you send. We show you the receipt; if it comes in under budget we refund the difference, if it is over we ask before paying more.</p></div></details>
+        <details><summary>Can you collect something I already paid for in a shop?</summary><div class="faq__a"><p>Yes. Choose Pick &amp; Deliver, then Shop or godown collection. Give us the shop or godown and upload the invoice or the quotation with your payment slip, and we collect it for you.</p></div></details>
+        <details><summary>Do you go to Villimalé or other islands?</summary><div class="faq__a"><p data-testid="home-faq-islands">Villimalé by ferry. For other islands, choose Boat, ferry or speedboat: we hand the package to the vessel at the harbour or jetty, with the boat name, departure time and receiver on the label. Or choose Maldivian Cargo: we take it to the Maldivian Cargo counter at the main bus terminal, and a cargo fee of <span data-k="fee-cargo">MVR 20</span> applies only to this option.</p></div></details>
+        <details><summary>Do you deliver for businesses?</summary><div class="faq__a"><p data-testid="home-faq-business">Yes. Request a business account with a photo of a typical package; we use it to agree your package size categories and a fixed rate for each. Send orders one at a time or in bulk from a spreadsheet, and we collect cash on delivery from your customers and pay it to you.</p></div></details>
         <details><summary>What don't you carry?</summary><div class="faq__a"><p data-testid="home-terms">We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.</p></div></details>
         <details><summary>Can I cancel?</summary><div class="faq__a"><p>Yes, until the package is collected: ask from your tracking page and our team confirms it. If you already paid, we refund you.</p></div></details>
       </div>

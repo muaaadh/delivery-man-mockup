@@ -17,9 +17,19 @@ body.page-staff main { padding-bottom: 64px; }
   .staff-clock { font-size: 36px; }
   .staff-punchcard__action { align-items: stretch; text-align: left; width: 100%; }
   .staff-punch { width: 100%; min-width: 0; }
-  .kpi-row[data-testid="staff-kpis"] .kpi:last-child { grid-column: 1 / -1; }
 }
 .staff-att td { vertical-align: top; }
+
+/* Leave history: a card that folds open (native <details>, closed by default). */
+.staff-fold__summary { cursor: pointer; list-style: none; min-height: 52px; border-radius: var(--radius) var(--radius) 0 0; }
+.staff-fold__summary::-webkit-details-marker { display: none; }
+.staff-fold__summary::marker { content: ''; }
+.staff-fold__summary:focus-visible { box-shadow: inset 0 0 0 2px var(--brand); }
+.staff-fold:not([open]) > .staff-fold__summary { border-bottom: 0; border-radius: var(--radius); }
+.staff-fold__count { margin-left: auto; white-space: nowrap; }
+.staff-fold__chevron { display: inline-flex; color: var(--text-2); transition: transform .15s ease; }
+.staff-fold[open] .staff-fold__chevron { transform: rotate(180deg); }
+@media (hover: hover) { .staff-fold__summary:hover { background: var(--surface); } }
 .staff-att__note { margin-top: 4px; }
 @media (max-width: 480px) { .staff-att th, .staff-att td { padding-left: 8px; padding-right: 8px; font-size: 14px; } }
 

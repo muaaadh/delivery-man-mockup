@@ -10,7 +10,9 @@
   const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
   const trim = v => String(v == null ? '' : v).trim();
 
-  // create(opts) → { el, validate(), getValue(), focus(), destroy() }; see BUILDERS.md for opts.
+  // create(opts) → { el, validate(), getValue(), focus(), destroy() }; see BUILDERS.md for opts. opts.dropoffKinds 'address' keeps the
+  // drop-off to a street address: no 'Cargo boat or terminal' and no airport zone, because boat, Maldivian Cargo and the airport are
+  // delivery methods with their own details and fee (web app updates §3). The pickup keeps every kind.
   function create(opts) {
     opts = opts || {};
     const { el, setError, phone } = MDM.ui;
@@ -80,8 +82,10 @@
     function endpoint(kind, initial, o) {
       o = o || {};
       const cur = initial || {};
-      const cargo0 = cur.cargo || null;
       const isPickup = kind === 'pickup';
+      const addressOnly = !isPickup && opts.dropoffKinds === 'address';
+      const zones = addressOnly ? zoneOptions.filter(z => z.value !== 'airport') : zoneOptions;
+      const cargo0 = addressOnly ? null : cur.cargo || null;
       const zoneKey = kind + '-zone', addrKey = kind + '-address';
       const parts = {};
       const block = el('div', { class: 'stack-4', 'data-endpoint': kind });
@@ -92,50 +96,52 @@
         sel.addEventListener('change', () => {
           const a = savedAddresses[Number(sel.value)];
           if (!a) return;
-          parts.address.value = a.address || ''; parts.zone.value = a.zone && zoneOptions.some(z => z.value === a.zone) ? a.zone : 'male';
+          parts.address.value = a.address || ''; parts.zone.value = a.zone && zones.some(z => z.value === a.zone) ? a.zone : 'male';
           if (!isPickup && a.meetAt && parts.meetAt && meetAtOptions.some(m => m.value === a.meetAt)) parts.meetAt.value = a.meetAt;
-          parts.cargo.input.checked = false;
+          if (parts.cargo) parts.cargo.input.checked = false;
           sync(); setError(fields[addrKey].wrap, null); setError(fields[zoneKey].wrap, null); onZone();
         });
       }
 
-      parts.cargo = checkbox(kind + '-cargo', 'Cargo boat or terminal', !!cargo0);
-      block.append(parts.cargo.el);
+      parts.cargo = addressOnly ? null : checkbox(kind + '-cargo', 'Cargo boat or terminal', !!cargo0);
+      if (parts.cargo) block.append(parts.cargo.el);
+      const cargoOn = () => !!parts.cargo && parts.cargo.input.checked;
 
       parts.address = input(addrKey, { autocomplete: 'street-address', value: cur.address && !cargo0 && cur.zone !== 'airport' ? cur.address : '', placeholder: isPickup ? 'M. Kaneerumaage, 2nd floor, Majeedhee Magu' : 'Hiyaa Tower 5, Apt 14-03' });
-      parts.zone = select(zoneKey, zoneOptions, { value: cur.zone && zoneOptions.some(z => z.value === cur.zone) ? cur.zone : (cargo0 && cargo0.terminal ? (terminals.find(t => t.value === cargo0.terminal) || {}).zone || 'male' : 'male') });
-      const addrField = field(addrKey, isPickup ? 'Pickup address' : 'Drop-off address', parts.address, { rule: () => (parts.cargo.input.checked || parts.zone.value === 'airport' || trim(parts.address.value)) ? null : ('Enter the ' + (isPickup ? 'pickup' : 'drop-off') + ' address') });
+      parts.zone = select(zoneKey, zones, { value: cur.zone && zones.some(z => z.value === cur.zone) ? cur.zone : (cargo0 && cargo0.terminal ? (terminals.find(t => t.value === cargo0.terminal) || {}).zone || 'male' : 'male') });
+      const addrField = field(addrKey, isPickup ? 'Pickup address' : 'Drop-off address', parts.address, { rule: () => (cargoOn() || parts.zone.value === 'airport' || trim(parts.address.value)) ? null : ('Enter the ' + (isPickup ? 'pickup' : 'drop-off') + ' address') });
       const zoneField = field(zoneKey, 'Zone', parts.zone);
       block.append(el('div', { class: 'grid-2' }, addrField, zoneField));
 
       parts.landmark = input(kind + '-landmark', { value: cur.landmark || '', placeholder: 'Near the STO shop, blue gate' });
       block.append(field(kind + '-landmark', 'Landmark or instructions', parts.landmark, { optional: true }));
 
-      // Cargo: terminal replaces the address; boat, expected time, consignee, receipt number.
-      parts.terminal = select(kind + '-terminal', [{ value: '', label: 'Choose a terminal' }].concat(terminals.map(t => ({ value: t.value, label: t.label }))), { value: cargo0 ? cargo0.terminal || '' : '' });
-      parts.boat = input(kind + '-boat', { value: cargo0 ? cargo0.boat || '' : '', placeholder: 'Alihaa Express' });
-      parts.time = input(kind + '-time', { type: 'time', value: cargo0 ? cargo0.time || '' : '' });
-      parts.consignee = input(kind + '-consignee', { value: cargo0 ? cargo0.consignee || '' : '', autocomplete: 'name', placeholder: 'Hassan Ziyad, Thoddoo' });
-      parts.receiptNo = input(kind + '-receipt-no', { value: cargo0 ? cargo0.receiptNo || '' : '' });
-      const cargoOn = () => parts.cargo.input.checked;
-      parts.cargoBlock = el('div', { class: 'stack-4', 'data-cargo': kind },
-        el('div', { class: 'grid-2' },
-          field(kind + '-terminal', 'Terminal', parts.terminal, { rule: () => parts.terminal.value ? null : 'Choose a terminal', when: cargoOn }),
-          field(kind + '-boat', 'Boat name', parts.boat, { rule: () => trim(parts.boat.value) ? null : 'Enter the boat name', when: cargoOn })),
-        el('div', { class: 'grid-2' },
-          field(kind + '-time', isPickup ? 'Expected arrival time' : 'Boat leaves at', parts.time, { optional: true }),
-          field(kind + '-consignee', 'Consignee name as written on the cargo', parts.consignee, { rule: () => trim(parts.consignee.value) ? null : 'Enter the name written on the cargo', when: cargoOn })),
-        field(kind + '-receipt-no', 'Cargo receipt no.', parts.receiptNo, { optional: true }));
-      block.append(parts.cargoBlock);
-      parts.terminal.addEventListener('change', () => {
-        const t = terminals.find(x => x.value === parts.terminal.value);
-        if (t && t.zone) { parts.zone.value = t.zone; onZone(); }
-      });
+      if (!addressOnly) {
+        // Cargo: terminal replaces the address; boat, expected time, consignee, receipt number.
+        parts.terminal = select(kind + '-terminal', [{ value: '', label: 'Choose a terminal' }].concat(terminals.map(t => ({ value: t.value, label: t.label }))), { value: cargo0 ? cargo0.terminal || '' : '' });
+        parts.boat = input(kind + '-boat', { value: cargo0 ? cargo0.boat || '' : '', placeholder: 'Alihaa Express' });
+        parts.time = input(kind + '-time', { type: 'time', value: cargo0 ? cargo0.time || '' : '' });
+        parts.consignee = input(kind + '-consignee', { value: cargo0 ? cargo0.consignee || '' : '', autocomplete: 'name', placeholder: 'Hassan Ziyad, Thoddoo' });
+        parts.receiptNo = input(kind + '-receipt-no', { value: cargo0 ? cargo0.receiptNo || '' : '' });
+        parts.cargoBlock = el('div', { class: 'stack-4', 'data-cargo': kind },
+          el('div', { class: 'grid-2' },
+            field(kind + '-terminal', 'Terminal', parts.terminal, { rule: () => parts.terminal.value ? null : 'Choose a terminal', when: cargoOn }),
+            field(kind + '-boat', 'Boat name', parts.boat, { rule: () => trim(parts.boat.value) ? null : 'Enter the boat name', when: cargoOn })),
+          el('div', { class: 'grid-2' },
+            field(kind + '-time', isPickup ? 'Expected arrival time' : 'Boat leaves at', parts.time, { optional: true }),
+            field(kind + '-consignee', 'Consignee name as written on the cargo', parts.consignee, { rule: () => trim(parts.consignee.value) ? null : 'Enter the name written on the cargo', when: cargoOn })),
+          field(kind + '-receipt-no', 'Cargo receipt no.', parts.receiptNo, { optional: true }));
+        block.append(parts.cargoBlock);
+        parts.terminal.addEventListener('change', () => {
+          const t = terminals.find(x => x.value === parts.terminal.value);
+          if (t && t.zone) { parts.zone.value = t.zone; onZone(); }
+        });
 
-      // Airport zone: a meeting point replaces the address.
-      parts.meet = select(kind + '-meet', [{ value: '', label: 'Choose a meeting point' }].concat(airportPoints.map(p => ({ value: p.value, label: p.label }))), { value: cur.zone === 'airport' && cur.meetAt && airportPoints.some(p => p.value === cur.meetAt) ? cur.meetAt : '' });
-      parts.meetField = field(kind + '-meet', 'Meeting point', parts.meet, { rule: () => parts.meet.value ? null : 'Choose a meeting point', when: () => parts.zone.value === 'airport' && !cargoOn() });
-      block.append(parts.meetField);
+        // Airport zone: a meeting point replaces the address.
+        parts.meet = select(kind + '-meet', [{ value: '', label: 'Choose a meeting point' }].concat(airportPoints.map(p => ({ value: p.value, label: p.label }))), { value: cur.zone === 'airport' && cur.meetAt && airportPoints.some(p => p.value === cur.meetAt) ? cur.meetAt : '' });
+        parts.meetField = field(kind + '-meet', 'Meeting point', parts.meet, { rule: () => parts.meet.value ? null : 'Choose a meeting point', when: () => parts.zone.value === 'airport' && !cargoOn() });
+        block.append(parts.meetField);
+      }
 
       if (!isPickup) {
         parts.meetAt = select('dropoff-meetat', meetAtOptions, { value: cur.meetAt && meetAtOptions.some(m => m.value === cur.meetAt) ? cur.meetAt : 'door' });
@@ -160,13 +166,13 @@
       function sync() {
         const cargo = cargoOn(), airport = parts.zone.value === 'airport' && !cargo;
         addrField.hidden = cargo || airport;
-        parts.cargoBlock.hidden = !cargo;
-        parts.meetField.hidden = !airport;
+        if (parts.cargoBlock) parts.cargoBlock.hidden = !cargo;
+        if (parts.meetField) parts.meetField.hidden = !airport;
         if (parts.meetAtField) parts.meetAtField.hidden = cargo || airport;
         parts.personBlock.hidden = !personOn();
       }
       function onZone() { sync(); if (o.onZone) o.onZone(); }
-      parts.cargo.input.addEventListener('change', onZone);
+      if (parts.cargo) parts.cargo.input.addEventListener('change', onZone);
       parts.zone.addEventListener('change', onZone);
       parts.self.input.addEventListener('change', sync);
       sync();
@@ -175,8 +181,8 @@
         const cargo = cargoOn();
         const zone = parts.zone.value || 'male';
         const airport = zone === 'airport' && !cargo;
-        const term = terminals.find(t => t.value === parts.terminal.value);
-        const meet = airportPoints.find(p => p.value === parts.meet.value);
+        const term = cargo ? terminals.find(t => t.value === parts.terminal.value) : null;
+        const meet = airport ? airportPoints.find(p => p.value === parts.meet.value) : null;
         const address = cargo ? ((term ? term.label : '') + (trim(parts.boat.value) ? ', boat ' + trim(parts.boat.value) : ''))
           : airport ? (AIRPORT_ADDRESS + (meet ? ', ' + meet.label : '')) : trim(parts.address.value);
         const person = personOn() ? { name: trim(parts.name.value), phone: phone.normalize(parts.phone.value) || trim(parts.phone.value) } : (me ? { name: me.name, phone: me.phone } : null);

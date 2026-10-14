@@ -203,7 +203,7 @@
       on: { click: () => { dismissToast(item); if (typeof opts.action.onClick === 'function') opts.action.onClick(); } } }, opts.action.label) : null;
     item.el = el('div', { class: 'toast toast--' + kind, role: 'status', 'data-testid': 'toast', 'data-kind': kind },
       TOAST_ICON[kind] ? html(MDM.icon(TOAST_ICON[kind], 16)) : null, el('span', { class: 'toast__text' }, msg), action);
-    // Hovering or focusing a toast pauses its timer so an action button stays reachable.
+    // Clicks pass through the toast to the page (base.css); hovering or focusing its action button pauses the timer so it stays reachable.
     const start = () => { if (item.left > 0 && !item.timer) { item.started = Date.now(); item.timer = setTimeout(() => dismissToast(item), item.left); } };
     const pause = () => { if (item.timer) { clearTimeout(item.timer); item.timer = null; item.left = Math.max(1000, item.left - (Date.now() - item.started)); } };
     item.el.addEventListener('mouseenter', pause); item.el.addEventListener('focusin', pause);
@@ -326,7 +326,8 @@
 
   function fieldValue(f, ctrl) {
     switch (f.type) {
-      case 'number': { const s = String(ctrl.value || '').trim(); return s === '' ? null : Number(s); }
+      // A half-typed number ('1e', '--') reads as '' with validity.badInput set: NaN, so check() says 'Enter a number', not 'Fill in'.
+      case 'number': { if (ctrl.validity && ctrl.validity.badInput) return NaN; const s = String(ctrl.value || '').trim(); return s === '' ? null : Number(s); }
       case 'checkbox': return !!ctrl.checked;
       case 'segmented': { const c = ctrl.querySelector('input:checked'); return c ? c.value : null; }
       case 'file': return ctrl.files && ctrl.files[0] || null;
@@ -411,8 +412,8 @@
         const v = fieldValue(f, parts[f.name].ctrl);
         values[f.name] = v;
         let msg = null;
-        if (f.required && isBlank(v)) msg = f.requiredMessage || 'Fill in this field';
-        else if (f.type === 'number' && v != null && isNaN(v)) msg = 'Enter a number';
+        if (f.type === 'number' && v != null && isNaN(v)) msg = 'Enter a number';
+        else if (f.required && isBlank(v)) msg = f.requiredMessage || 'Fill in this field';
         else if (f.type === 'number' && v != null && f.min != null && v < Number(f.min)) msg = 'Enter at least ' + f.min;
         else if (f.type === 'number' && v != null && f.max != null && v > Number(f.max)) msg = 'Enter at most ' + f.max;
         else if (f.type === 'tel' && v && !phone.valid(v, { landline: !!f.landline, intl: !!f.intl })) msg = f.invalidMessage || 'Enter a valid Maldivian mobile number';
@@ -432,7 +433,7 @@
       focus: firstFocus, onOk: check, onDone: () => urls.forEach(u => URL.revokeObjectURL(u)) }).then(v => v === 'ok' ? values : null);
   }
 
-  // ---- Phone (Maldives: mobile 7xxxxxx | 9xxxxxx, landline 3xxxxxx; international as +digits) ----
+  // ---- Phone (Maldives: mobile 7xxxxxx | 9xxxxxx, landline 3xxxxxx (Malé) | 6xxxxxx (islands); international as +digits) ----
   // Country codes per the ITU allocation: 1 and 7 are the only 1-digit codes, the 2-digit codes are a fixed set, everything else is 3 digits.
   const COUNTRY_CODE = /^(1|7|2[07]|3[0-469]|4[013-9]|5[1-8]|6[0-6]|8[1246]|9[0-58])/;
   const phone = {
@@ -444,7 +445,7 @@
       const plus = s.charAt(0) === '+' || /^00\d/.test(digits);
       if (/^00\d/.test(digits)) digits = digits.slice(2);
       const local = digits.length === 10 && digits.slice(0, 3) === '960' ? digits.slice(3) : (digits.length === 7 ? digits : null);
-      if (local && /^[379]\d{6}$/.test(local)) return local;
+      if (local && /^[3679]\d{6}$/.test(local)) return local;
       if (local && !plus) return null;
       if (digits.length >= 8 && digits.length <= 15 && !(digits.length === 10 && digits.slice(0, 3) === '960')) return '+' + digits;
       return null;
@@ -454,7 +455,7 @@
       if (!n) return false;
       if (n.charAt(0) === '+') return !!(opts && opts.intl);
       if (/^[79]\d{6}$/.test(n)) return true;
-      return /^3\d{6}$/.test(n) && !!(opts && opts.landline);
+      return /^[36]\d{6}$/.test(n) && !!(opts && opts.landline);
     },
     // format(raw) → '+960 777 1234' for a Maldivian number. International: an already spaced string keeps its own grouping
     // ('+44 20 7946 0958' stays as typed); an unspaced one gets the country code split off by the ITU rule and the rest grouped in

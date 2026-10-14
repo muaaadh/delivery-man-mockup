@@ -1,4 +1,5 @@
-// Home: fills every number from settings, runs the live demo order in the hero phone (real map, rider, ETA), drives the
+// Home: the three service categories, the delivery methods and the rate ranges (web app updates 11/10/2026 §1, §3, §4) are
+// filled from the shared lists and settings; it also runs the live demo order in the hero phone (real map, rider, ETA), drives the
 // scrubbed hero stage and the pinned "How it works" story, and draws the coverage map. Motion primitives come from js/motion.js.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
@@ -8,36 +9,67 @@
   const setKey = (k, text) => document.querySelectorAll('[data-k="' + k + '"]').forEach(n => { if (text != null) n.textContent = String(text); });
   const DEMO_CODE = 'MDM-1038';
 
+  // Count-up numbers ([data-count]) end on dataset.countFinal, so a settings change mid-animation still lands on the right text.
+  const setCount = (testid, text) => { const n = node(testid); if (n && text != null) { n.textContent = String(text); n.dataset.countFinal = String(text); } };
+
+  // Service categories (§1), collection types and delivery methods (§3) take their wording from the shared lists.
+  function renderLabels() {
+    MDM.SERVICE_CATEGORIES.forEach(c => {
+      document.querySelectorAll('[data-cat-label="' + c.value + '"]').forEach(n => { n.textContent = c.label; });
+      document.querySelectorAll('[data-cat-hint="' + c.value + '"]').forEach(n => { n.textContent = c.hint.replace(/([^.])$/, '$1.'); });
+    });
+    MDM.REQUEST_TYPES.forEach(t => document.querySelectorAll('[data-type-label="' + t.value + '"]').forEach(n => { n.textContent = t.label; }));
+    MDM.DELIVERY_METHODS.forEach(m => document.querySelectorAll('[data-method-label="' + m.value + '"]').forEach(n => { n.textContent = m.label; }));
+  }
+  // Business size categories (§1.3) with their starting rates, smallest first; each business then agrees its own rates.
+  function renderTiers(s) {
+    const list = node('home-business-tiers');
+    const tiers = MDM.pricing.businessTiers(s);
+    if (list) list.replaceChildren(...tiers.map(t => el('li', { 'data-tier': t.value }, el('span', null, t.label + ', ' + (t.size === 'xl' ? 'XL' : MDM.pricing.sizeLabel(t.size).toLowerCase()) + ' size'),
+      el('strong', { class: 'mono' }, el('span', { class: 'tiers__from' }, 'from'), ' ' + fmt(t.rate)))));
+    return tiers.reduce((m, t) => Math.min(m, Number(t.rate) || Infinity), Infinity);
+  }
+
   async function render() {
     const s = await MDM.store.settings();
     const rates = s.rates || {}, sizes = rates.sizes || {}, guide = s.sizeGuide || {}, ops = s.ops || {};
     const pct = Math.round(Number(rates.shoppingPct) || 0);
-    const bag = sizes.bag || {}, box = sizes.box || {}, xl = sizes.xl || {};
+    const bag = sizes.bag || {};
 
     const hours = MDM.shell.hoursLine(s);
     setText('home-hours', hours);
     const status = node('home-hours'); if (status) status.parentElement.dataset.open = String(/^Open/.test(hours));
+
+    renderLabels();
+    const bizFrom = renderTiers(s);
+    const bizMin = isFinite(bizFrom) ? bizFrom : Math.round(Number(rates.business) || 0);
 
     setText('home-hero-from', fmt(bag.same));
     setText('home-service-price-pick', 'From ' + fmt(bag.same));
     setText('home-service-price-shop', 'From ' + fmt(bag.same));
     setText('home-service-fee-shop', 'Shopping fee ' + pct + '%');
     const fee = document.querySelector('.receipt__fee .mono'); if (fee) fee.textContent = fmt(Math.round(136 * pct / 100));
-    setText('home-service-price-business', fmt(rates.business));
+    // The cargo fee is per package unless rules.cargoFeePer is 'order' (and the airport fee per order unless airportFeePer is 'package').
+    const rules = s.rules || {};
+    const cargoEach = rules.cargoFeePer === 'order' ? '' : ' a package', airportEach = rules.airportFeePer === 'package' ? ' a package' : '';
+    setText('home-method-cargo-fee', fmt(rates.cargo) + cargoEach); setText('home-method-airport-fee', fmt(rates.airport) + airportEach);
+    setText('home-fee-cargo-note', (cargoEach ? 'a package, ' : '') + 'only for Maldivian Cargo deliveries');
+    setText('home-fee-airport-note', (airportEach ? 'a package, ' : '') + 'airport deliveries');
 
-    setText('home-rate-bag', fmt(bag.same)); setText('home-rate-bag-cross', fmt(bag.cross));
-    setText('home-rate-box', fmt(box.same)); setText('home-rate-box-cross', fmt(box.cross));
-    setText('home-rate-xl', fmt(xl.same));
+    // §4: rates as ranges (Bag MVR 35–45, Box MVR 45–60, XL MVR 60++) straight from settings.rates.sizes.
+    ['bag', 'box', 'xl'].forEach(size => { setCount('home-rate-' + size, MDM.pricing.rangeLabel(size, s)); setKey('range-' + size, MDM.pricing.rangeLabel(size, s)); });
     setText('home-guide-bag', guide.bag); setText('home-guide-box', guide.box);
-    setText('home-fee-shopping', pct + '% of the receipt');
+    setText('home-fee-shopping', pct + '% of the budget');
     setText('home-fee-cargo', fmt(rates.cargo)); setText('home-fee-airport', fmt(rates.airport));
-    setText('home-fee-business', String(Math.round(Number(rates.business) || 0)));
+    setKey('fee-cargo', fmt(rates.cargo) + cargoEach); setKey('fee-airport', fmt(rates.airport) + airportEach);
+    setText('home-fee-business-from', 'from ' + fmt(bizMin));
+    setCount('home-fee-business', String(bizMin));
     setText('home-due-days', 'due in ' + (Number(s.invoiceDueDays) || 14) + ' days');
 
     setKey('bag-cross', fmt(bag.cross)); setKey('bag-same', fmt(bag.same)); setKey('bag-cross-num', String(bag.cross));
     const bank = (s.banks || [])[0]; if (bank) { setKey('bank-name', bank.name); setKey('bank-no', bank.accountNo); }
     setKey('review', ops.reviewText ? ', usually in ' + ops.reviewText : '');
-    if (ops.asapText) setText('home-faq-asap', ops.asapText + ' when you choose "as soon as possible". You can also pick a 2-hour window later today or another day.');
+    if (ops.asapText) setText('home-faq-asap', ops.asapText + ' on a normal order. Choose Express to jump the queue (we confirm it first), or an Advance order to book the collection and delivery days ahead.');
     if (s.terms) setText('home-terms', s.terms);
 
     const c = MDM.shell.contactLinks();

@@ -22,6 +22,22 @@
   const icon = (name, size) => MDM.ui.html(MDM.icon(name, size || 16));
   const parseAmount = v => Number(String(v == null ? '' : v).replace(/[^\d.]/g, ''));
   const channelOf = c => CHANNEL[c && c.notify] || CHANNEL.whatsapp;
+  const CHARGE_STAGE = { collection: 'at collection', delivery: 'at delivery' };
+  // Fee rows in the amount due: airport, cargo and shopping fees, the extra vehicle charge and billable charges (web app updates §3, §6).
+  // They are all in order.totals already; a voided or non-billable charge never appears.
+  function feeRows(order, settings) {
+    const adjs = {}, charges = order.charges || [];
+    ((order.fees || {}).adjustments || []).forEach(a => { adjs[a.id] = a; });
+    return MDM.pricing.feeLines(order, settings).map(f => {
+      if (f.key !== 'adjustment') return f;
+      const a = adjs[f.id] || {};
+      const ch = charges.find(c => (a.chargeId && c.id === a.chargeId) || (c.adjustmentId && c.adjustmentId === a.id));
+      if (ch && (ch.void || !ch.billable)) return null;
+      if (ch) return Object.assign({}, f, { key: 'charge-' + ch.type, reason: [ch.type !== 'other' ? ch.description : '', CHARGE_STAGE[ch.stage]].filter(Boolean).join(', ') });
+      if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: a.remarks || '' });
+      return f;
+    }).filter(Boolean);
+  }
 
   const RULES = {
     bank: d => d.bank ? null : 'Choose the bank you paid from',
@@ -164,18 +180,33 @@
       el('div', { class: 'rate-table__label' }, label, opts.sub ? el('small', null, opts.sub) : null),
       el('div', { class: 'rate-table__value' + (opts.mono ? ' mono' : '') }, value));
   }
-  function line(label, sub, amount, fee) {
-    return el('div', { class: 'summary__line' + (fee ? ' summary__line--fee' : '') },
+  function line(label, sub, amount, fee, key) {
+    return el('div', { class: 'summary__line' + (fee ? ' summary__line--fee' : ''), dataset: key ? { fee: key } : null },
       el('span', { class: 'summary__desc' }, label, sub ? el('span', { class: 'summary__sub' }, sub) : null),
       el('span', { class: 'summary__amount mono' }, MDM.pricing.format(amount)));
   }
   function summary(order, settings) {
-    const lines = (order.packages || []).map(p => line(MDM.pricing.lineLabel(p, order.service), p.description, p.price ? p.price.lineTotal : 0));
+    const from = {};
+    (order.changes || []).forEach(c => { const m = /^package (.+) size$/.exec(c.field || ''); if (m && c.from && !from[m[1]]) from[m[1]] = c.from; });
+    const lines = (order.packages || []).map(p => line(MDM.pricing.lineLabel(p, order.service),
+      [p.description, from[p.id] && from[p.id] !== p.size ? 'changed from ' + MDM.pricing.sizeLabel(from[p.id]) + ' by our team' : ''].filter(Boolean).join(' · ') || null, p.price ? p.price.lineTotal : 0));
     (order.items || []).forEach(it => lines.unshift(line(it.qty + ' × ' + it.name, null, it.total)));
-    if (order.totals.budget) lines.push(line('Shopping budget (paid up front)', null, order.totals.budget, true));
-    MDM.pricing.feeLines(order, settings).forEach(f => lines.push(line(f.label, f.reason, f.amount, true)));
+    const shopItems = Array.isArray((order.details || {}).items) ? order.details.items.filter(i => i && i.name) : [];
+    const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0);
+    if (order.totals.budget) lines.push(line(receipt ? 'Shopping receipt' : 'Shopping budget (paid up front)', shopItems.length ? shopItems.map(i => (i.qty || 1) + ' × ' + i.name).join(', ') : null, order.totals.budget, true, 'shop-budget'));
+    feeRows(order, settings).forEach(f => lines.push(line(f.label, f.reason, f.amount, true, f.key)));
     return el('div', { class: 'summary checkout-summary' }, lines, el('div', { class: 'summary__rule' }),
       el('div', { class: 'summary__total' }, el('span', null, 'Amount due'), el('span', { class: 'mono', 'data-testid': 'checkout-amount' }, MDM.pricing.format(order.totals.total))));
+  }
+  // The delivery method (§3) and where the package goes: the island for boats and cargo, the resort for airport deliveries.
+  function deliverySub(order) {
+    const d = order.delivery || {}, m = d.method || 'home';
+    const text = m === 'boat' ? [((d.boat || {}).name), (d.boat || {}).island].filter(Boolean).join(' to ')
+      : m === 'cargo' ? [MDM.geo.cargoCounter().label, (d.cargo || {}).island ? 'for ' + d.cargo.island : ''].filter(Boolean).join(', ')
+      : m === 'airport' ? [(d.airport || {}).counter, (d.airport || {}).resort].filter(Boolean).join(', ')
+      : [d.address, d.zone ? MDM.geo.zoneShort(d.zone) : ''].filter(Boolean).join(', ');
+    const drops = new Set((order.packages || []).map(p => (p.dropoff || {}).address).filter(Boolean));
+    return m === 'home' && drops.size > 1 ? el('small', null, drops.size + ' drop-off addresses') : text ? el('small', null, text) : null;
   }
   function scheduleText(order) {
     const s = order.schedule || {};
@@ -210,7 +241,8 @@
         row('Order code', el('span', { class: 'checkout-copy checkout-copy--end' }, el('span', { class: 'checkout-code mono', 'data-testid': 'checkout-code' }, order.code), copyButton(order.code, 'checkout-copy-code', 'order code'))),
         row('Customer', [c.name || '', el('small', { class: 'mono' }, MDM.ui.phone.format(c.phone))]),
         row('Status', [MDM.ui.html(MDM.badgeFor(order.status, { customer: true })), ' ', MDM.ui.html(MDM.payBadge(order.payment.status))]),
-        row('Collection', scheduleText(order))),
+        row('Collection', scheduleText(order)),
+        row('Delivery', [el('span', { 'data-testid': 'checkout-method' }, MDM.deliveryMethodLabel((order.delivery || {}).method)), deliverySub(order)])),
       summary(order, settings));
   }
   function bankSection(order, settings) {
@@ -219,7 +251,7 @@
       el('div', { class: 'section-head' }, el('h2', { id: 'co-bank' }, 'Transfer to one of our accounts')),
       el('div', { class: 'stack-4' },
         notice('info', 'info', 'Demo bank details, replace before launch.'),
-        el('div', { class: 'rate-table' }, banks.map(b => row(b.name, el('span', { class: 'checkout-copy checkout-copy--end' },
+        el('div', { class: 'rate-table checkout-banks' }, banks.map(b => row(b.name, el('span', { class: 'checkout-copy checkout-copy--end' },
           el('span', { class: 'checkout-account mono' }, b.accountNo), copyButton(b.accountNo, 'checkout-copy-account', 'account number')), { sub: 'Account name: ' + b.accountName }))),
         el('p', { class: 'checkout-ref' }, 'Use the order code ', el('span', { class: 'mono' }, order.code), ' as the transfer reference.')));
   }
@@ -360,8 +392,17 @@
     const pay = order.payment || {};
     if (pay.status === 'refunded') { show(notice('info', 'info', 'Refunded ' + MDM.pricing.format((pay.refund || {}).amount || 0) + '. Nothing to pay.', trackAction(order)), ''); return; }
     if (order.status === 'cancelled') { show(notice('danger', 'alert-circle', 'This order was cancelled. Nothing to pay.', trackAction(order)), ''); return; }
-    // Business orders are invoiced monthly and never pass through payment.
-    if (pay.method === 'invoice' || pay.status === 'invoiced') { show(notice('info', 'info', 'No payment needed now. This order goes on your monthly business invoice.', trackAction(order)), ''); return; }
+    // Business orders are invoiced monthly and never pass through payment. Their receiver only pays the cash on delivery, if any,
+    // and is told who arranged the delivery; the business signed in on this browser sees its own wording.
+    if (pay.method === 'invoice' || pay.status === 'invoiced') {
+      let biz = null; try { biz = JSON.parse(localStorage.getItem('mdm:business') || 'null'); } catch (e) { biz = null; }
+      const name = (order.customer && order.customer.name) || 'the business';
+      const cod = order.cod && order.cod.amount > 0 && order.cod.status === 'pending' && ['delivered', 'returned'].indexOf(order.status) < 0 ? order.cod : null;
+      const text = biz && biz.accountId && biz.accountId === order.accountId ? 'No payment needed now. This order goes on your monthly business invoice.'
+        : 'Nothing to pay online. This delivery is arranged by ' + name + ' and billed to them.' + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash when the package arrives.' : '');
+      show(el('div', { 'data-testid': 'checkout-business' }, notice('info', 'info', text, trackAction(order))), '');
+      return;
+    }
     if (pay.status === 'paid') { show(el('div', { class: 'stack-4', 'data-testid': 'checkout-paid' }, notice('ok', 'check-circle', 'Paid, thank you. Verified ' + MDM.ui.fmtDate(pay.verifiedAt) + '.', invoiceLink(order)), orderSection(order, settings)), ''); return; }
     if (pay.status === 'pending' && !(order.pricing && order.pricing.status === 'confirmed')) {
       show(notice('info', 'info', "We're confirming your price. Pay once it is confirmed, or after delivery. We'll message you " + channelOf(order.customer) + '.', trackAction(order)), '');

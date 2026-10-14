@@ -44,3 +44,11 @@ body.page-track .track-file { display: inline-flex; align-items: center; justify
 body.page-track .track-proof-list .list__item { gap: 12px; }
 body.page-track .track-invoice { margin-top: 12px; }
 body.page-track .track-pay-row { margin-top: 16px; }
+
+/* Delivery method details, boat change history, shopping items and package category changes (web app updates §2, §3). */
+body.page-track .track-sub { margin-top: 20px; }
+body.page-track .track-h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+body.page-track .track-items .list__title { overflow-wrap: anywhere; }
+body.page-track .track-changes { margin: 0; padding: 0; list-style: none; }
+body.page-track .track-changes li + li { margin-top: 2px; }
+body.page-track .track-result > .section > .alert + .summary { margin-top: 12px; }

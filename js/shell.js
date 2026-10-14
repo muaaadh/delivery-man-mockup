@@ -12,7 +12,7 @@
     { label: 'Track', href: 'track/', page: 'track' },
   ];
   const FOOTER_COLUMNS = [
-    { title: 'Services', links: [{ label: 'Home delivery', href: 'request/?type=home' }, { label: 'Shop & deliver', href: 'request/?type=shop_buy' }, { label: 'Postal & courier', href: 'request/?type=postal' }, { label: 'Airport & baggage', href: 'request/?type=airport' }, { label: 'Office assistance', href: 'request/?type=office' }, { label: 'E-store', href: 'store/' }] },
+    { title: 'Services', links: [{ label: 'Pick & Deliver', href: 'request/?category=pick' }, { label: 'Shop & Deliver', href: 'request/?type=shop_buy' }, { label: 'Business Delivery', href: 'business/' }, { label: 'Postal & courier collection', href: 'request/?type=postal' }, { label: 'Administrative services', href: 'request/?type=office' }, { label: 'E-store', href: 'store/' }] },
     { title: 'Your orders', links: [{ label: 'Request a delivery', href: 'request/' }, { label: 'Track an order', href: 'track/' }, { label: 'My orders', href: 'account/' }, { label: 'For businesses', href: 'business/' }, { label: 'Questions', href: '#faq' }] },
     { title: 'Team', links: [{ label: 'Customer sign-in', href: 'login/' }, { label: 'Business sign-in', href: 'login/?as=business' }, { label: 'Driver sign-in', href: 'login/?as=driver' }, { label: 'Staff portal', href: 'login/?as=staff' }, { label: 'Office sign-in', href: 'login/?as=admin' }] },
   ];
@@ -24,6 +24,7 @@
     { view: 'drivers', label: 'Drivers', icon: 'bike', group: 'Operations' },
     { view: 'customers', label: 'Customers', icon: 'users', group: 'Accounts' },
     { view: 'business', label: 'Business', icon: 'building', group: 'Accounts' },
+    { view: 'cash', label: 'Cash & COD', icon: 'wallet', group: 'Accounts' },
     { view: 'store', label: 'E-store', icon: 'store', group: 'Accounts' },
     { view: 'team', label: 'Team & HR', icon: 'clock', group: 'Team' },
     { view: 'reports', label: 'Reports', icon: 'sliders', group: 'Insights' },
@@ -36,14 +37,14 @@
   // Role permissions (client requirements §21): operators run the day, office staff handle customers and payments, admin sees everything.
   const ROLE_VIEWS = {
     admin: ADMIN_NAV.map(n => n.view),
-    operator: ['overview', 'orders', 'bulk', 'live', 'drivers', 'customers', 'business', 'store', 'reports', 'notifications', 'zones'],
-    office: ['overview', 'orders', 'customers', 'business', 'store', 'notifications'],
+    operator: ['overview', 'orders', 'bulk', 'live', 'drivers', 'customers', 'business', 'cash', 'store', 'reports', 'notifications', 'zones'],
+    office: ['overview', 'orders', 'customers', 'business', 'cash', 'store', 'notifications'],
   };
   function session() { try { return JSON.parse(localStorage.getItem('mdm:session') || 'null'); } catch (e) { return null; } }
   function allowedViews() { const s = session(); return ROLE_VIEWS[(s && s.role) || 'admin'] || ROLE_VIEWS.admin; }
   // Keys that are not sidebar views but count towards one: payment reviews and quotes are orders needing action, requests are business.
-  const COUNT_ALIAS = { reviews: 'orders', quotes: 'orders', unassigned: 'orders', onHold: 'orders', failed: 'orders', cancels: 'orders', priority: 'orders', requests: 'business', riders: 'live', online: 'live', leaves: 'team', batches: 'bulk' };
-  const HOT_VIEWS = { orders: true, business: true, team: true, bulk: true };
+  const COUNT_ALIAS = { reviews: 'orders', quotes: 'orders', unassigned: 'orders', onHold: 'orders', failed: 'orders', cancels: 'orders', priority: 'orders', requests: 'business', riders: 'live', online: 'live', leaves: 'team', batches: 'bulk', returns: 'orders', cod: 'cash' };
+  const HOT_VIEWS = { orders: true, business: true, team: true, bulk: true, cash: true };
 
   // Minimal DOM builder: el(tag, { class, id, dataset, on:{ event: fn }, any attribute }, ...children) where children are Node | string | array | null.
   function el(tag, attrs) {

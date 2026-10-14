@@ -39,6 +39,9 @@
       map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
       if (opts.interactive !== false) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       map.touchZoomRotate.disableRotation();
+      // The OpenFreeMap styles name images their sprite lacks ('wood-pattern' in dark): a transparent 1x1 stand-in stops the warnings.
+      // ("Expected value to be of type number, but found null" comes from the vendor style's own label filters, not our layers.)
+      map.on('styleimagemissing', e => { if (e && e.id && !map.hasImage(e.id)) map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) }); });
       map.__style = themeStyle(); map.__own = new Set(); live.add(map); map.on('remove', () => live.delete(map));
       // One settle path: a failed instance is torn down here (canvas, worker, tile requests), because the caller never gets a handle
       // to destroy it and only shows .map__fallback on rejection (SPEC §4.5).

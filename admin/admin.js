@@ -156,6 +156,9 @@
   }
 
   // ---- Sidebar counts: what needs someone ---------------------------------------------------------------------------------------
+  // Web app updates §5.5 and §5.6: packages coming back after a business cancelled, cash a driver still holds, cash the office owes a business.
+  const returnPending = o => !!(o.cancellation && o.cancellation.returnStatus === 'pending');
+  const cashDifference = o => !!(o.cod && typeof o.cod.variance === 'number' && o.cod.variance !== 0 && o.cod.status !== 'remitted');
   function queues(orders) {
     return {
       quotes: orders.filter(o => o.status === 'requested'),
@@ -164,6 +167,9 @@
       failed: orders.filter(o => o.status === 'failed'),
       cancels: orders.filter(o => o.cancellation && o.cancellation.status === 'requested' && ['cancelled', 'delivered', 'returned'].indexOf(o.status) < 0),
       priority: orders.filter(o => o.priority && o.priority.status === 'requested' && ['cancelled', 'delivered', 'returned'].indexOf(o.status) < 0),
+      returns: orders.filter(returnPending),
+      cashFromDrivers: orders.filter(o => o.cod && o.cod.status === 'collected'),
+      cashToBusinesses: orders.filter(o => o.cod && o.cod.status === 'with_office'),
     };
   }
   async function refreshCounts() {
@@ -172,7 +178,8 @@
       MDM.store.list('leaves', { where: { status: 'pending' } }), MDM.store.list('batches', { where: { status: 'confirmed' } })]);
     const q = queues(orders);
     const counts = {};
-    Object.keys(q).forEach(k => { counts[k] = q[k].length; });
+    ['quotes', 'reviews', 'unassigned', 'failed', 'cancels', 'priority', 'returns'].forEach(k => { counts[k] = q[k].length; });
+    counts.cod = q.cashFromDrivers.length + q.cashToBusinesses.length;
     counts.requests = { value: requests.length, hot: true };
     counts.leaves = { value: leaves.length, hot: true };
     counts.batches = { value: batches.length, hot: true };
@@ -187,8 +194,9 @@
   // ---- Shared formatting and table helpers (MDM.admin.fmt) ----------------------------------------------------------------
   const SERVICE = { pick: 'Pick & deliver', shop: 'Shop & deliver', business: 'Business', store: 'E-store' };
   const LEVEL = { normal: 'Normal', express: 'Express', advance: 'Advance order' };
-  const SOURCE = { web: 'Website', viber: 'Viber', whatsapp: 'WhatsApp', phone: 'Phone', walkin: 'Walk-in', business: 'Business portal', portal: 'Business portal', csv: 'CSV import', store: 'E-store' };
-  const NOTIFY = { sms: 'SMS', whatsapp: 'WhatsApp', viber: 'Viber', email: 'Email' };
+  const SOURCE = { web: 'Website', viber: 'Viber', whatsapp: 'WhatsApp', phone: 'Phone', walkin: 'Walk-in', business: 'Business portal', portal: 'Business portal', csv: 'CSV import', excel: 'Excel import', store: 'E-store' };
+  // Channels a notification went out on; 'app' is the in-app message to a driver, operations or the business (staff notifications).
+  const NOTIFY = { sms: 'SMS', whatsapp: 'WhatsApp', viber: 'Viber', email: 'Email', app: 'In the app' };
   const DONE = ['delivered', 'returned', 'cancelled'];
   const money = n => MDM.pricing.format(n);
   const plural = (n, word, pluralForm) => MDM.ui.plural(n, word, pluralForm);
@@ -215,6 +223,9 @@
     return html(MDM.ui.badge(s.kind, s.label, { 'data-status': st, 'data-testid': 'payment-badge' }));
   }
   function typeLabel(o) { return MDM.requestTypeLabel(o.requestType); }
+  // vehicleCharged(order): the office added an extra vehicle charge (store.addVehicleCharge sets order.vehicleCharged; older orders
+  // only carry the 'vehicle' adjustment). order.extraVehicle is the customer's request at booking, not the charge (§2.3).
+  function vehicleCharged(o) { return !!o.vehicleCharged || ((o.fees || {}).adjustments || []).some(a => a.preset === 'vehicle'); }
   // flags(order) → [{ kind, label }]: priority, express, advance, cancellation and priority requests the office has to see in a list.
   function flags(o) {
     const out = [];
@@ -224,7 +235,21 @@
     if (p.status === 'requested' && DONE.indexOf(o.status) < 0) out.push({ kind: 'warn', label: 'Priority requested', key: 'priority-request' });
     if (o.cancellation && o.cancellation.status === 'requested' && DONE.indexOf(o.status) < 0) out.push({ kind: 'danger', label: 'Cancel requested', key: 'cancel-request' });
     if (o.serviceLevel === 'advance' && DONE.indexOf(o.status) < 0) out.push({ kind: 'info', label: 'Advance', key: 'advance' });
+    if ((o.extraVehicle || vehicleCharged(o)) && DONE.indexOf(o.status) < 0) out.push({ kind: 'info', label: 'Extra vehicle', key: 'extra-vehicle' });
+    if (returnPending(o)) out.push({ kind: 'danger', label: 'Return pending', key: 'return-pending' });
+    if (cashDifference(o)) out.push({ kind: 'warn', label: 'Cash difference', key: 'cash-difference' });
     return out;
+  }
+  // methodText(order) → 'Home delivery' · 'Speedboat Thulusdhoo Express' · 'Maldivian Cargo · Fuvahmulah' · 'Airport · Lagoon Point Resort'.
+  function methodText(o) {
+    const d = o.delivery || {}, m = d.method || 'home';
+    if (m === 'boat' && d.boat) {
+      const v = (MDM.VESSEL_TYPES.find(x => x.value === d.boat.vesselType) || {}).label;
+      return [d.boat.name ? (v ? v.replace(' (dhoni)', '') + ' ' : '') + d.boat.name : MDM.deliveryMethodLabel(m), d.boat.island].filter(Boolean).join(' · ');
+    }
+    if (m === 'cargo') return ['Maldivian Cargo', d.cargo && d.cargo.island].filter(Boolean).join(' · ');
+    if (m === 'airport') return ['Airport', d.airport && (d.airport.resort || d.airport.counter)].filter(Boolean).join(' · ');
+    return MDM.deliveryMethodLabel(m);
   }
   function flagNodes(o) { const f = flags(o); return f.length ? el('span', { class: 'row-flags' }, f.map(x => html(MDM.ui.badge(x.kind, x.label, { 'data-flag': x.key })))) : null; }
   function driverName(id, drivers) { const d = id && (drivers || []).find(x => x.id === id); return d ? d.name : ''; }
@@ -245,7 +270,8 @@
       ctx.narrow ? el('span', { class: 'table__sub' }, typeLabel(o)) : null) },
     customer: { label: 'Customer', cell: o => el('td', { 'data-label': 'Customer' }, o.customer ? o.customer.name : '', el('span', { class: 'table__sub mono' }, o.customer ? MDM.ui.phone.format(o.customer.phone) : '')) },
     type: { label: 'Type', cell: o => el('td', { 'data-label': 'Type' }, typeLabel(o), o.serviceLevel && o.serviceLevel !== 'normal' ? el('span', { class: 'table__sub' }, LEVEL[o.serviceLevel]) : null) },
-    route: { label: 'Route', cell: o => el('td', { 'data-label': 'Route' }, routeText(o), el('span', { class: 'table__sub' }, nb(plural((o.packages || []).length, 'package')))) },
+    route: { label: 'Route', cell: o => el('td', { 'data-label': 'Route' }, routeText(o), el('span', { class: 'table__sub' }, nb(plural((o.packages || []).length, 'package'))),
+      el('span', { class: 'table__sub', 'data-testid': 'orders-row-method', 'data-method': (o.delivery && o.delivery.method) || 'home' }, methodText(o))) },
     total: { label: 'Total', th: 'num', cell: (o, ctx) => el('td', { class: 'num mono', 'data-label': 'Total' }, money(o.totals ? o.totals.total : 0), ctx.narrow ? el('span', { class: 'table__sub' }, paymentBadge(o)) : (o.pricing && o.pricing.status !== 'confirmed' ? el('span', { class: 'table__sub' }, 'estimate') : null)) },
     payment: { label: 'Payment', cell: o => el('td', { 'data-label': 'Payment' }, paymentBadge(o)) },
     status: { label: 'Status', cell: o => el('td', { class: 'table__primary', 'data-label': 'Status' }, html(MDM.badgeFor(o.status)), flagNodes(o)) },
@@ -275,8 +301,15 @@
     mapEl.appendChild(el('div', { class: 'map__fallback' }, el('div', { class: 'alert alert--warn' }, html(MDM.icon('alert-triangle', 16)),
       el('div', { class: 'alert__body' }, 'Map unavailable right now. Stops and status are still updated below.'))));
   }
-  // CSV export shared by reports and lists: rows of arrays, quoted where needed, UTF-8 with BOM so Excel keeps "Malé".
-  function csv(rows) { return rows.map(r => r.map(v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(',')).join('\r\n'); }
+  // CSV export shared by reports and lists: rows of arrays, quoted where needed, UTF-8 with BOM so Excel keeps "Malé". A text cell that
+  // starts with = + - @ (a name or note someone typed) gets a leading apostrophe so a spreadsheet shows it instead of running it as a
+  // formula; real numbers, negative amounts included (also as text, '-12.50' from toFixed), stay numbers.
+  function csvCell(v) {
+    let s = v == null ? '' : String(v);
+    if (typeof v !== 'number' && /^[=+\-@]/.test(s) && !/^-\d+(\.\d+)?$/.test(s)) s = "'" + s;
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function csv(rows) { return rows.map(r => r.map(csvCell).join(',')).join('\r\n'); }
   function downloadCsv(rows, filename) {
     const url = URL.createObjectURL(new Blob(['﻿' + csv(rows)], { type: 'text/csv;charset=utf-8' }));
     const a = el('a', { href: url, download: filename, hidden: true });
@@ -297,14 +330,17 @@
         el('div', { class: 'kpi__value mono', 'data-testid': 'kpi-' + testid + '-value' }, String(value)),
         note ? el('div', { class: 'kpi__note' }, note) : null);
     }
-    function attention(orders, requests, leaves, batches, drivers) {
+    function attention(orders, requests, leaves, batches, drivers, accounts) {
       const q = queues(orders);
       const groups = [];
       const link = (o, meta, aside) => el('a', { class: 'list__item list__item--link', href: '#/orders/' + encodeURIComponent(o.id), 'data-testid': 'attention-item', 'data-status': o.status, 'data-code': o.code },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, el('span', { class: 'mono' }, o.code), ' · ' + (o.customer ? o.customer.name : '')), el('div', { class: 'list__meta' }, meta)),
         el('div', { class: 'list__aside' }, aside));
+      // Cash queues open the Cash & COD page when this role has it; otherwise the matching orders.
+      const cashPage = can('cash') && !!views.cash;
       // Each queue shows its 3 oldest-first items; the rest are one click away in the matching orders tab.
-      const MORE = { price: '#/orders?tab=price', payments: '#/orders?tab=payments', failed: '#/orders?tab=failed', cancels: '#/orders?tab=cancels', priority: '#/orders?tab=priority', unassigned: '#/orders?tab=unassigned', bulk: '#/bulk', leave: '#/team?tab=leave', business: '#/business' };
+      const MORE = { price: '#/orders?tab=price', payments: '#/orders?tab=payments', failed: '#/orders?tab=failed', cancels: '#/orders?tab=cancels', priority: '#/orders?tab=priority', unassigned: '#/orders?tab=unassigned', bulk: '#/bulk', leave: '#/team?tab=leave', business: '#/business',
+        returns: '#/orders?tab=returns', cashDrivers: cashPage ? '#/cash' : '#/orders', cashBusiness: cashPage ? '#/cash' : '#/orders' };
       const group = (key, title, items) => {
         if (!items.length) return;
         const shown = items.slice(0, 3);
@@ -321,6 +357,28 @@
       group('cancels', 'Cancellation requests', q.cancels.map(o => link(o, (o.cancellation.reason || 'No reason given') + ' · ' + MDM.STATUS[o.status].label, MDM.ui.timeAgo(o.cancellation.requestedAt))));
       group('priority', 'Priority requests', q.priority.map(o => { const r = (o.priority.requests || []).slice().reverse().find(x => x.decision === 'pending') || {}; return link(o, (r.reason || 'Priority delivery') + (r.deadline ? ' · by ' + r.deadline : ''), MDM.ui.timeAgo(r.at || o.updatedAt)); }));
       group('unassigned', 'Driver to assign', q.unassigned.map(o => link(o, routeText(o) + ' · ' + typeLabel(o), MDM.ui.timeAgo(o.updatedAt))));
+      const accountName = id => ((accounts || []).find(a => a.id === id) || {}).name || 'the business';
+      group('returns', 'Returns to bring back', q.returns.map(o => {
+        const c = o.cancellation || {}, prev = MDM.STATUS[c.previousStatus];
+        return link(o, 'Cancelled by ' + accountName(o.accountId) + (prev ? ' while ' + prev.label.toLowerCase() : '') + ' · ' + (driverName(o.driverId, drivers) || 'the driver') + ' brings it back', MDM.ui.timeAgo(o.cancelledAt || c.decidedAt || o.updatedAt));
+      }));
+      // Cash is owed per person, so these two queues list one row per driver and per business with the total.
+      const cashRows = (list, keyOf, nameOf, kind, hrefOf) => {
+        const groupsBy = {};
+        list.forEach(o => { const k = keyOf(o) || 'none'; (groupsBy[k] = groupsBy[k] || []).push(o); });
+        return Object.keys(groupsBy).map(k => {
+          const items = groupsBy[k], total = items.reduce((t, o) => t + (Number(o.cod.collectedAmount) || 0), 0);
+          const short = items.filter(cashDifference).length;
+          return el('a', { class: 'list__item list__item--link', href: hrefOf(k), 'data-testid': 'attention-item', 'data-status': kind, 'data-key': k },
+            el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, nameOf(k)),
+              el('div', { class: 'list__meta' }, plural(items.length, 'order') + ' · ' + items.map(o => o.code).join(', ') + (short ? ' · ' + plural(short, 'cash difference') : ''))),
+            el('div', { class: 'list__aside mono' }, money(total)));
+        });
+      };
+      group('cashDrivers', 'Cash to receive from drivers', cashRows(q.cashFromDrivers, o => o.driverId, k => driverName(k, drivers) || 'Unassigned driver', 'cod-driver',
+        k => cashPage ? '#/cash' : '#/orders?driver=' + encodeURIComponent(k)));
+      group('cashBusiness', 'Cash to pay businesses', cashRows(q.cashToBusinesses, o => o.accountId, k => accountName(k), 'cod-business',
+        k => cashPage ? '#/cash' : '#/orders?account=' + encodeURIComponent(k)));
       if (can('bulk')) group('bulk', 'Bulk orders to collect', batches.map(b => el('a', { class: 'list__item list__item--link', href: '#/bulk/' + encodeURIComponent(b.id), 'data-testid': 'attention-item', 'data-status': 'batch' },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, el('span', { class: 'mono' }, b.code), ' · ' + b.name), el('div', { class: 'list__meta' }, plural((b.orderIds || []).length, 'package') + ' · ' + (b.collection ? b.collection.address : ''))),
         el('div', { class: 'list__aside' }, MDM.ui.timeAgo(b.createdAt)))));
@@ -330,13 +388,13 @@
       if (can('business')) group('business', 'Business account requests', requests.map(r => el('a', { class: 'list__item list__item--link', href: '#/business', 'data-testid': 'attention-item', 'data-status': 'request' },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, r.name), el('div', { class: 'list__meta' }, r.contactName + ' · ' + MDM.geo.zoneLabel(r.zone))),
         el('div', { class: 'list__aside' }, MDM.ui.timeAgo(r.createdAt)))));
-      if (!groups.length) return emptyBlock('Nothing needs attention right now.', 'Prices to confirm, payment slips, failed stops, cancellations, priority requests and leave appear here.');
+      if (!groups.length) return emptyBlock('Nothing needs attention right now.', 'Prices to confirm, payment slips, failed stops, cancellations, priority requests, returns, cash on delivery and leave appear here.');
       return el('div', { class: 'queues', 'data-testid': 'attention-list' }, groups);
     }
     async function render() {
       if (!v.alive) return;
-      const [orders, requests, drivers, leaves, staff, batches, positions] = await Promise.all([MDM.store.list('orders'), MDM.store.list('business_requests', { where: { status: 'pending' } }), MDM.store.list('drivers'),
-        MDM.store.list('leaves', { where: { status: 'pending' } }), MDM.store.list('staff'), MDM.store.list('batches', { where: { status: 'confirmed' } }), MDM.store.list('positions')]);
+      const [orders, requests, drivers, leaves, staff, batches, positions, accounts] = await Promise.all([MDM.store.list('orders'), MDM.store.list('business_requests', { where: { status: 'pending' } }), MDM.store.list('drivers'),
+        MDM.store.list('leaves', { where: { status: 'pending' } }), MDM.store.list('staff'), MDM.store.list('batches', { where: { status: 'confirmed' } }), MDM.store.list('positions'), MDM.store.list('business_accounts')]);
       if (!v.alive) return;
       leaves.forEach(l => { const s = staff.find(x => x.id === l.staffId); l.staffName = s ? s.name : 'Employee'; });
       const today = MDM.ui.dayKey(new Date());
@@ -359,7 +417,7 @@
         kpi('Pending payments', pendingPay.length, money(pendingPay.reduce((t, o) => t + o.totals.total, 0)) + ' outstanding', 'pending-payments', 'receipt', '#/orders?payment=requested'),
         kpi('Active drivers', active.length, 'of ' + drivers.length + ' on the team', 'active-drivers', 'users', can('drivers') ? '#/drivers' : null));
       v.slots.revenue.textContent = money(revenueToday) + ' received today';
-      v.slots.attention.replaceChildren(attention(orders, requests, leaves, batches, drivers));
+      v.slots.attention.replaceChildren(attention(orders, requests, leaves, batches, drivers, accounts));
       const recent = orders.slice(0, 10);
       const cols = ['code', 'customer', 'type', 'total', 'status', 'created'];
       v.slots.recent.replaceChildren(recent.length
@@ -427,7 +485,7 @@
           recentSec);
         await render();
         const schedule = () => { clearTimeout(v.timer); v.timer = setTimeout(() => render().catch(() => {}), 40); };
-        ['orders', 'business_requests', 'drivers', 'leaves', 'batches'].forEach(c => v.unsubs.push(MDM.store.subscribe(c, schedule)));
+        ['orders', 'business_requests', 'business_accounts', 'drivers', 'leaves', 'batches'].forEach(c => v.unsubs.push(MDM.store.subscribe(c, schedule)));
         v.unsubs.push(MDM.store.subscribe('*', msg => { if (msg && (msg.op === 'reset' || msg.op === 'refresh')) schedule(); }));
         initMap().catch(() => { if (v.alive) mapFallback(v.mapEl); });
       },
@@ -446,7 +504,7 @@
   // ---- Public contract -------------------------------------------------------------------------------------------------------
   MDM.admin = {
     views, navigate, params, openOrder, setQuery, user, by, can, queues,
-    fmt: { SERVICE, LEVEL, SOURCE, NOTIFY, DONE, money, plural, routeText, paymentBadge, typeLabel, flags, flagNodes, driverName, byLabel, deliveredAt, scheduleText, fmtDay,
+    fmt: { SERVICE, LEVEL, SOURCE, NOTIFY, DONE, money, plural, routeText, methodText, returnPending, cashDifference, vehicleCharged, paymentBadge, typeLabel, flags, flagNodes, driverName, byLabel, deliveredAt, scheduleText, fmtDay,
       orderTableHead, orderRow, columnsFor, section, emptyBlock, mapFallback, whenCell, csv, downloadCsv, columns: Object.keys(COLUMNS) },
   };
   views.overview = overviewView();

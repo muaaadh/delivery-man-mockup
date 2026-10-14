@@ -20,3 +20,5 @@ body.page-checkout .checkout-panel .btn--primary { margin-top: 20px; }
 @media (max-width: 480px) {
   body.page-checkout .checkout-copy--end { flex-direction: column; align-items: flex-end; gap: 0; }
 }
+body.page-checkout .checkout-account { white-space: nowrap; }
+body.page-checkout .checkout-banks .rate-table__row { grid-template-columns: minmax(0, 1fr) auto; }

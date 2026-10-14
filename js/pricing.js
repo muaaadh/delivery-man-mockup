@@ -20,10 +20,10 @@
 
   // feeContext(packages, service) → which packages attract the airport and cargo fees and why. Reasons come in two forms: the
   // generic one the request panel prints while the draft is still being edited ('drop-off at the airport', 'pickup at a terminal')
-  // and the named place for a saved order ('drop-off at Arrivals hall', 'drop-off at Malé North Harbour'). Business orders carry no fees.
+  // and the named place for a saved order ('drop-off at Arrivals hall', 'drop-off at the Maldivian Cargo counter').
+  // Web app updates §3.3: the cargo fee applies only when Maldivian Cargo is the delivery method (boat deliveries carry no cargo fee).
   function feeContext(packages, service) {
     const ctx = { airportCount: 0, cargoCount: 0, airportReasons: [], airportPlaces: [], cargoReasons: [], cargoPlaces: [] };
-    if (service === 'business') return ctx;
     (packages || []).forEach(pkg => {
       const pz = pickupZoneOf(pkg, service), dz = dropZoneOf(pkg);
       if (pz === 'airport' || dz === 'airport') {
@@ -33,18 +33,19 @@
         ctx.airportReasons.push(atPickup ? 'pickup at the airport' : 'drop-off at the airport');
         ctx.airportPlaces.push((atPickup ? 'pickup at ' : 'drop-off at ') + (point ? point.label : 'the airport'));
       }
-      const cargoPickup = !!(pkg.pickup && pkg.pickup.cargo), cargoDrop = !!(pkg.dropoff && pkg.dropoff.cargo);
-      if (cargoPickup || cargoDrop) {
-        const end = cargoPickup ? pkg.pickup : pkg.dropoff;
-        const terminal = MDM.geo.terminals().find(t => t.value === (end.cargo && end.cargo.terminal));
+      const d = pkg.dropoff || {};
+      // Orders saved before delivery methods existed marked boat drops with dropoff.cargo.terminal; they keep the fee they were priced with.
+      const cargoDrop = d.method ? d.method === 'cargo' : !!(d.cargo && d.cargo.terminal);
+      if (cargoDrop) {
+        const terminal = d.method ? MDM.geo.cargoCounter() : MDM.geo.terminals().find(t => t.value === d.cargo.terminal);
         ctx.cargoCount += 1;
-        ctx.cargoReasons.push((cargoPickup ? 'pickup' : 'drop-off') + ' at a terminal');
-        ctx.cargoPlaces.push((cargoPickup ? 'pickup at ' : 'drop-off at ') + (terminal ? terminal.label : 'a terminal'));
+        ctx.cargoReasons.push(d.method ? 'Maldivian Cargo delivery' : 'drop-off at a terminal');
+        ctx.cargoPlaces.push('drop-off at ' + (terminal ? terminal.label : 'a terminal'));
       }
     });
     return ctx;
   }
-  function cargoLabel(count, rules) { return 'Cargo fee' + (count > 1 && rules.cargoFeePer !== 'order' ? ' × ' + count : ''); }
+  function cargoLabel(count, rules) { return 'Maldivian Cargo fee' + (count > 1 && rules.cargoFeePer !== 'order' ? ' × ' + count : ''); }
   function shoppingLabel(rates) { const pct = Number(rates.shoppingPct) || 0; return 'Shopping fee' + (pct ? ' ' + pct + '%' : ''); }
 
   // quote(draft, settings) → { packages, fees, totals, feeLines }
@@ -63,25 +64,27 @@
       const pz = pickupZoneOf(pkg, service), dz = dropZoneOf(pkg);
       const cross = isCross(pz, dz, rules);
       let lineTotal, businessRate = false;
-      if (service === 'business' && pkg.underOneFt !== false && BUSINESS_ISLANDS.indexOf(island(pz)) >= 0 && BUSINESS_ISLANDS.indexOf(island(dz)) >= 0) {
+      if (service === 'business' && pkg.tierRate != null) { lineTotal = round(pkg.tierRate); businessRate = true; }
+      else if (service === 'business' && pkg.underOneFt !== false && BUSINESS_ISLANDS.indexOf(island(pz)) >= 0 && BUSINESS_ISLANDS.indexOf(island(dz)) >= 0) {
         lineTotal = round(rates.business); businessRate = true;
       } else {
         lineTotal = round(cross ? cell.cross : cell.same);
       }
-      if (size === 'xl' && (cell.quoted || cell.quoted == null)) reasons.add('xl');
+      // Business packages on an agreed size rate are priced already; only a vehicle still needs a quote.
+      if (!businessRate && size === 'xl' && (cell.quoted || cell.quoted == null)) reasons.add('xl');
       if (pkg.needsVehicle) reasons.add('vehicle');
-      if (island(pz) === 'villimale' || island(dz) === 'villimale') reasons.add('villimale');
-      if (pz === 'other' || dz === 'other') reasons.add('other_zone');
+      if (!businessRate && (island(pz) === 'villimale' || island(dz) === 'villimale')) reasons.add('villimale');
+      if (!businessRate && (pz === 'other' || dz === 'other')) reasons.add('other_zone');
       if (service === 'shop' && pkg.shop) {
         const base = pkg.shop.receiptTotal != null && pkg.shop.receiptTotal > 0 ? round(pkg.shop.receiptTotal) : round(pkg.shop.budget);
         budget += base;
         shopping += round(base * (Number(rates.shoppingPct) || 0) / 100);
       }
-      return Object.assign({}, pkg, { size, price: { same: round(cell.same), cross: round(cell.cross), crossIsland: cross, businessRate, lineTotal } });
+      return Object.assign({}, pkg, { size, price: { same: round(cell.same), cross: round(cell.cross), crossIsland: cross, businessRate, tier: businessRate ? (pkg.tier || null) : null, lineTotal } });
     });
 
-    const airportFee = service === 'business' ? 0 : round(rates.airport) * (airportCount ? (rules.airportFeePer === 'package' ? airportCount : 1) : 0);
-    const cargoFee = service === 'business' ? 0 : round(rates.cargo) * (cargoCount ? (rules.cargoFeePer === 'order' ? 1 : cargoCount) : 0);
+    const airportFee = round(rates.airport) * (airportCount ? (rules.airportFeePer === 'package' ? airportCount : 1) : 0);
+    const cargoFee = round(rates.cargo) * (cargoCount ? (rules.cargoFeePer === 'order' ? 1 : cargoCount) : 0);
     if (airportFee) feeLines.push({ key: 'airport', label: 'Airport fee', amount: airportFee, reason: airportReasons[0] || '' });
     if (cargoFee) feeLines.push({ key: 'cargo', label: cargoLabel(cargoCount, rules), amount: cargoFee, reason: cargoReasons[0] || '' });
     if (shopping) feeLines.push({ key: 'shopping', label: shoppingLabel(rates), amount: shopping, reason: 'of the shopping budget' });
@@ -115,7 +118,7 @@
   }
 
   // feeLines(order, settings?) → the fee rows to render for a stored order (same shape as quote().feeLines, plus adjustments as their
-  // own rows). Amounts are the frozen order.fees, never recomputed; settings only shape the labels ('Cargo fee × 2', 'Shopping fee 10%')
+  // own rows). Amounts are the frozen order.fees, never recomputed; settings only shape the labels ('Maldivian Cargo fee × 2', 'Shopping fee 10%')
   // and the reasons name the saved meeting point or terminal ('drop-off at Arrivals hall').
   function feeLines(order, settings) {
     const s = settings || {}; const rates = s.rates || {}, rules = s.rules || {};
@@ -176,5 +179,24 @@
     Object.keys(SIZES).forEach(k => { const n = Number(counts[k]) || 0; min += n * round((sizes[k] || {}).same); max += n * round((sizes[k] || {}).cross); });
     return { min, max };
   }
-  MDM.pricing = { estimateRange, countsRange, quote, recalc, feeLines, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
+  // Business size categories and agreed rates (web app updates §1.3, §5.2).
+  function businessTiers(settings) { const t = ((settings || {}).rates || {}).businessTiers; return (Array.isArray(t) && t.length ? t : MDM.DEFAULT_BUSINESS_TIERS).slice(); }
+  function businessRate(account, tier, settings) {
+    if (account && account.rates && account.rates[tier] != null) return round(account.rates[tier]);
+    const t = businessTiers(settings).find(x => x.value === tier);
+    return round(t ? t.rate : ((settings || {}).rates || {}).business);
+  }
+  // The tiers an account may use, with its agreed rate: [{ value, label, size, hint, rate }]. Accounts without rates get every tier at the default.
+  function accountTiers(account, settings) {
+    const all = businessTiers(settings);
+    const keys = account && account.rates && Object.keys(account.rates).length ? all.filter(t => account.rates[t.value] != null) : all;
+    return keys.map(t => Object.assign({}, t, { rate: businessRate(account, t.value, settings) }));
+  }
+  // Rates as ranges for the public rates section (§4): 'MVR 35–45', 'MVR 45–60', 'MVR 60++'.
+  function rangeLabel(size, settings) {
+    const cell = (((settings || {}).rates || {}).sizes || {})[size] || { same: 0, cross: 0 };
+    if (size === 'xl') return 'MVR ' + round(cell.same) + '++';
+    return round(cell.same) === round(cell.cross) ? format(cell.same) : 'MVR ' + round(cell.same) + '–' + round(cell.cross);
+  }
+  MDM.pricing = { estimateRange, countsRange, businessTiers, businessRate, accountTiers, rangeLabel, quote, recalc, feeLines, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
 })(window.MDM);

@@ -72,3 +72,62 @@ body.page-invoice .invoice-address { display: block; max-width: 30ch; margin-lef
   body.page-invoice .table--stack td { display: table-cell; padding: 8px 12px; border-bottom: 1px solid #999; }
   body.page-invoice .table--stack td[data-label]::before { content: none; }
 }
+
+/* ---------- Photos: package photos on requests and accounts ---------- */
+body.page-admin .photo-btn { display: inline-block; flex: none; padding: 0; border: 0; background: none; border-radius: var(--radius-xs); cursor: zoom-in; }
+body.page-admin .photo-btn:focus-visible { box-shadow: var(--focus); outline: none; }
+body.page-admin .photo-btn--large .thumb { width: 120px; height: 120px; }
+body.page-admin .photo-view { margin: 0; }
+body.page-admin .photo-view img { display: block; max-width: 100%; max-height: 65dvh; margin: 0 auto; border-radius: var(--radius-sm); }
+body.page-admin .photo-view figcaption { margin-top: 8px; font-size: 13px; color: var(--text-2); text-align: center; }
+body.page-admin .pkg-cell { display: inline-flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 10px; text-align: left; }
+body.page-admin .business-rates__line { display: block; white-space: nowrap; }
+
+/* ---------- Approve a business / edit rates: the photo and one row per size category ---------- */
+body.page-admin .approve-photo { display: flex; gap: 16px; align-items: flex-start; }
+body.page-admin .approve-photo__text { min-width: 0; color: var(--text); }
+body.page-admin .approve-photo__text p + p { margin-top: 4px; }
+body.page-admin .approve-photo__none { width: 120px; height: 120px; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--border-strong); border-radius: var(--radius-xs); font-size: 13px; color: var(--text-2); }
+body.page-admin .tier-fieldset { border: 0; padding: 0; margin: 16px 0 0; }
+body.page-admin .tier-fieldset legend { margin-bottom: 4px; }
+body.page-admin .tier-row { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 4px 16px; align-items: end; padding: 8px 0; }
+body.page-admin .tier-row + .tier-row { border-top: 1px solid var(--border); }
+body.page-admin .tier-row .checkbox { padding-top: 0; align-self: center; }
+body.page-admin .tier-row__rate.field > label { font-weight: 400; color: var(--text-2); }
+body.page-admin .tier-editor > .field__error { margin-top: 8px; }
+@media (max-width: 480px) { body.page-admin .tier-row { grid-template-columns: 1fr; } body.page-admin .approve-photo { flex-direction: column; } }
+
+/* ---------- Business account: photo + assessment beside the rate table; collection points ---------- */
+body.page-admin .account-rates { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px 32px; align-items: start; }
+body.page-admin .account-rates__photo { display: flex; gap: 16px; align-items: flex-start; }
+body.page-admin .account-rates__assess { min-width: 0; }
+body.page-admin .account-rates__assess p { font-size: 14px; overflow-wrap: anywhere; }
+body.page-admin .point-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+body.page-admin .card > .list > .list__item .list__title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (max-width: 960px) { body.page-admin .account-rates { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { body.page-admin .account-rates__photo { flex-direction: column; } }
+
+/* ---------- Rates: website ranges and the business size categories ---------- */
+body.page-admin .rates-ranges { padding: 4px 0 0; }
+body.page-admin .tier-list { display: grid; gap: 12px; }
+body.page-admin .tier-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px 16px; background: var(--surface); }
+body.page-admin .tier-block > * + * { margin-top: 12px; }
+body.page-admin .tier-block__head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+body.page-admin .tier-block__title { font-size: 14px; font-weight: 600; }
+body.page-admin .tier-block__head .btn { margin-left: auto; }
+
+/* ---------- Printable invoice: fee lines and the cash on delivery summary ---------- */
+body.page-invoice .invoice-line--fee td { color: var(--text-2); }
+body.page-invoice .invoice-cod-note { font-size: 13px; color: var(--text-2); max-width: 70ch; }
+body.page-admin .table td.table__actions .actions-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+body.page-admin .table .request-address { max-width: 170px; }
+@media (max-width: 720px) { body.page-admin .table td.table__actions .actions-stack { flex-direction: row; } body.page-admin .table--stack .request-address { max-width: none; } }
+body.page-admin .rates-cargo .input { max-width: calc(50% - 12px); }
+@media (max-width: 720px) { body.page-admin .rates-cargo .input { max-width: none; } }
+@media (max-width: 720px) { body.page-admin [data-testid="business-requests"] td[data-label="Zone"] > span { text-align: right; } body.page-admin .table--stack td[data-label="Typical package"] { align-items: center; } }
+@media (max-width: 480px) { body.page-admin .business-points .list__item { flex-wrap: wrap; } body.page-admin .business-points .point-actions { justify-content: flex-start; } }
+/* Long form dialogs (approve a business, edit rates): the Save / Cancel row stays in view while the size categories scroll. */
+body.page-admin .dialog--wide .dialog__actions { position: sticky; bottom: 0; z-index: 1; background: var(--card); }
+/* Printable invoice on phones: stacked cells read right-aligned; a fee line has no rate, so its empty Rate row is not shown. */
+@media screen and (max-width: 720px) { body.page-invoice .table--stack td > span { text-align: right; } body.page-invoice .table--stack td.invoice-cell--empty { display: none; } }
+@media print { body.page-invoice .table--stack td.mono, body.page-invoice .table--stack td.num, body.page-invoice .table--stack td:first-child { white-space: nowrap; } }

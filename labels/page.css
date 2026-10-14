@@ -18,6 +18,7 @@ body.page-labels { background: var(--app-bg); }
 
 .label { --ink: #000; position: relative; width: 100mm; height: 150mm; padding: 4mm; display: flex; flex-direction: column; gap: 2.5mm; background: #fff; color: var(--ink); border: 1px solid #d2d2d7; border-radius: 2px; box-shadow: 0 2px 10px rgba(0, 0, 0, .06); overflow: hidden; font-size: 9pt; line-height: 1.3; break-inside: avoid; }
 @media (max-width: 440px) { .label { zoom: .88; } }
+.label > * { flex-shrink: 0; }   /* nothing on a label may be squeezed: a section that does not fit shows up as overflow in testing */
 .label__top { display: flex; align-items: center; justify-content: space-between; gap: 2mm; padding-bottom: 2mm; border-bottom: .5mm solid var(--ink); }
 .label__brand { color: var(--ink); font-size: 11pt; gap: 2mm; }
 .label__brand .brand__mark { width: 8mm; height: 8mm; border-radius: 1.6mm; background: var(--ink); }
@@ -46,6 +47,19 @@ body.page-labels { background: var(--app-bg); }
 .label__zone-name { font-size: 13pt; font-weight: 600; line-height: 1.15; }
 .label__zone-key { font-size: 9pt; font-weight: 500; opacity: .85; white-space: nowrap; }
 
+/* Delivery method box (boat, Maldivian Cargo, airport) and the cash to collect strip */
+.label__method { padding: 2mm 2.5mm; border: .5mm solid var(--ink); border-radius: 1mm; }
+.label__mrows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .4mm 3mm; margin: 0; font-size: 10pt; line-height: 1.25; }
+.label__mrows dt { font-size: 8pt; color: #333; padding-top: .4mm; }
+.label__mrows dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.label__cod { padding: 1.6mm 3mm; border: .8mm solid var(--ink); border-radius: 1mm; font-size: 13pt; font-weight: 600; line-height: 1.2; text-align: center; }
+.label--boat .label__addr, .label--cargo .label__addr, .label--airport .label__addr { font-weight: 500; }
+.label--boat, .label--cargo, .label--airport { gap: 2mm; }
+.label--boat .label__sign, .label--cargo .label__sign, .label--airport .label__sign, .label--cod .label__sign { padding-top: 3.5mm; }
+.label--boat .label__qr, .label--cargo .label__qr, .label--airport .label__qr { width: 23mm; height: 23mm; }
+.label__method { padding: 1.6mm 2.5mm; }
+.label--boat .label__addr, .label--cargo .label__addr, .label--airport .label__addr { -webkit-line-clamp: 1; }
+
 .label__from { font-size: 8.5pt; }
 .label__fromline { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .label__fromline strong { font-weight: 600; }
@@ -68,3 +82,26 @@ body.page-labels { background: var(--app-bg); }
 .label__sign { display: grid; grid-template-columns: 2fr 1fr; gap: 4mm; margin-top: auto; padding-top: 7mm; font-size: 7.5pt; color: #333; }
 .label__sign > span { border-top: .3mm solid var(--ink); padding-top: .8mm; }
 .label__sign + .label__foot { margin-top: 0; }
+.label .label__sign--tight { padding-top: 2.5mm; }
+
+/* fit() steps for crowded labels: a tighter layout first, then smaller type with long lines clamped (the label never runs off its page) */
+.label.label--compact { gap: 1.5mm; }
+.label.label--compact .label__top { padding-bottom: 1.4mm; }
+.label.label--compact .label__qr { width: 21mm; height: 21mm; }
+.label.label--compact .label__code { font-size: 18pt; }
+.label.label--compact .label__to { padding: 1.8mm 2.5mm; }
+.label.label--compact .label__method { padding: 1.3mm 2.5mm; }
+.label.label--compact .label__zone { padding: 1.6mm 3mm; }
+.label.label--compact .label__meta { padding-top: 1.4mm; }
+.label.label--compact .label__foot { padding-top: 1.2mm; }
+.label.label--min .label__name { font-size: 13pt; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.label.label--min .label__phone { font-size: 10.5pt; }
+.label.label--min .label__addr { font-size: 10pt; -webkit-line-clamp: 1; }
+.label.label--min .label__zone-name { font-size: 11.5pt; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.label.label--min .label__mrows { font-size: 9pt; }
+.label.label--min .label__mrows dd { -webkit-line-clamp: 1; }
+.label.label--min .label__cod { font-size: 12pt; padding: 1.1mm 3mm; }
+.label.label--min .label__flag { height: 5mm; font-size: 8pt; }
+@media (max-width: 720px) { .labels-toolbar__actions .btn { height: 44px; } }   /* phone tap targets */
+.label__cod-note { display: block; font-size: 8pt; font-weight: 500; line-height: 1.25; margin-top: .4mm; }
+.label--return .label__landmark[data-kind="instructions"] { -webkit-line-clamp: 2; font-weight: 600; color: var(--ink); }

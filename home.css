@@ -145,30 +145,41 @@ body.page-home .tile--ink { background: var(--ink); color: rgba(255, 255, 255, .
 body.page-home .tile--ink h3, body.page-home .tile--ink .tile__price { color: #fff !important; }
 body.page-home .tile--ink p { color: rgba(255, 255, 255, .72); }
 body.page-home .tile--ink .tile__price { margin: 28px 0 24px; }
-body.page-home .tile__art { position: relative; }
-body.page-home .draw { width: 100%; height: auto; overflow: visible; }
-body.page-home .draw__base { fill: none; stroke: rgba(255, 255, 255, .16); stroke-width: 3; stroke-dasharray: 2 10; stroke-linecap: round; }
-body.page-home .draw__line { fill: none; stroke: var(--red); stroke-width: 5; stroke-linecap: round; stroke-dasharray: 520; stroke-dashoffset: 520; }
-body.page-home .tile.is-in .draw__line, html.reduce-motion body.page-home .draw__line, html:not(.motion) body.page-home .draw__line { stroke-dashoffset: 0; transition: stroke-dashoffset 2.2s var(--ease-out) .35s; }
-body.page-home .draw__from { fill: #fff; }
-body.page-home .draw__to { fill: var(--red); }
-body.page-home .tile__labels { display: flex; justify-content: space-between; gap: 12px; margin-top: 14px; font-size: 13px; color: rgba(255, 255, 255, .55); }
+/* Pick & Deliver: the four collection types as links, each with a one-line description */
+body.page-home .pick-list { border-top: 1px solid rgba(255, 255, 255, .14); }
+body.page-home .pick-list li { border-bottom: 1px solid rgba(255, 255, 255, .14); }
+body.page-home .pick-list a { position: relative; display: flex; flex-direction: column; gap: 4px; min-height: 44px; padding: 18px 44px 18px 0; color: #fff; text-decoration: none; border-radius: 8px; }
+body.page-home .pick-list a::after { content: ""; position: absolute; right: 10px; top: 50%; width: 9px; height: 9px; margin-top: -5px; border-top: 2px solid var(--red); border-right: 2px solid var(--red); transform: rotate(45deg); transition: transform .25s var(--ease-out); }
+body.page-home .pick-list__label { font-size: 19px; font-weight: 600; line-height: 1.3; letter-spacing: -.01em; }
+body.page-home .pick-list__hint { font-size: 15px; line-height: 1.45; color: rgba(255, 255, 255, .66); }
+@media (hover: hover) {
+  body.page-home .pick-list a:hover { text-decoration: none; }
+  body.page-home .pick-list a:hover .pick-list__label { text-decoration: underline; text-underline-offset: 4px; }
+  body.page-home .pick-list a:hover::after { transform: translateX(3px) rotate(45deg); }
+}
 body.page-home .receipt { margin: 28px 0 24px; padding: 16px 18px; background: var(--tint); border-radius: 18px; font-size: 14px; }
 body.page-home .receipt > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; }
 body.page-home .receipt__fee { margin-top: 6px; padding-top: 12px !important; border-top: 1px dashed var(--border-strong); color: var(--text-2); }
 body.page-home .tile--red { background: var(--red); color: #fff; }
 body.page-home .tile--red p { color: rgba(255, 255, 255, .85); }
-body.page-home .tile__big { margin-top: auto !important; padding-top: 24px; font-size: clamp(64px, 7vw, 92px) !important; line-height: 1 !important; font-weight: 700; letter-spacing: -.05em; color: inherit !important; }
-body.page-home .tile__sub { margin-top: 4px !important; font-size: 17px; }
-body.page-home .tile__link { margin-top: 20px; align-self: flex-start; color: inherit; font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 5px; }
+body.page-home .tile__sub { margin-top: 16px !important; font-size: 15px; }
+body.page-home .tile__link { margin-top: auto; padding-top: 20px; align-self: flex-start; color: inherit; font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 5px; }
+/* Business Delivery: starting rate per package size category; each business agrees its own */
+body.page-home .tiers { margin-top: 24px; border-top: 1px solid rgba(255, 255, 255, .32); }
+body.page-home .tiers li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255, 255, 255, .32); font-size: 16px; color: rgba(255, 255, 255, .9); }
+body.page-home .tiers strong { font-size: 24px; font-weight: 700; letter-spacing: -.02em; color: #fff; white-space: nowrap; }
+body.page-home .tiers__from { font-size: 15px; font-weight: 500; letter-spacing: 0; color: rgba(255, 255, 255, .85); }
+body.page-home .tile .tiers__note { margin-top: 10px; font-size: 15px; }
 
-body.page-home .tile--sm { min-height: 300px; padding: 36px; }
-body.page-home .tile--sm h3 { font-size: 26px; }
-body.page-home .tile--sm .tile__link { margin-top: auto; padding-top: 20px; }
-body.page-home .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
-body.page-home .chips li { padding: 6px 12px; border-radius: 999px; background: var(--tint); font-size: 13px; color: var(--text-2); }
-body.page-home .tile--ink .chips li { background: rgba(255, 255, 255, .1); color: rgba(255, 255, 255, .8); }
-body.page-home .tile--ink .tile__link { color: #fff; }
+/* Delivery methods row under the categories (§3) */
+body.page-home .methods { margin-top: 56px; }
+body.page-home .methods__title { font-size: 19px; font-weight: 600; }
+body.page-home .methods__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+body.page-home .method { display: flex; flex-direction: column; padding: 24px; background: var(--card); border-radius: 22px; }
+body.page-home .method h4 { font-size: 17px; font-weight: 600; line-height: 1.3; }
+body.page-home .method p { margin-top: 8px; font-size: 15px; line-height: 1.45; color: var(--text-2); }
+body.page-home .method .method__fee { margin-top: auto; padding-top: 14px; font-size: 14px; color: var(--text); }
+body.page-home .method__fee strong { margin-left: 4px; font-weight: 600; }
 body.page-home .levels { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 56px; }
 body.page-home .level { padding: 4px 32px; }
 body.page-home .level + .level { border-left: 1px solid var(--border); }
@@ -181,12 +192,13 @@ body.page-home .rates { display: grid; grid-template-columns: repeat(3, minmax(0
 body.page-home .rate { padding: 8px 36px 12px; text-align: center; }
 body.page-home .rate + .rate { border-left: 1px solid var(--border); }
 body.page-home .rate h3 { font-size: 17px; font-weight: 600; color: var(--text-2); }
-body.page-home .rate__num { margin: 10px auto 0; font-size: clamp(44px, 5vw, 64px); font-weight: 700; letter-spacing: -.035em; line-height: 1.1; max-width: none; }
+body.page-home .rate__num { margin: 10px auto 0; font-size: clamp(36px, 4.2vw, 52px); font-weight: 700; letter-spacing: -.035em; line-height: 1.1; max-width: none; white-space: nowrap; }
 body.page-home .rate__cross { margin: 6px auto 0; font-size: 17px; font-weight: 500; color: var(--text); max-width: none; }
 body.page-home .rate__guide { margin: 14px auto 0; font-size: 15px; color: var(--text-2); max-width: 24ch; }
 body.page-home .fees { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 56px; }
-body.page-home .fees li { padding: 10px 18px; border-radius: 999px; background: var(--tint); font-size: 14px; color: var(--text-2); }
-body.page-home .fees strong { margin-left: 6px; font-weight: 600; color: var(--text); }
+body.page-home .fees li { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: center; column-gap: 6px; padding: 10px 18px; border-radius: 22px; background: var(--tint); font-size: 14px; color: var(--text-2); text-align: center; }
+body.page-home .fees strong { font-weight: 600; color: var(--text); }
+body.page-home .fees__note { font-size: 13px; color: var(--text-2); }
 body.page-home .fine { margin: 20px auto 0; text-align: center; font-size: 13px; color: var(--text-3); }
 
 /* ---------- Business ---------- */
@@ -243,7 +255,7 @@ body.page-home .finale__signin a { color: var(--text); text-decoration: underlin
   body.page-home .levels { grid-template-columns: 1fr; margin-top: 36px; }
   body.page-home .level { padding: 18px 0; }
   body.page-home .level + .level { border-left: 0; border-top: 1px solid var(--border); }
-  body.page-home .tile--sm { padding: 28px; }
+  body.page-home .methods__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   body.page-home .rate { padding: 28px 0; }
   body.page-home .rate + .rate { border-left: 0; border-top: 1px solid var(--border); }
   body.page-home .biz { grid-template-columns: 1fr; padding: 44px 32px; border-radius: 30px; gap: 28px; }
@@ -266,9 +278,16 @@ body.page-home .finale__signin a { color: var(--text); text-decoration: underlin
   body.page-home .head--center p { font-size: 17px; }
   body.page-home .tile h3 { font-size: 26px; }
   body.page-home .tile { padding: 28px; }
+  body.page-home .methods__grid { grid-template-columns: 1fr; gap: 12px; }
+  body.page-home .method { padding: 20px; border-radius: 20px; }
+  body.page-home .pick-list__label { font-size: 17px; }
+  body.page-home .tiers strong { font-size: 20px; }
   body.page-home .coverage__map { height: 340px; }
   body.page-home .zones { gap: 18px; }
   body.page-home .faq__list summary { font-size: 17px; padding: 22px 40px 22px 0; }
   body.page-home .finale { padding: 96px 0; }
   body.page-home .finale__actions .btn { flex: 1 1 100%; }
+  /* 44px tap targets on phones for the text links in the tiles and under the final call to action */
+  body.page-home .tile__link { display: inline-flex; align-items: flex-end; min-height: 44px; }
+  body.page-home .finale__signin a { display: inline-flex; align-items: center; min-height: 44px; }
 }

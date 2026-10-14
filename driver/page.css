@@ -7,6 +7,8 @@ body.page-driver .driver-pick .field { margin-top: 12px; }
 
 /* Bigger tap targets on the road: 44px for every regular button. */
 body.page-driver .btn:not(.btn--sm):not(.btn--lg):not(.btn--xl) { height: 44px; }
+/* Small buttons (Switch driver, Mark all as read, file chips) still get a 44px target on phones. */
+@media (max-width: 720px) { body.page-driver main .btn--sm:not(.map .btn) { min-height: 44px; } }
 
 /* Duty card */
 body.page-driver .driver-duty__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -20,7 +22,54 @@ body.page-driver .driver-duty__note { margin-top: 12px; color: var(--text-3); }
 body.page-driver .driver-duty__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; padding-bottom: 10px; }
 body.page-driver .driver-duty__foot .driver-duty__line { margin-top: 0; }
 body.page-driver .driver-leave { list-style: none; padding: 0; margin-top: 4px; }
-body.page-driver .driver-leave .list__item { padding: 10px 0; }
+body.page-driver .driver-leave .list__item { padding: 10px 0; align-items: flex-start; }
+
+/* Accumulated off days (§7) on the duty card */
+body.page-driver .driver-offdays { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface); }
+body.page-driver .driver-offdays__main { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+body.page-driver .driver-offdays__label { font-size: 13px; font-weight: 500; color: var(--text); }
+body.page-driver .driver-offdays__value { font-size: 20px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.page-driver .driver-offdays__unit { font-size: 13px; font-weight: 400; color: var(--text-2); }
+body.page-driver .driver-offdays .driver-duty__line { margin-top: 2px; }
+
+/* Collapsible leave section: a native <details>, closed by default */
+body.page-driver .driver-leave-body { padding-top: 6px; padding-bottom: 6px; }
+body.page-driver .driver-leave-body:has(> details[open]) { padding-bottom: 16px; }
+body.page-driver .driver-fold__summary { display: flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; list-style: none; border-radius: var(--radius-xs); }
+body.page-driver .driver-fold__summary::-webkit-details-marker { display: none; }
+body.page-driver .driver-fold__summary::marker { content: ''; }
+body.page-driver .driver-fold__count { margin-left: auto; font-size: 13px; color: var(--text-2); white-space: nowrap; }
+body.page-driver .driver-fold__chevron { display: inline-flex; color: var(--text-2); transition: transform .15s ease; }
+body.page-driver .driver-fold[open] .driver-fold__chevron { transform: rotate(180deg); }
+body.page-driver .driver-fold__body { padding-top: 4px; }
+body.page-driver .driver-fold__sub { font-size: 14px; font-weight: 600; margin-top: 24px; }
+body.page-driver .driver-leave__form { margin-top: 12px; max-width: none; }
+body.page-driver .driver-leave__actions { margin-top: 16px; }
+body.page-driver .driver-leave__days { font-size: 13px; color: var(--text-2); }
+body.page-driver .driver-leave__error:empty { display: none; }
+
+/* Messages from the office and cash on hand */
+body.page-driver .driver-notes, body.page-driver .driver-cash { margin-top: 16px; }
+body.page-driver .driver-notes__head { flex-wrap: wrap; }
+body.page-driver .driver-notes__head .driver-card-title { font-size: 15px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+body.page-driver .driver-notes__new:empty { display: none; }
+body.page-driver .driver-notes__list > .driver-note { padding: 0; }
+body.page-driver .driver-note__btn { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-height: 44px; padding: 12px 16px; text-align: left; color: inherit; transition: background-color .15s ease; }
+body.page-driver .driver-note__btn:focus-visible { box-shadow: inset 0 0 0 2px var(--brand); }
+body.page-driver .driver-note__dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: transparent; }
+body.page-driver .driver-note.is-unread .driver-note__dot { background: var(--brand); }
+body.page-driver .driver-note__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+body.page-driver .driver-note__title { font-size: 14px; font-weight: 500; color: var(--text-2); }
+body.page-driver .driver-note.is-unread .driver-note__title { font-weight: 600; color: var(--text); }
+body.page-driver .driver-note__msg { font-size: 13px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+body.page-driver .driver-note__time { font-size: 12px; color: var(--text-3); }
+@media (hover: hover) { body.page-driver .driver-note__btn:hover { background: var(--surface); } }
+body.page-driver .driver-notes__foot { justify-content: flex-start; }
+body.page-driver .driver-cash__list { margin-top: 8px; }
+body.page-driver .driver-cash__list .list__item { padding: 10px 0; }
+body.page-driver .driver-cash__amount { font-size: 15px; font-weight: 600; color: var(--text); white-space: nowrap; }
+body.page-driver .driver-cash__pending { margin-top: 10px; font-weight: 500; color: var(--text); }
+body.page-driver .driver-cash__owed { margin-top: 6px; }
 
 /* Jobs */
 body.page-driver .driver-jobs { margin-top: 32px; }
@@ -38,6 +87,7 @@ body.page-driver .job__head { display: flex; align-items: center; justify-conten
 body.page-driver .job__code { font-size: 18px; letter-spacing: -.01em; }
 body.page-driver .job__tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 body.page-driver .tag--hot { color: var(--brand); border-color: var(--brand); font-weight: 500; }
+body.page-driver .tag--cash { color: var(--warn); border-color: var(--warn); font-weight: 500; }
 body.page-driver .job__meta { font-size: 13px; line-height: 1.4; color: var(--text-2); margin-top: 6px; overflow-wrap: anywhere; }
 
 /* Progress: five bars with a short label under each. */
@@ -82,6 +132,19 @@ body.page-driver .job__dl { display: grid; grid-template-columns: 120px minmax(0
 body.page-driver .job__dl dt { color: var(--text-2); }
 body.page-driver .job__dl dd { margin: 0; overflow-wrap: anywhere; }
 body.page-driver .job__dl dd.job__code { font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 600; letter-spacing: .02em; }
+body.page-driver .job__method-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+body.page-driver .job__method-title .icon { color: var(--text-2); }
+body.page-driver .job__method .job__dl { margin-top: 10px; }
+body.page-driver .job__boatbtn { margin-top: 14px; }
+body.page-driver .job__boatlist { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; min-width: 0; }
+body.page-driver .job__boatlist li + li { padding-top: 6px; border-top: 1px solid var(--border); }
+body.page-driver .job__boatmore { color: var(--text-2); }
+body.page-driver .job__charges { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+body.page-driver .job__charges .job__dl { margin-top: 8px; }
+body.page-driver .job--return { box-shadow: inset 3px 0 0 var(--danger); }
+body.page-driver .job__returnalert { margin-top: 12px; }
+body.page-driver .job__pkgs--return { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+body.page-driver .jobs-list--after { margin-top: 32px; }
 body.page-driver .job__preview { display: block; max-width: 100%; height: auto; margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 
 /* Actions */
@@ -93,6 +156,10 @@ body.page-driver .job__alert-link { margin-top: 6px; }
 body.page-driver .job__alert-link a { display: inline-block; padding: 10px 0; margin: -10px 0; font-weight: 500; }
 
 body.page-driver .driver-mapsec { margin-top: 40px; }
+
+/* Dialogs on this page: group headings between fields and the cash difference warning */
+body.page-driver .driver-dlg-group { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text); margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+body.page-driver .driver-cash-warn { margin-top: 6px; font-size: 13px; line-height: 1.4; font-weight: 500; color: var(--warn); }
 
 @media (max-width: 340px) {
   body.page-driver .job__dl { grid-template-columns: 1fr; gap: 0 12px; }

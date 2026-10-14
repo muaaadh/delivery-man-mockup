@@ -8,12 +8,15 @@
     const NOW = now instanceof Date ? now : new Date(now || Date.now());
     const t = (minutesAgo) => new Date(NOW.getTime() - minutesAgo * 60000).toISOString();
     const days = (d, h) => (d * 24 + (h || 0)) * 60;
+    const clock = (minutesAgo) => { const d = new Date(NOW.getTime() - minutesAgo * 60000); d.setMinutes(Math.round(d.getMinutes() / 15) * 15); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+    const clockDate = (minutesAgo) => { const d = new Date(NOW.getTime() - minutesAgo * 60000); d.setMinutes(Math.round(d.getMinutes() / 15) * 15); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
     const dateOnly = (minutesAgo) => { const d = new Date(NOW.getTime() - minutesAgo * 60000); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 
     const settings = {
-      rates: { sizes: { bag: { same: 35, cross: 45 }, box: { same: 45, cross: 60 }, xl: { same: 60, cross: 60, quoted: true } }, cargo: 20, airport: 40, shoppingPct: 10, business: 25, express: 25 },
-      rules: { airportReplacesCross: true, cargoFeePer: 'package', airportFeePer: 'order', paymentTiming: 'after_delivery', upfrontOptional: true },
-      sizeGuide: { bag: 'Fits in a carrier bag: documents, food, small parcels', box: 'A carton up to about 1 ft (30 cm) a side, strapped on the bike', xl: 'Bigger than a box or needs two hands; may need a vehicle, price confirmed first' },
+      rates: { sizes: { bag: { same: 35, cross: 45 }, box: { same: 45, cross: 60 }, xl: { same: 60, cross: 60, quoted: true } }, cargo: 20, airport: 40, shoppingPct: 10, business: 25, express: 25, vehicle: null,
+        businessTiers: MDM.DEFAULT_BUSINESS_TIERS.map(x => Object.assign({}, x)) },
+      rules: { airportReplacesCross: true, cargoFeePer: 'order', airportFeePer: 'order', paymentTiming: 'after_delivery', upfrontOptional: true, naaluBillable: false },
+      sizeGuide: { bag: 'Fits in a carrier bag, under about 1 ft (30 cm): documents, food, small parcels', box: 'A carton up to about 2 ft (60 cm) a side, strapped on the bike', xl: 'Bigger than a box or needs two hands; may need a vehicle, price confirmed first' },
       ops: { hours: { open: '09:00', close: '23:00' }, days: 'Every day', asapText: 'Usually within 60 to 90 minutes in Malé and Hulhumalé', reviewText: 'about 30 minutes', businessReplyText: 'within 1 working day', slotStart: '09:00', slotEnd: '23:00', slotMinutes: 120, speedCityKmh: 18, speedHighwayKmh: 40, peakBufferMin: 10, peakWindows: ['08:00-09:30', '17:00-19:30'], closedWindows: ['Fri 12:00-13:30'] },
       banks: [
         { id: 'bml', name: 'Bank of Maldives', accountName: 'Mr. Delivery Man', accountNo: '7730 0000 12345' },
@@ -24,7 +27,7 @@
       notice: { text: 'Sinamalé Bridge closed to motorcycles during heavy rain, Hulhumalé deliveries may be delayed', active: false },
       invoiceDueDays: 14, gstPercent: 0, demo: { autopilot: true },
       notifications: { enabled: true, channel: 'customer', channels: { sms: true, whatsapp: true, viber: true, email: true }, senderName: 'MrDelivery' },
-      hr: { shiftStart: '08:00', shiftEnd: '17:00', graceMinutes: 10, annualLeaveDays: 30, sickLeaveDays: 30, punchFrom: ['portal', 'driver app', 'office kiosk'] },
+      hr: { shiftStart: '08:00', shiftEnd: '17:00', graceMinutes: 10, annualLeaveDays: 30, sickLeaveDays: 30, punchFrom: ['portal', 'driver app', 'office kiosk'], weeklyOffDay: 5 },
       store: { open: true, address: 'Mr. Delivery Man store, Majeedhee Magu', zone: 'male', note: 'Packaging and delivery bundles, delivered with your next order or on their own' },
     };
 
@@ -42,7 +45,8 @@
       { id: 'stf_lamya', name: 'Mariyam Lamya', role: 'office', title: 'Customer care and payments', phone: '7790003', username: 'lamya', email: 'care@example.com', status: 'active', joinedAt: dateOnly(days(350)), leaveBalance: { annual: 25, sick: 27 } },
     ].concat(drivers.map(d => ({ id: d.staffId, name: d.name, role: 'driver', title: d.vehicle === 'pickup' ? 'Driver (pickup truck)' : 'Rider', phone: d.phone, username: d.phone, driverId: d.id, status: d.id === 'drv_hamid' ? 'on_leave' : 'active', joinedAt: dateOnly(Math.round((NOW - new Date(d.createdAt)) / 60000)), leaveBalance: { annual: 20, sick: 30 } })));
     const SHIFTS = { stf_lamya: ['09:00', '18:00'], stf_rasheed: ['08:15', '18:00'] };
-    staff.forEach(s => { s.createdAt = t(days(300)); s.updatedAt = t(days(2)); const sh = SHIFTS[s.id] || [settings.hr.shiftStart, settings.hr.shiftEnd]; s.shiftStart = sh[0]; s.shiftEnd = sh[1]; });
+    const OFF_OPENING = { stf_nazim: 3, stf_shiyam: 4, stf_rasheed: 2, stf_faisal: 1, stf_fayaz: 2, stf_lamya: 1 };
+    staff.forEach(s => { s.createdAt = t(days(300)); s.updatedAt = t(days(2)); const sh = SHIFTS[s.id] || [settings.hr.shiftStart, settings.hr.shiftEnd]; s.shiftStart = sh[0]; s.shiftEnd = sh[1]; s.offDays = { opening: OFF_OPENING[s.id] || 0, adjust: 0 }; });
 
     const C = {
       shifza:  { id: 'cus_shifza',  name: 'Aishath Shifza',   phone: '7912345', email: 'shifza@example.com', notify: 'whatsapp' },
@@ -72,6 +76,7 @@
       ministry: { address: 'Ministry of Economic Development, Velaanaage', zone: 'male' },
       agora: { address: 'Agora Mall, Ameenee Magu', zone: 'male' },
       arrivals: { address: 'Velana International Airport, Arrivals hall', zone: 'airport' },
+      kanduGodown: { address: 'Kandu godown, Lot 2211, Maafannu', zone: 'male' },
       departures: { address: 'Velana International Airport, Departures entrance', zone: 'airport' },
     };
     const staffBy = { admin: 'admin', fayaz: 'operator:stf_fayaz', lamya: 'operator:stf_lamya' };
@@ -120,11 +125,13 @@
       else { const p = MDM.geo.geocodeZone(e.zone, e.address); e.lat = p.lat; e.lng = p.lng; }
       return e;
     }
+    // A package has a category (Bag / Box / XL) and an optional photo, no measurements (§2.2); sizeSource says who chose the category.
     let pkgSeq = 1;
     function pkg(o) {
       return {
         id: 'pkg_seed_' + String(pkgSeq++).padStart(2, '0'), size: o.size || 'bag', description: o.description || '', needsVehicle: !!o.needsVehicle, fragile: !!o.fragile,
-        underOneFt: o.underOneFt !== false, dims: o.dims || null, weightKg: o.weightKg || null, photoId: null, sizeSource: o.dims ? 'customer' : 'estimate',
+        underOneFt: o.underOneFt !== false, photoId: null, sizeSource: o.sizeSource || 'estimate',
+        tier: o.tier || null, tierRate: o.tierRate != null ? o.tierRate : null,
         pickup: o.shop ? null : endpoint(o.pickup, { contact: o.pickupContact || null, cargo: o.pickupCargo || null, meetAt: o.pickupMeetAt || '', instructions: o.pickupNote || '' }),
         dropoff: endpoint(o.dropoff, { recipient: o.recipient || null, cargo: o.dropCargo || null, meetAt: o.dropCargo ? '' : (o.meetAt || 'door'), instructions: o.dropNote || '' }),
         shop: o.shop ? Object.assign({ address: '', unavailable: 'call', receiptTotal: null, receiptPhotoId: null }, o.shop, MDM.geo.geocodeZone(o.shop.zone, o.shop.name)) : null,
@@ -141,6 +148,15 @@
     function order(spec) {
       const id = 'ord_seed_' + spec.code.slice(4);
       const service = spec.service || 'pick';
+      // Delivery method (web app updates §3): boats drop at the jetty, Maldivian Cargo at its counter, airport at a counter or meeting point.
+      const method = spec.method || 'home';
+      const md = spec.methodDetails || {};
+      if (method !== 'home') {
+        const r0 = spec.packages[0].dropoff.recipient || {};
+        const end = MDM.deliveryEndpoint(Object.assign({ method, recipientName: r0.name, recipientPhone: r0.phone }, md));
+        spec.packages.forEach(pk => { pk.dropoff = Object.assign({}, pk.dropoff, end, { recipient: pk.dropoff.recipient || end.recipient, instructions: pk.dropoff.instructions || '' }); });
+      }
+      if (spec.extraVehicle) spec.packages.forEach(pk => { if (pk.size === 'box' || pk.size === 'xl') pk.needsVehicle = true; });
       const q = MDM.pricing.quote({ service, packages: spec.packages }, settings);
       const first = spec.packages[0];
       const cust = spec.customer;
@@ -153,8 +169,10 @@
         requestType: spec.type || 'home', service, serviceLevel: spec.level || 'normal', accountId: spec.accountId || null, batchId: spec.batchId || null, batchIndex: spec.batchIndex || null,
         customerId: cust.id || null, customer: { name: cust.name, phone: cust.phone, email: cust.email || '', notify: cust.notify || 'sms' },
         collection: { address: pick.address, zone: pick.zone, landmark: pick.landmark || '', contactName: (pick.contact && pick.contact.name) || cust.name, contactPhone: (pick.contact && pick.contact.phone) || cust.phone, instructions: spec.collectNote || '' },
-        delivery: { address: drop.address, zone: drop.zone, landmark: drop.landmark || '', recipientName: (drop.recipient && drop.recipient.name) || cust.name, recipientPhone: (drop.recipient && drop.recipient.phone) || cust.phone, instructions: spec.deliverNote || '', meetAt: drop.meetAt || 'door' },
+        delivery: { method, address: method === 'home' ? drop.address : (md.address || (md.boat && md.boat.address) || (md.cargo && md.cargo.island) || drop.address), zone: drop.zone, landmark: drop.landmark || '', recipientName: (drop.recipient && drop.recipient.name) || cust.name, recipientPhone: (drop.recipient && drop.recipient.phone) || cust.phone, instructions: spec.deliverNote || '', meetAt: drop.meetAt || 'door',
+          boat: md.boat ? Object.assign({ history: [] }, md.boat) : null, cargo: method === 'cargo' ? Object.assign({ counter: MDM.geo.cargoCounter().label }, md.cargo || {}) : null, airport: md.airport || null },
         details: spec.details || {}, documents: spec.documents || [], items: spec.items || null,
+        extraVehicle: !!spec.extraVehicle, charges: [], cod: null,
         packages: q.packages, fees: q.fees, totals: q.totals, estimate: MDM.pricing.estimateRange(spec.packages, settings, service),
         pricing: { status: 'estimated', history: [], needsReview: !!spec.needsReview, confirmedAt: null, confirmedBy: null, remarks: '' },
         schedule: spec.schedule || { type: 'asap' },
@@ -173,14 +191,38 @@
       if (o.payment.status !== 'pending' && o.payment.status !== 'invoiced' && !o.payment.invoiceNo) o.payment.invoiceNo = 'INV-' + spec.code.slice(4);
       if (spec.adjustments) { o.fees.adjustments = spec.adjustments.map((a, i) => Object.assign({ id: 'adj_' + spec.code.slice(4) + '_' + i, at: t(a.min != null ? a.min : created - 5), by: staffBy.fayaz, remarks: '' }, a)); MDM.pricing.recalc(o, settings); }
       if (spec.receipt != null) { o.packages[0].shop.receiptTotal = spec.receipt; MDM.pricing.recalc(o, settings); }
+      // Charges recorded on proof of collection / delivery (§6); billable ones are on the customer's price too.
+      (spec.charges || []).forEach((c, i) => {
+        const ch = { id: 'chg_' + spec.code.slice(4) + '_' + i, type: c.type, stage: c.stage, amount: c.amount, description: c.description || '', paidBy: c.paidBy || 'driver', billable: !!c.billable, adjustmentId: null, by: c.by || (spec.driverId ? 'driver:' + spec.driverId : staffBy.fayaz), at: rt(c.at) || t(created), void: false };
+        if (ch.billable) { ch.adjustmentId = 'adj_' + ch.id; o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: ch.adjustmentId, preset: c.type === 'other' ? 'other' : c.type, label: c.type === 'other' ? ch.description : ((MDM.CHARGE_TYPES.find(x => x.value === c.type) || {}).label), amount: ch.amount, at: ch.at, by: ch.by, remarks: ch.description, chargeId: ch.id }]); MDM.pricing.recalc(o, settings); }
+        o.charges.push(ch);
+        const typeLabel = c.type === 'other' ? ch.description : (MDM.CHARGE_TYPES.find(x => x.value === c.type) || {}).label;
+        o.events.push(ev('charge_added', typeLabel + ' ' + MDM.pricing.format(ch.amount) + (ch.stage === 'collection' ? ' at collection' : ch.stage === 'delivery' ? ' at delivery' : '') + (ch.paidBy === 'driver' ? ', paid by the driver' : '') + (ch.billable ? ', added to the price' : ''), ch.at, ch.by, 'internal'));
+      });
+      // Cash on delivery (§5.6)
+      if (spec.cod && (Number(spec.cod.amount) > 0)) {
+        o.cod = Object.assign({ amount: 0, status: 'pending', collectedAmount: null }, spec.cod);
+        ['collectedAt', 'handedAt', 'remittedAt'].forEach(k => { if (o.cod[k] != null) o.cod[k] = rt(o.cod[k]); });
+        if (o.cod.collectedAt) { o.cod.collectedBy = o.cod.collectedBy || 'driver:' + spec.driverId; o.cod.variance = (o.cod.collectedAmount || 0) - o.cod.amount; o.events.push(ev('cod_collected', 'Cash collected ' + MDM.pricing.format(o.cod.collectedAmount || 0), o.cod.collectedAt, o.cod.collectedBy, 'internal')); }
+        if (o.cod.handedAt) { o.cod.handedTo = o.cod.handedTo || staffBy.lamya; o.events.push(ev('cod_handover', 'Cash ' + MDM.pricing.format(o.cod.collectedAmount || 0) + ' handed to the office by ' + drvName(spec.driverId), o.cod.handedAt, o.cod.handedTo, 'internal')); }
+        if (o.cod.remittedAt) { o.cod.remittedBy = o.cod.remittedBy || staffBy.lamya; o.events.push(ev('cod_remitted', 'Cash on delivery ' + MDM.pricing.format(o.cod.collectedAmount || 0) + ' paid to ' + cust.name + (o.cod.remittanceRef ? ' (ref ' + o.cod.remittanceRef + ')' : ''), o.cod.remittedAt, o.cod.remittedBy, 'internal')); }
+      }
+      // Boat details changed after booking (§5.3 note)
+      if (o.delivery.boat && spec.boatHistory) spec.boatHistory.forEach(h => {
+        const at = rt(h.at); o.delivery.boat.history.push(Object.assign({}, h, { at }));
+        o.changes = (o.changes || []).concat(Object.keys(h.to).map(k => ({ at, by: h.by, field: 'delivery boat ' + k, from: h.from[k], to: h.to[k] })));
+        const reason = (MDM.BOAT_CHANGE_REASONS.find(r => r.value === h.reason) || {}).label || '';
+        o.events.push(ev('boat_updated', 'Boat details updated: ' + [h.to.name ? 'now on ' + h.to.name : '', h.to.departureTime ? 'departs ' + h.to.departureTime : ''].filter(Boolean).join(', ') + (reason ? ' (' + reason.toLowerCase() + ')' : ''), at, h.by, 'public'));
+      });
       if (o.payment.status === 'paid' || o.payment.status === 'received') { if (o.payment.paidAmount == null) o.payment.paidAmount = o.totals.total; o.payment.reference = o.payment.reference || spec.code; }
-      // Status history and the public timeline
+      // Status history and the public timeline. Several drop-offs: the order is delivered at the last one, so name that receiver.
+      const lastTo = ((spec.packages[spec.packages.length - 1].dropoff || {}).recipient || {}).name || o.delivery.recipientName;
       let prev = null;
       spec.steps.forEach(([st, min, by, label]) => {
         const at = t(min);
         const who = o.driverId ? drvName(o.driverId) : 'Our driver';
         const dby = by || ({ requested: spec.by || 'customer', confirmed: staffBy.fayaz, assigned: staffBy.fayaz, dispatched: staffBy.fayaz }[st] || (o.driverId ? 'driver:' + o.driverId : staffBy.fayaz));
-        if (st === 'requested') o.events.push(ev('created', label || (spec.source && spec.source !== 'web' ? 'Order created by our team (' + spec.source + ')' : 'Order submitted, we will confirm the price shortly'), at, dby));
+        if (st === 'requested') o.events.push(ev('created', label || (/^business:/.test(dby) ? 'Order submitted by ' + cust.name : spec.source && spec.source !== 'web' ? 'Order created by our team (' + spec.source + ')' : 'Order submitted, we will confirm the price shortly'), at, dby));
         else if (st === 'confirmed') {
           o.events.push(ev('price_confirmed', 'Price confirmed: ' + MDM.pricing.format(o.totals.total), at, dby));
           o.events.push(ev('confirmed', label || 'Order confirmed', at, dby));
@@ -192,7 +234,7 @@
         else if (st === 'arrived') o.events.push(ev('arrived', label || who + ' arrived for collection', at, dby));
         else if (st === 'collected') o.events.push(ev('collected', label || 'Collected from ' + o.collection.address + ', proof photo added', at, dby));
         else if (st === 'out_for_delivery') o.events.push(ev('out_for_delivery', label || 'Out for delivery with ' + who, at, dby));
-        else if (st === 'delivered') o.events.push(ev('delivered', label || 'Delivered to ' + o.delivery.recipientName, at, dby));
+        else if (st === 'delivered') o.events.push(ev('delivered', label || 'Delivered to ' + lastTo, at, dby));
         else o.events.push(ev(st, label || MDM.STATUS[st].customer, at, dby));
         o.statusHistory.push({ at, from: prev, to: st, by: dby });
         prev = st;
@@ -236,13 +278,15 @@
       payment: paid('delivered', 'delivered+90', 'delivered+120', 'bml', 'Aishath Shifza'),
       stops: [pickDone('collected'), dropDone('delivered', 'Ahmed Sobah')] });
 
-    order({ code: 'MDM-1026', type: 'shop_buy', service: 'shop', customer: C.nazeeha, driverId: 'drv_nazim', steps: full(days(5, 4), 'drv_nazim', 15, 10, 2, 5, 20, 40, 2, 30), receipt: 412, settle: 'due',
+    order({ code: 'MDM-1026', type: 'shop_buy', service: 'shop', customer: C.nazeeha,
+      details: { shop: { name: "STO People's Choice", address: 'Boduthakurufaanu Magu', zone: 'male', phone: '3314466' }, budget: 450,
+        items: [{ name: 'Rice', details: '2 kg', qty: 1, instructions: '' }, { name: 'Cooking oil', details: '1 L', qty: 1, instructions: '' }, { name: 'Eggs', details: 'Tray of 12', qty: 1, instructions: 'Pack on top' }, { name: 'Onions', details: '1 kg bags', qty: 2, instructions: '' }, { name: 'Dhal', details: '1 kg', qty: 1, instructions: '' }, { name: 'Dried chilli', details: '250 g', qty: 1, instructions: '' }] }, driverId: 'drv_nazim', steps: full(days(5, 4), 'drv_nazim', 15, 10, 2, 5, 20, 40, 2, 30), receipt: 412, settle: 'due',
       packages: [pkg({ size: 'bag', description: 'Groceries', shop: { name: "STO People's Choice", zone: 'male', address: 'Boduthakurufaanu Magu', list: '2 kg rice, 1 L cooking oil, 12 eggs, 2 kg onions, dhal 1 kg, chilli 250 g', budget: 450, unavailable: 'closest' }, dropoff: A.ranfaru, recipient: { name: 'Mariyam Nazeeha', phone: '9912045' } })],
       payment: paid('confirmed', 'confirmed+4', 'confirmed+9', 'mib', 'Mariyam Nazeeha', { upfront: true, upfrontRequired: true, paidAmount: 540 }),
       stops: [pickDone('collected'), dropDone('delivered', 'Mariyam Nazeeha')] });
 
     order({ code: 'MDM-1027', customer: C.rilwan, driverId: 'drv_faisal', steps: full(days(4, 6), 'drv_faisal', 25, 10, 5, 10, 15, 3, 2, 40),
-      packages: [pkg({ size: 'box', description: 'Printer cartridges (2 boxes taped together)', fragile: true, dims: { l: 32, w: 24, h: 18 }, pickup: A.meerubahuru, dropoff: A.vinares, recipient: { name: 'Ibrahim Naail', phone: '7723456' }, meetAt: 'lobby' })],
+      packages: [pkg({ size: 'box', description: 'Printer cartridges (2 boxes taped together)', fragile: true, sizeSource: 'customer', pickup: A.meerubahuru, dropoff: A.vinares, recipient: { name: 'Ibrahim Naail', phone: '7723456' }, meetAt: 'lobby' })],
       payment: paid('confirmed', 'confirmed+3', 'confirmed+8', 'bml', 'Mohamed Rilwan', { upfront: true }),
       stops: [pickDone('collected'), dropDone('delivered', 'Ibrahim Naail')] });
 
@@ -258,7 +302,9 @@
       stops: [pickDone('collected'), dropDone('delivered', 'Fathimath Zeena', 'security')] });
 
     order({ code: 'MDM-1030', customer: C.afeef, driverId: 'drv_shiyam', steps: full(days(1, 8), 'drv_shiyam', 15, 8, 2, 6, 10, 2, 2, 20),
-      packages: [pkg({ size: 'box', description: 'Spare parts for a dhoni engine, to the boat', pickup: A.ranfaru, dropoff: { address: 'Malé North Harbour', zone: 'male' }, dropCargo: { terminal: 'male_north', boat: 'Alihaa Express', time: '16:00', consignee: 'Hassan Ziyad, Thoddoo', receiptNo: 'AE-2291' }, recipient: { name: 'Boat crew, Alihaa Express', phone: '7911223' } })],
+      method: 'boat', methodDetails: { boat: { vesselType: 'boat', name: 'Alihaa Express', departureDate: clockDate(days(1, 8) - 75 - 60), departureTime: clock(days(1, 8) - 75 - 60), jetty: 'male_north', island: 'Thoddoo, Alifu Alifu', address: 'Hassan Ziyad, Thoddoo', contact: '7911223' } },
+      charges: [{ type: 'naalu', stage: 'delivery', amount: 20, description: 'Porter at North Harbour', at: 'delivered' }],
+      packages: [pkg({ size: 'box', description: 'Spare parts for a dhoni engine, to the boat', pickup: A.ranfaru, dropoff: { address: 'Malé North Harbour', zone: 'male' }, recipient: { name: 'Hassan Ziyad', phone: '7911223' } })],
       payment: paid('delivered', 'delivered+30', 'delivered+36', 'mib', 'Hussain Afeef'),
       stops: [pickDone('collected'), dropDone('delivered', 'Alihaa Express crew')] });
 
@@ -277,20 +323,23 @@
         pkg({ size: 'box', description: 'Baby clothes', pickup: A.ranfaru, dropoff: A.rehendhi, recipient: { name: 'Aminath Sana', phone: '9944556' }, meetAt: 'door' }),
       ],
       payment: { status: 'requested', requestedAt: 'delivered' },
+      charges: [{ type: 'packing', stage: 'delivery', amount: 15, description: 'Boxed the loose baby clothes', billable: true, at: 'delivered' }],
       stops: [pickDone('collected'), dropDone('out_for_delivery+20', 'Ali Nasih'), dropDone('delivered', "Sana's mother", 'family')] });
 
-    order({ code: 'MDM-1033', type: 'shop_buy', service: 'shop', customer: C.rilwan, driverId: 'drv_shiyam', steps: full(200, 'drv_shiyam', 12, 5, 2, 10, 50, 5, 2, 50), receipt: 300, settle: 'settled',
+    order({ code: 'MDM-1033', type: 'shop_buy', service: 'shop', customer: C.rilwan,
+      details: { shop: { name: 'Lifeline Pharmacy', address: 'Majeedhee Magu', zone: 'male', phone: '3329933' }, budget: 300,
+        items: [{ name: 'Panadol', details: '500 mg strips', qty: 2, instructions: '' }, { name: 'ORS sachets', details: 'Any brand', qty: 6, instructions: '' }, { name: 'Digital thermometer', details: '', qty: 1, instructions: 'Not the ear type' }] }, driverId: 'drv_shiyam', steps: full(200, 'drv_shiyam', 12, 5, 2, 10, 50, 5, 2, 50), receipt: 300, settle: 'settled',
       packages: [pkg({ size: 'bag', description: 'Pharmacy run', shop: { name: 'Lifeline Pharmacy', zone: 'male', address: 'Majeedhee Magu', list: 'Panadol 2 strips, ORS sachets ×6, thermometer', budget: 300, unavailable: 'call' }, dropoff: A.meerubahuru, recipient: { name: 'Mohamed Rilwan', phone: '7778901' } })],
       payment: paid('confirmed', 'confirmed+2', 'confirmed+8', 'mib', 'Mohamed Rilwan', { upfront: true, upfrontRequired: true }),
       stops: [pickDone('collected'), dropDone('delivered', 'Mohamed Rilwan')] });
 
     // Waiting on the operator: price confirmation
     order({ code: 'MDM-1034', type: 'postal', customer: C.zeena, steps: [['requested', 50]], needsReview: true,
-      details: { carrier: 'redbox_maafannu', collectionCode: 'RB-48213', collectBefore: dateOnly(-days(1)) + ' 17:00', smsNote: 'SMS from Redbox: collect before tomorrow 5 pm' },
+      details: { carrier: 'redbox_maafannu', trackingNo: 'RB2210486MV', collectionCode: 'RB-48213', collectBefore: dateOnly(-days(1)) + ' 17:00', smsNote: 'SMS from Redbox: collect before tomorrow 5 pm' },
       packages: [pkg({ size: 'bag', description: 'Redbox parcel (online order)', pickup: A.redbox, pickupContact: { name: 'Redbox Maafannu', phone: '' }, dropoff: A.villi, recipient: { name: 'Aishath Nuha', phone: '7688990' } })] });
 
     const o1035 = order({ code: 'MDM-1035', customer: C.waheed, steps: [['requested', 40]], needsReview: true,
-      packages: [pkg({ size: 'xl', description: 'Standing fan (boxed)', fragile: true, dims: { l: 120, w: 45, h: 40 }, weightKg: 9, needsVehicle: true, pickup: A.dhonveli, dropoff: A.hiyaa5, recipient: { name: 'Hawwa Rasheedha', phone: '9922334' }, meetAt: 'lobby' })] });
+      packages: [pkg({ size: 'xl', description: 'Standing fan (boxed)', fragile: true, sizeSource: 'customer', needsVehicle: true, pickup: A.dhonveli, dropoff: A.hiyaa5, recipient: { name: 'Hawwa Rasheedha', phone: '9922334' }, meetAt: 'lobby' })] });
     o1035.packages[0].photoId = photo('file_pkg_1035', 'package', o1035.id, 'Package photo from the customer', t(41), 'xl');
 
     // Paid upfront, slip waiting for verification
@@ -317,6 +366,13 @@
     o1038.route.stops[0].proofPhotoId = photo('file_col_1038', 'proof_collection', o1038.id, 'Proof of collection', o1038.route.stops[0].at, 'bag');
     o1038.packages[0].photoId = o1038.route.stops[0].proofPhotoId; o1038.packages[0].photoSource = 'driver';
 
+    // Same route as MDM-1039, so "Your most frequent order" has something to show for Mohamed Rilwan
+    const o1073 = order({ code: 'MDM-1073', customer: C.rilwan, driverId: 'drv_shiyam', steps: full(days(12, 5), 'drv_shiyam', 20, 10, 5, 10, 15, 3, 2, 40),
+      packages: [pkg({ size: 'box', description: 'Framed prints', fragile: true, pickup: A.meerubahuru, dropoff: A.handhuvaree, recipient: { name: 'Mariyam Waheeda', phone: '7733445' } })],
+      payment: paid('delivered', 'delivered+25', 'delivered+60', 'bml', 'Mohamed Rilwan'),
+      stops: [pickDone('collected'), dropDone('delivered', 'Mariyam Waheeda')] });
+    o1073.route.stops[1].photoId = photo('file_proof_1073', 'proof', o1073.id, 'Proof of delivery', o1073.route.stops[1].at, 'box');
+
     order({ code: 'MDM-1039', customer: C.rilwan, driverId: 'drv_shiyam', steps: [['requested', 38], ['confirmed', 30], ['assigned', 12]],
       packages: [pkg({ size: 'box', description: 'Photo frames', fragile: true, pickup: A.meerubahuru, dropoff: A.handhuvaree, recipient: { name: 'Mariyam Waheeda', phone: '7733445' } })] });
 
@@ -335,7 +391,7 @@
     o1041.documents[0].kind = 'invoice';
 
     order({ code: 'MDM-1042', type: 'postal', customer: C.waheed, driverId: 'drv_shiyam', steps: [['requested', 22], ['confirmed', 18], ['assigned', 12], ['dispatched', 10]],
-      details: { carrier: 'pikpost', location: 'bus_terminal', collectionCode: 'PK-77120', collectBefore: dateOnly(0) + ' 22:00' },
+      details: { carrier: 'pikpost', location: 'bus_terminal', trackingNo: 'LX448120967CN', collectionCode: 'PK-77120', collectBefore: dateOnly(0) + ' 22:00' },
       packages: [pkg({ size: 'bag', description: 'Pikpost parcel', pickup: A.pikpost, pickupContact: { name: 'Pikpost locker', phone: '' }, dropoff: A.kaneeru, recipient: { name: 'Ali Waheed', phone: '9912345' }, meetAt: 'reception' })] });
 
     const o1043 = order({ code: 'MDM-1043', customer: C.shifza, driverId: 'drv_shiyam', steps: full(70, 'drv_shiyam', 10, 5, 2, 10, 15, 19),
@@ -348,17 +404,19 @@
 
     // Business account orders (invoiced monthly)
     const kandu = { id: null, name: 'Kandu Books & Stationery', phone: '7801122', email: 'orders@kandubooks.example', notify: 'whatsapp' };
-    const bizPkg = (desc, drop, recipient) => pkg({ size: 'bag', description: desc, pickup: A.kandu, pickupContact: { name: 'Ahmed Shafeeu', phone: '7801122' }, dropoff: drop, recipient });
-    const biz = (code, createdMin, packages) => order({ code, type: 'business', service: 'business', source: 'business', by: 'business:bacc_kandu', accountId: 'bacc_kandu', customer: kandu, driverId: 'drv_rasheed',
+    const bizPkg = (desc, drop, recipient) => pkg({ size: 'bag', tier: 'small', tierRate: 25, description: desc, pickup: A.kandu, pickupContact: { name: 'Ahmed Shafeeu', phone: '7801122' }, dropoff: drop, recipient });
+    const biz = (code, createdMin, packages, extra) => order(Object.assign({ code, type: 'business', service: 'business', source: 'business', by: 'business:bacc_kandu', accountId: 'bacc_kandu', customer: kandu, driverId: 'drv_rasheed',
       steps: full(createdMin, 'drv_rasheed', 10, 10, 5, 10, 8, 4, 3, 60), payment: { method: 'invoice', status: 'invoiced' }, packages,
-      stops: [pickDone('collected')].concat(packages.map((p, i) => dropDone(i === packages.length - 1 ? 'delivered' : 'out_for_delivery+' + (15 + i * 12), p.dropoff.recipient.name))) });
+      stops: [pickDone('collected')].concat(packages.map((p, i) => dropDone(i === packages.length - 1 ? 'delivered' : 'out_for_delivery+' + (15 + i * 12), p.dropoff.recipient.name))) }, extra || {}));
     biz('MDM-1044', days(9, 5), [bizPkg('Textbook order 1182', A.amin, { name: 'Aishath Leela', phone: '7710101' }), bizPkg('Textbook order 1183', A.rehendhi, { name: 'Moosa Rasheed', phone: '7710202' })]);
     biz('MDM-1045', days(6, 4), [bizPkg('Stationery order 1190', A.ranfaru, { name: 'Ibrahim Nazeer', phone: '9910303' }), bizPkg('Stationery order 1191', A.handhuvaree, { name: 'Sara Ahmed', phone: '7710404' }), bizPkg('Stationery order 1192', A.hiyaa5, { name: 'Ahmed Naseem', phone: '7710505' })]);
-    biz('MDM-1046', days(3, 6), [bizPkg('Textbook order 1201', A.vinares, { name: 'Fathimath Ibrahim', phone: '7710606' }), bizPkg('Textbook order 1202', A.dhonveli, { name: 'Hussain Shareef', phone: '9910707' })]);
+    biz('MDM-1046', days(3, 6), [bizPkg('Textbook order 1201', A.vinares, { name: 'Fathimath Ibrahim', phone: '7710606' }), bizPkg('Textbook order 1202', A.dhonveli, { name: 'Hussain Shareef', phone: '9910707' })],
+      { cod: { amount: 275, status: 'remitted', collectedAmount: 275, collectedAt: 'delivered', handedAt: 'delivered+90', remittedAt: 'delivered+1440', remittanceRef: 'FT-88213' } });
     biz('MDM-1047', days(1, 5), [bizPkg('Art supplies order 1210', A.meerubahuru, { name: 'Aminath Zahira', phone: '7710808' }), bizPkg('Art supplies order 1211', A.amin, { name: 'Ali Shiyam', phone: '7710909' })]);
 
-    // Express, waiting for confirmation (priority request opened automatically)
+    // Express airport delivery, waiting for confirmation (priority request opened automatically)
     order({ code: 'MDM-1048', level: 'express', customer: C.rilwan, steps: [['requested', 9]], needsReview: true,
+      method: 'airport', methodDetails: { airport: { point: 'departures', counter: '', resort: '', speedboat: '', departureTime: '18:00', instructions: 'Mohamed Rilwan meets the driver at the entrance; his flight leaves at 6 pm' } },
       priority: { level: 'express', status: 'requested', requests: [{ id: 'pri_1048', at: t(9), by: 'customer', reason: 'Express delivery chosen when booking', deadline: '', instructions: '', decision: 'pending', decidedAt: null, decidedBy: null, remarks: '' }] },
       packages: [pkg({ size: 'bag', description: 'Forgotten passport for a 6 pm flight', pickup: A.meerubahuru, dropoff: A.departures, meetAt: 'departures', recipient: { name: 'Mohamed Rilwan', phone: '7778901' } })] });
 
@@ -372,9 +430,9 @@
     o1049.updatedAt = t(15);
 
     // Airport baggage, driver on the way to collect (Hulhumalé Phase 2 → Departures)
-    order({ code: 'MDM-1050', type: 'airport', customer: C.zeena, driverId: 'drv_faisal', steps: [['requested', 60], ['confirmed', 52], ['assigned', 40], ['dispatched', 35], ['on_the_way', 6]],
-      details: { mode: 'baggage', area: 'departures', flight: 'UL 104', flightTime: '21:30', passengerName: 'Fathimath Zeena', passengerPhone: '7654321', bags: 2 },
-      packages: [pkg({ size: 'xl', description: '2 suitcases for check-in', dims: { l: 75, w: 50, h: 30 }, weightKg: 23, pickup: A.vinares, dropoff: A.departures, meetAt: 'departures', recipient: { name: 'Fathimath Zeena', phone: '7654321' } })],
+    order({ code: 'MDM-1050', type: 'home', customer: C.zeena, driverId: 'drv_faisal', steps: [['requested', 60], ['confirmed', 52], ['assigned', 40], ['dispatched', 35], ['on_the_way', 6]],
+      method: 'airport', methodDetails: { airport: { point: 'departures', counter: 'SriLankan Airlines check-in', resort: '', speedboat: '', departureTime: '21:30', instructions: 'Luggage for flight UL 104; the passenger meets the driver at the entrance' } },
+      packages: [pkg({ size: 'xl', description: '2 suitcases for check-in', sizeSource: 'customer', pickup: A.vinares, dropoff: A.departures, meetAt: 'departures', recipient: { name: 'Fathimath Zeena', phone: '7654321' } })],
       adjustments: [{ preset: 'size', label: 'Second suitcase', amount: 40, min: 52, remarks: '2 bags, 1 trip' }],
       payment: paid('confirmed', 'confirmed+2', 'confirmed+7', 'bml', 'Fathimath Zeena', { upfront: true }) });
 
@@ -399,8 +457,9 @@
 
     // Post office, driver at the counter right now
     order({ code: 'MDM-1054', type: 'postal', customer: C.rilwan, driverId: 'drv_rasheed', steps: [['requested', 90], ['confirmed', 80], ['assigned', 60], ['dispatched', 55], ['on_the_way', 20], ['arrived', 4]],
-      details: { carrier: 'post_office', postOffice: 'male_7th', collectionCode: '', ownerName: 'Mohamed Rilwan', shippingAddress: 'H. Meerubahuruge, Chandhanee Magu', ownerContact: '7778901', idNote: 'No collection code; the owner sent their ID details to the post collections contact' },
+      details: { carrier: 'post_office', postOffice: 'male_7th', trackingNo: 'RR093771525GB', collectionCode: '', ownerName: 'Mohamed Rilwan', shippingAddress: 'H. Meerubahuruge, Chandhanee Magu', ownerContact: '7778901', idNote: 'No collection code; the owner sent their ID details to the post collections contact' },
       packages: [pkg({ size: 'box', description: 'Registered parcel from Sri Lanka', pickup: A.postoffice, pickupContact: { name: 'Post collections counter', phone: '3315555' }, dropoff: A.meerubahuru, recipient: { name: 'Mohamed Rilwan', phone: '7778901' } })],
+      charges: [{ type: 'other', stage: 'collection', amount: 25, description: 'Post office handling fee', billable: true, at: 'arrived+2' }],
       stops: [{ status: 'arrived', arrivedAt: 'arrived' }] });
 
     // DHL import with the collection document uploaded
@@ -430,43 +489,97 @@
     const o1056 = orders[orders.length - 1];
     o1056.totals.items = 95; o1056.totals.total += 95; o1056.estimate = { min: o1056.totals.total, max: o1056.totals.total, exact: o1056.totals.total };
 
+    // ---- web app updates 11/10/2026: delivery methods, extra vehicle, shopping list, business cash on delivery ----------------------
+    // Speedboat delivery; the driver swapped the speedboat at the jetty and paid naalu.
+    order({ code: 'MDM-1067', customer: C.shifza, driverId: 'drv_nazim', steps: full(480, 'drv_nazim', 10, 6, 2, 8, 10, 4, 2, 45),
+      method: 'boat', methodDetails: { boat: { vesselType: 'speedboat', name: 'Huraa Speed 1', departureDate: clockDate(480 - 42 - 10), departureTime: clock(480 - 42 - 10), jetty: 'hulhumale_ferry', island: 'Huraa, Kaafu Atoll', address: 'H. Blue Lagoon, Huraa', contact: '7998811' } },
+      boatHistory: [{ at: 'out_for_delivery+10', by: 'driver:drv_nazim', reason: 'changed', note: 'Huraa Speed 1 was full', from: { name: 'Huraa Speed 1', departureTime: clock(480 - 42 - 10) }, to: { name: 'Huraa Speed 2', departureTime: clock(373) } }],
+      charges: [{ type: 'naalu', stage: 'delivery', amount: 10, description: 'Loaded onto the speedboat', at: 'delivered' }],
+      packages: [pkg({ size: 'box', description: 'Kitchen scale and baking trays', pickup: A.amin, dropoff: { address: 'Hulhumalé ferry terminal', zone: 'hulhumale_p1' }, recipient: { name: 'Aminath Shaha', phone: '7998811' } })],
+      payment: paid('delivered', 'delivered+25', 'delivered+40', 'bml', 'Aishath Shifza'),
+      stops: [pickDone('collected'), dropDone('delivered', 'Speedboat crew, Huraa Speed 2', 'recipient')] });
+    const o1067 = orders[orders.length - 1];
+    o1067.delivery.boat = Object.assign({}, o1067.delivery.boat, { name: 'Huraa Speed 2', departureTime: clock(373), departureDate: clockDate(373) });
+    // Keep the drop-off and the delivery stop on the boat that actually took it.
+    const end1067 = MDM.deliveryEndpoint(o1067.delivery);
+    o1067.packages.forEach(pk => { pk.dropoff = Object.assign({}, pk.dropoff, end1067, { recipient: pk.dropoff.recipient }); });
+    o1067.route.stops.forEach(st => { if (st.type === 'dropoff') Object.assign(st, { address: end1067.address, landmark: end1067.landmark }); });
+    o1067.delivery.landmark = end1067.landmark;
+    // Maldivian Cargo: MVR 20 cargo fee, delivered to the counter at the main bus terminal.
+    order({ code: 'MDM-1068', customer: C.waheed, steps: [['requested', 75], ['confirmed', 66]],
+      method: 'cargo', methodDetails: { cargo: { island: 'Kulhudhuffushi, Haa Dhaalu', consignee: 'Ahmed Rashid' } },
+      packages: [pkg({ size: 'box', description: 'Printer for a shop in Kulhudhuffushi', pickup: A.dhonveli, dropoff: { address: 'Maldivian Cargo', zone: 'male' }, recipient: { name: 'Ahmed Rashid', phone: '7661234' } })] });
+    // Airport delivery to a resort counter, with the resort speedboat.
+    order({ code: 'MDM-1069', customer: C.rilwan, steps: [['requested', 64], ['confirmed', 58]],
+      method: 'airport', methodDetails: { airport: { point: 'resort_counters', counter: 'Lagoon Point Resort counter', resort: 'Lagoon Point Resort, Baa Atoll', speedboat: 'Lagoon Express 3', departureTime: '15:30', instructions: 'Hand to the resort host; the guest arrives on EK 652' } },
+      packages: [pkg({ size: 'bag', description: 'Forgotten camera charger for a resort guest', pickup: A.meerubahuru, dropoff: { address: 'Velana International Airport', zone: 'airport' }, recipient: { name: 'Resort host, Lagoon Point', phone: '7999001' } })] });
+    // More than one XL: the customer ticked Extra vehicle; the office confirms the vehicle charge.
+    const o1070 = order({ code: 'MDM-1070', customer: C.afeef, steps: [['requested', 18]], needsReview: true, extraVehicle: true,
+      packages: [
+        pkg({ size: 'xl', description: 'Flat-pack wardrobe, box 1 of 2', pickup: A.rehendhi, dropoff: A.hiyaa5, recipient: { name: 'Hussain Afeef', phone: '7345678' } }),
+        pkg({ size: 'xl', description: 'Flat-pack wardrobe, box 2 of 2', pickup: A.rehendhi, dropoff: A.hiyaa5, recipient: { name: 'Hussain Afeef', phone: '7345678' } }),
+      ] });
+    o1070.packages[0].photoId = photo('file_pkg_1070', 'package', o1070.id, 'Package photo from the customer', t(19), 'xl');
+    // Shop & deliver with an itemised list.
+    order({ code: 'MDM-1071', type: 'shop_buy', service: 'shop', customer: C.zeena, steps: [['requested', 28], ['confirmed', 21]],
+      details: { shop: { name: 'Fantasy Store', address: 'Fareedhee Magu', zone: 'male', phone: '3320001' }, budget: 420,
+        items: [{ name: 'Basmati rice', details: '5 kg bag, any brand', qty: 1, instructions: '' }, { name: 'Fresh milk', details: '1 L, full cream', qty: 4, instructions: 'Check the expiry date' }, { name: 'Eggs', details: 'Tray of 30', qty: 1, instructions: 'Pack separately' }, { name: 'Dates', details: '1 kg box', qty: 1, instructions: '' }] },
+      packages: [pkg({ size: 'box', description: 'Groceries', shop: { name: 'Fantasy Store', zone: 'male', address: 'Fareedhee Magu', list: 'Basmati rice 5 kg ×1, fresh milk 1 L ×4, eggs tray of 30 ×1, dates 1 kg ×1', budget: 420, unavailable: 'call' }, dropoff: A.handhuvaree, recipient: { name: 'Fathimath Zeena', phone: '7654321' } })],
+      payment: { status: 'requested', upfront: true, upfrontRequired: true, requestedAt: 21 } });
+    // A single business order with cash on delivery at the medium size rate.
+    order({ code: 'MDM-1072', type: 'business', service: 'business', source: 'business', by: 'business:bacc_fonu', accountId: 'bacc_fonu', customer: { id: null, name: 'Fonu Online Store', phone: '7633221', email: 'hello@fonu.example', notify: 'whatsapp' },
+      steps: [['requested', 26, 'business:bacc_fonu', 'Order submitted by Fonu Online Store'], ['confirmed', 26, 'system', 'Confirmed at the business rate']], payment: { method: 'invoice', status: 'invoiced' },
+      cod: { amount: 890 },
+      packages: [pkg({ size: 'box', tier: 'medium', tierRate: 40, description: 'Sneakers, size 42', pickup: A.fonu, pickupContact: { name: 'Shaheem Ali', phone: '7633221' }, dropoff: A.rehendhi, recipient: { name: 'Ibrahim Rameez', phone: '7731188' } })] });
+
     // ---- bulk business orders ---------------------------------------------------------------------------------------------
     const fonu = { id: null, name: 'Fonu Online Store', phone: '7633221', email: 'hello@fonu.example', notify: 'whatsapp' };
     const batches = [];
     function batch(spec) {
       const b = { id: spec.id, code: spec.code, accountId: spec.account, name: spec.name, serviceLevel: 'normal', source: spec.source, notes: spec.notes || '', status: spec.status,
-        collection: spec.collection, orderIds: [], by: 'business:' + spec.account, createdAt: t(spec.createdMin), updatedAt: t(spec.updatedMin || spec.createdMin), collectedAt: spec.collectedMin != null ? t(spec.collectedMin) : null };
+        collection: spec.collection, collectionPointId: spec.collection.pointId || null, preferredTime: spec.collection.preferredTime || '', orderIds: [], by: 'business:' + spec.account, createdAt: t(spec.createdMin), updatedAt: t(spec.updatedMin || spec.createdMin), collectedAt: spec.collectedMin != null ? t(spec.collectedMin) : null };
       spec.rows.forEach((r, i) => {
         const steps = [['requested', spec.createdMin, 'business:' + spec.account, 'Order submitted (bulk ' + spec.code + ', package ' + (i + 1) + ' of ' + spec.rows.length + ')'], ['confirmed', spec.createdMin - 1, 'system', 'Confirmed at the business rate']];
         if (spec.collectedMin != null) steps.push(['collected', spec.collectedMin, staffBy.fayaz, 'Collected, sorting at our hub']);
         if (r.out != null) steps.push(['out_for_delivery', r.out, 'driver:' + r.driver]);
         if (r.done != null) steps.push(['delivered', r.done, 'driver:' + r.driver]);
+        if (r.cancel) steps.push(['cancelled', r.cancel.at, 'business:' + spec.account, 'Cancelled by ' + spec.name + ': ' + r.cancel.reason + (r.cancel.withUs ? '. The package is with us and goes back to the business' : '')]);
+        const tier = r.tier || 'small', tierInfo = MDM.DEFAULT_BUSINESS_TIERS.find(x => x.value === tier);
         const o = order({ code: r.code, type: 'bulk', service: 'business', source: spec.source, accountId: spec.account, batchId: spec.id, batchIndex: i + 1, customer: spec.customer, driverId: r.driver || null, withRoute: spec.collectedMin != null,
-          details: { reference: r.reference }, payment: { method: 'invoice', status: 'invoiced' }, steps,
-          packages: [pkg({ size: r.size || 'bag', description: r.description, pickup: spec.pickupAddr, pickupContact: { name: spec.collection.contactName, phone: spec.collection.contactPhone }, dropoff: r.to, recipient: { name: r.name, phone: r.phone } })],
+          details: { reference: r.reference }, payment: { method: 'invoice', status: 'invoiced' }, steps, cod: r.cod || null,
+          method: r.method || 'home', methodDetails: r.methodDetails || null,
+          cancellation: r.cancel ? { status: 'approved', reason: r.cancel.reason, requestedAt: t(r.cancel.at), requestedBy: 'business:' + spec.account, decidedAt: t(r.cancel.at), decidedBy: 'business:' + spec.account, remarks: 'Cancelled by the business', byBusiness: true, previousStatus: r.out != null ? 'out_for_delivery' : 'confirmed', actionRequired: r.cancel.withUs ? 'return_to_sender' : 'none', returnStatus: r.cancel.withUs ? 'pending' : null } : null,
+          cancelReason: r.cancel ? r.cancel.reason : null, cancelledBy: r.cancel ? 'business:' + spec.account : null,
+          packages: [pkg({ size: r.size || tierInfo.size, tier, tierRate: spec.rates[tier], description: r.description, pickup: spec.pickupAddr, pickupContact: { name: spec.collection.contactName, phone: spec.collection.contactPhone }, dropoff: r.to, recipient: { name: r.name, phone: r.phone } })],
           stops: spec.collectedMin != null ? [pickDone('collected')].concat(r.done != null ? [dropDone('delivered', r.name)] : []) : [] });
         if (r.driver) { o.events.push(ev('assigned', 'Assigned to ' + drvName(r.driver) + ' for ' + MDM.geo.zoneLabel(r.to.zone), t(spec.collectedMin - 5), staffBy.fayaz)); o.events.sort((a, b) => a.at < b.at ? -1 : 1); }
         b.orderIds.push(o.id);
       });
       batches.push(b);
     }
-    batch({ id: 'blk_seed_1001', code: 'BLK-1001', account: 'bacc_kandu', name: 'Kandu Books & Stationery', customer: kandu, source: 'csv', status: 'out_for_delivery', createdMin: 240, collectedMin: 150, updatedMin: 30,
-      notes: 'Term 3 textbook orders', pickupAddr: A.kandu, collection: { address: A.kandu.address, zone: 'male', landmark: '', contactName: 'Ahmed Shafeeu', contactPhone: '7801122', instructions: 'Ask for the dispatch shelf' },
+    const KANDU_RATES = { small: 25, medium: 35 }, FONU_RATES = { small: 25, medium: 40, large: 60 };
+    batch({ id: 'blk_seed_1001', code: 'BLK-1001', account: 'bacc_kandu', name: 'Kandu Books & Stationery', customer: kandu, rates: KANDU_RATES, source: 'excel', status: 'out_for_delivery', createdMin: 240, collectedMin: 150, updatedMin: 25,
+      notes: 'Term 3 textbook orders', pickupAddr: A.kandu, collection: { pointId: 'cpt_kandu_shop', address: A.kandu.address, zone: 'male', landmark: '', contactName: 'Ahmed Shafeeu', contactPhone: '7801122', instructions: 'Ask for the dispatch shelf', preferredTime: '14:00' },
       rows: [
-        { code: 'MDM-1057', name: 'Aishath Nadha', phone: '7720001', to: A.amin, description: 'Grade 7 textbook set', reference: 'KB-2301', driver: 'drv_nazim', out: 100, done: 60 },
-        { code: 'MDM-1058', name: 'Ibrahim Shareef', phone: '7720002', to: A.rehendhi, description: 'Grade 9 textbook set', reference: 'KB-2302', driver: 'drv_nazim', out: 100 },
-        { code: 'MDM-1059', name: 'Mariyam Sama', phone: '7720003', to: A.hiyaa5, description: 'Grade 5 workbooks', reference: 'KB-2303', driver: 'drv_faisal', out: 90, done: 45 },
-        { code: 'MDM-1060', name: 'Ahmed Rizwan', phone: '7720004', to: A.vinares, description: 'A-Level biology', reference: 'KB-2304', driver: 'drv_faisal', out: 90 },
+        { code: 'MDM-1057', name: 'Aishath Nadha', phone: '7720001', to: A.amin, description: 'Grade 7 textbook set', reference: 'KB-2301', driver: 'drv_nazim', out: 100, done: 60,
+          cod: { amount: 320, status: 'with_office', collectedAmount: 320, collectedAt: 'delivered', handedAt: 'delivered+40' } },
+        { code: 'MDM-1058', name: 'Ibrahim Shareef', phone: '7720002', to: A.rehendhi, description: 'Grade 9 textbook set', reference: 'KB-2302', driver: 'drv_nazim', out: 100, cod: { amount: 450 } },
+        { code: 'MDM-1059', name: 'Mariyam Sama', phone: '7720003', to: A.hiyaa5, description: 'Grade 5 workbooks', reference: 'KB-2303', driver: 'drv_faisal', out: 90, done: 45,
+          cod: { amount: 180, status: 'collected', collectedAmount: 180, collectedAt: 'delivered' } },
+        { code: 'MDM-1060', name: 'Ahmed Rizwan', phone: '7720004', to: A.vinares, description: 'A-Level biology', reference: 'KB-2304', driver: 'drv_faisal', out: 90,
+          cod: { amount: 260, status: 'not_collected', note: 'Order cancelled' }, cancel: { at: 25, reason: 'Their customer cancelled the order', withUs: true } },
         { code: 'MDM-1061', name: 'Fathimath Hana', phone: '7720005', to: A.ranfaru, description: 'Grade 3 stationery pack', reference: 'KB-2305', driver: 'drv_shiyam', out: 120, done: 95 },
-        { code: 'MDM-1062', name: 'Hassan Nimal', phone: '7720006', to: A.villi, description: 'Grade 10 textbook set', reference: 'KB-2306', size: 'box', driver: 'drv_rasheed' },
+        { code: 'MDM-1062', name: 'Hassan Nimal', phone: '7720006', to: { address: 'Malé speedboat jetties', zone: 'male' }, description: 'Grade 10 textbook set', reference: 'KB-2306', tier: 'medium', driver: 'drv_rasheed',
+          method: 'boat', methodDetails: { boat: { vesselType: 'speedboat', name: 'Thulusdhoo Express', departureDate: clockDate(-120), departureTime: clock(-120), jetty: 'male_jetties', island: 'Thulusdhoo, Kaafu Atoll', address: 'Ma. Fehi Villa, Thulusdhoo', contact: '7720006' } } },
       ] });
-    batch({ id: 'blk_seed_1002', code: 'BLK-1002', account: 'bacc_fonu', name: 'Fonu Online Store', customer: fonu, source: 'portal', status: 'confirmed', createdMin: 35,
-      notes: 'Evening drop', pickupAddr: A.fonu, collection: { address: A.fonu.address, zone: 'hulhumale_p1', landmark: 'Next to the Hulhumalé bus stop', contactName: 'Shaheem Ali', contactPhone: '7633221', instructions: 'Packages ready after 4 pm' },
+    batch({ id: 'blk_seed_1002', code: 'BLK-1002', account: 'bacc_fonu', name: 'Fonu Online Store', customer: fonu, rates: FONU_RATES, source: 'portal', status: 'confirmed', createdMin: 35,
+      notes: 'Evening drop', pickupAddr: A.fonu, collection: { pointId: 'cpt_fonu_wh', address: A.fonu.address, zone: 'hulhumale_p1', landmark: 'Next to the Hulhumalé bus stop', contactName: 'Shaheem Ali', contactPhone: '7633221', instructions: 'Packages ready after 4 pm', preferredTime: '16:00' },
       rows: [
-        { code: 'MDM-1063', name: 'Aminath Raya', phone: '7730001', to: A.hiyaa5, description: 'Abaya (size M)', reference: 'FN-8801' },
-        { code: 'MDM-1064', name: 'Mohamed Ahsan', phone: '7730002', to: A.kaneeru, description: 'Sneakers', reference: 'FN-8802', size: 'box' },
-        { code: 'MDM-1065', name: 'Hawwa Shiza', phone: '7730003', to: A.dhonveli, description: 'Handbag', reference: 'FN-8803' },
-        { code: 'MDM-1066', name: 'Ali Ahusan', phone: '7730004', to: A.vinares, description: 'Perfume set', reference: 'FN-8804' },
+        { code: 'MDM-1063', name: 'Aminath Raya', phone: '7730001', to: A.hiyaa5, description: 'Abaya (size M)', reference: 'FN-8801', cod: { amount: 350 } },
+        { code: 'MDM-1064', name: 'Mohamed Ahsan', phone: '7730002', to: A.kaneeru, description: 'Sneakers', reference: 'FN-8802', tier: 'medium', cod: { amount: 890 } },
+        { code: 'MDM-1065', name: 'Hawwa Shiza', phone: '7730003', to: A.dhonveli, description: 'Handbag', reference: 'FN-8803', tier: 'medium', cod: { amount: 615 } },
+        { code: 'MDM-1066', name: 'Ali Ahusan', phone: '7730004', to: { address: 'Maldivian Cargo', zone: 'male' }, description: 'Perfume set', reference: 'FN-8804', cod: { amount: 0 },
+          method: 'cargo', methodDetails: { cargo: { island: 'Fuvahmulah', consignee: 'Ali Ahusan' } } },
       ] });
     // Batch child orders that have only one stop done keep the full route so the map can draw them.
     orders.filter(o => o.batchId === 'blk_seed_1001' && o.status === 'out_for_delivery').forEach(o => { o.route.polyline = MDM.geo.routeThrough(o.route.stops); });
@@ -475,25 +588,42 @@
     const monthKey = NOW.toISOString().slice(0, 7);
     orders.filter(o => o.service === 'business' && o.status === 'delivered').forEach(o => {
       const d = (o.events.filter(e => e.type === 'delivered').pop() || {}).at || o.updatedAt;
-      if (d.slice(0, 7) !== monthKey) { const shift = new Date(NOW.getTime() - 20 * 60000).toISOString(); o.events.forEach(e => { e.at = shift; }); o.statusHistory.forEach(h => { h.at = shift; }); o.updatedAt = shift; o.createdAt = shift; o.route.stops.forEach(s => { s.at = shift; }); }
+      if (d.slice(0, 7) !== monthKey) { const shift = new Date(NOW.getTime() - 20 * 60000).toISOString(); o.events.forEach(e => { e.at = shift; }); o.statusHistory.forEach(h => { h.at = shift; }); o.updatedAt = shift; o.createdAt = shift; o.route.stops.forEach(s => { s.at = shift; }); if (o.cod) ['collectedAt', 'handedAt', 'remittedAt'].forEach(k => { if (o.cod[k]) o.cod[k] = shift; }); }
     });
 
     // ---- customers ------------------------------------------------------------------------------------------------------
+    const BOOK = {
+      cus_shifza: [['Home', A.kaneeru], ['Office', A.amin]],
+      cus_nazeeha: [['Home', A.ranfaru], ["Mum's home", A.handhuvaree]],
+      cus_rilwan: [['Home', A.meerubahuru], ["Wife's home", A.hiyaa5], ['Office', A.dhonveli]],
+      cus_zeena: [['Home', A.handhuvaree]],
+      cus_waheed: [['Home', A.dhonveli], ['Office', A.kaneeru]],
+      cus_afeef: [['Home', A.rehendhi], ['Other', A.agora]],
+    };
     const customers = Object.values(C).map(c => {
       const mine = orders.filter(o => o.customerId === c.id);
       const last = mine.map(o => o.createdAt).sort().pop() || null;
-      const addresses = [];
-      mine.forEach(o => o.packages.forEach(p => { if (p.pickup && p.pickup.address && p.pickup.zone !== 'airport' && !addresses.some(a => a.address === p.pickup.address)) addresses.push({ label: addresses.length ? 'Address ' + (addresses.length + 1) : 'Home', address: p.pickup.address, zone: p.pickup.zone, meetAt: 'door' }); }));
-      return { id: c.id, name: c.name, phone: c.phone, email: c.email, notify: c.notify, addresses: addresses.slice(0, 2), createdAt: t(days(45)), updatedAt: last || t(days(45)), lastOrderAt: last, orderCount: mine.length };
+      const addresses = (BOOK[c.id] || []).map(([label, a], i) => ({ id: 'adr_' + c.id.slice(4) + '_' + (i + 1), label, address: a.address, zone: a.zone, landmark: a.landmark || '', meetAt: 'door', contactName: '', contactPhone: '', notes: '' }));
+      return { id: c.id, name: c.name, phone: c.phone, email: c.email, notify: c.notify, addresses, createdAt: t(days(45)), updatedAt: last || t(days(45)), lastOrderAt: last, orderCount: mine.length };
     });
 
     // ---- business ------------------------------------------------------------------------------------------------------
     const business_accounts = [
-      { id: 'bacc_kandu', name: 'Kandu Books & Stationery', contactName: 'Ahmed Shafeeu', phone: '7801122', landline: '3321122', email: 'orders@kandubooks.example', tin: '1092231GST001', zone: 'male', pickupAddress: A.kandu.address, pickupWindow: 'afternoon', ratePerPackage: 25, priorityAllowed: true, status: 'approved', approvedAt: t(days(40)), createdAt: t(days(42)), updatedAt: t(days(40)) },
-      { id: 'bacc_fonu', name: 'Fonu Online Store', contactName: 'Shaheem Ali', phone: '7633221', landline: '', email: 'hello@fonu.example', tin: '', zone: 'hulhumale_p1', pickupAddress: A.fonu.address, pickupWindow: 'evening', ratePerPackage: 25, priorityAllowed: true, status: 'approved', approvedAt: t(days(12)), createdAt: t(days(14)), updatedAt: t(days(12)) },
+      { id: 'bacc_kandu', name: 'Kandu Books & Stationery', contactName: 'Ahmed Shafeeu', phone: '7801122', landline: '3321122', email: 'orders@kandubooks.example', tin: '1092231GST001', zone: 'male', pickupAddress: A.kandu.address, pickupWindow: 'afternoon', ratePerPackage: 25, priorityAllowed: true, status: 'approved', approvedAt: t(days(40)), createdAt: t(days(42)), updatedAt: t(days(40)),
+        rates: KANDU_RATES, tiers: ['small', 'medium'], packagePhotoId: photo('file_bpkg_kandu', 'business_package', null, 'Typical package: textbook set in a carrier bag', t(days(42)), 'bag'), assessment: 'Mostly textbook sets in carrier bags; boxes for full-class orders',
+        collectionPoints: [
+          { id: 'cpt_kandu_shop', label: 'Shop', address: A.kandu.address, zone: 'male', landmark: '', contactName: 'Ahmed Shafeeu', contactPhone: '7801122', preferredTime: '14:00', isDefault: true },
+          { id: 'cpt_kandu_godown', label: 'Godown', address: A.kanduGodown.address, zone: 'male', landmark: 'Behind the Maafannu stadium', contactName: 'Moosa Farhan', contactPhone: '7801133', preferredTime: '10:00', isDefault: false },
+        ] },
+      { id: 'bacc_fonu', name: 'Fonu Online Store', contactName: 'Shaheem Ali', phone: '7633221', landline: '', email: 'hello@fonu.example', tin: '', zone: 'hulhumale_p1', pickupAddress: A.fonu.address, pickupWindow: 'evening', ratePerPackage: 25, priorityAllowed: true, status: 'approved', approvedAt: t(days(12)), createdAt: t(days(14)), updatedAt: t(days(12)),
+        rates: FONU_RATES, tiers: ['small', 'medium', 'large'], packagePhotoId: photo('file_bpkg_fonu', 'business_package', null, 'Typical package: clothing in a mailer', t(days(14)), 'box'), assessment: 'Clothing in mailers (small), shoes and bags in boxes (medium), occasional large orders',
+        collectionPoints: [
+          { id: 'cpt_fonu_wh', label: 'Warehouse', address: A.fonu.address, zone: 'hulhumale_p1', landmark: 'Next to the Hulhumalé bus stop', contactName: 'Shaheem Ali', contactPhone: '7633221', preferredTime: '16:00', isDefault: true },
+          { id: 'cpt_fonu_shop', label: 'Showroom', address: 'Fonu showroom, Majeedhee Magu', zone: 'male', landmark: '', contactName: 'Aisha Nasir', contactPhone: '7633222', preferredTime: '', isDefault: false },
+        ] },
     ];
     const business_requests = [
-      { id: 'breq_shifa', name: "Shifa's Cakes", contactName: 'Shifa Ibrahim', phone: '7556677', landline: '', email: 'shifa.cakes@example.com', zone: 'hulhumale_p1', pickupAddress: 'Rehendhi Flat 2, Apt 108', pickupWindow: 'afternoon', volume: '11-30', notes: 'Home baker, mostly cake boxes to Phase 1 and 2. Fragile.', status: 'pending', createdAt: t(days(1, 2)), updatedAt: t(days(1, 2)) },
+      { id: 'breq_shifa', name: "Shifa's Cakes", contactName: 'Shifa Ibrahim', phone: '7556677', landline: '', email: 'shifa.cakes@example.com', zone: 'hulhumale_p1', pickupAddress: 'Rehendhi Flat 2, Apt 108', pickupWindow: 'afternoon', volume: '11-30', notes: 'Home baker, mostly cake boxes to Phase 1 and 2. Fragile.', status: 'pending', typicalSize: 'medium', packagePhotoId: photo('file_breq_shifa', 'business_package', null, 'Typical package: a cake box', t(days(1, 2)), 'box'), createdAt: t(days(1, 2)), updatedAt: t(days(1, 2)) },
       { id: 'breq_kandu', name: 'Kandu Books & Stationery', contactName: 'Ahmed Shafeeu', phone: '7801122', landline: '3321122', email: 'orders@kandubooks.example', zone: 'male', pickupAddress: A.kandu.address, pickupWindow: 'afternoon', volume: '11-30', notes: 'School textbook season is busiest.', status: 'approved', createdAt: t(days(42)), updatedAt: t(days(40)) },
     ];
     const invLines = [];
@@ -516,10 +646,12 @@
     const shiftOf = { stf_admin: [8, 0, 17, 10], stf_fayaz: [8, 5, 17, 0], stf_lamya: [9, 0, 18, 0], stf_nazim: [8, 2, 17, 30], stf_shiyam: [7, 58, 17, 5], stf_rasheed: [8, 20, 18, 10], stf_faisal: [8, 0, 16, 55], stf_hamid: [8, 0, 17, 0] };
     for (let d = 6; d >= 0; d--) {
       const base = new Date(NOW); base.setDate(base.getDate() - d);
-      if (base.getDay() === 5 && d !== 0) continue;   // Friday off, except when today is Friday
+      const friday = base.getDay() === 5 && d !== 0;   // the weekly off day; working it earns an accumulated off day (§7)
       staff.forEach((s, i) => {
         const sh = shiftOf[s.id]; if (!sh) return;
+        if (friday && ['stf_nazim', 'stf_shiyam'].indexOf(s.id) < 0) return;
         if (s.id === 'stf_hamid' && d <= 1) return;     // on leave
+        if (s.id === 'stf_rasheed' && d === 3) return;  // took an accumulated off day
         const jitter = (hash(s.id + d) % 7);
         const inAt = new Date(base); inAt.setHours(sh[0], sh[1] + jitter, 0, 0);
         const outAt = new Date(base); outAt.setHours(sh[2], sh[3] + (jitter % 4), 0, 0);
@@ -534,6 +666,8 @@
       { id: 'lv_seed_1', staffId: 'stf_hamid', type: 'sick', from: dateOnly(days(1)), to: dateOnly(-days(1)), days: 3, reason: 'Fever, medical certificate attached', status: 'approved', decidedBy: 'admin', decidedAt: t(days(1, 2)), remarks: 'Get well soon', createdAt: t(days(1, 4)), updatedAt: t(days(1, 2)) },
       { id: 'lv_seed_2', staffId: 'stf_shiyam', type: 'annual', from: dateOnly(-days(6)), to: dateOnly(-days(8)), days: 3, reason: 'Family trip to the island', status: 'pending', decidedBy: null, decidedAt: null, remarks: '', createdAt: t(180), updatedAt: t(180) },
       { id: 'lv_seed_3', staffId: 'stf_lamya', type: 'annual', from: dateOnly(-days(14)), to: dateOnly(-days(14)), days: 1, reason: 'Personal errand', status: 'pending', decidedBy: null, decidedAt: null, remarks: '', createdAt: t(60), updatedAt: t(60) },
+      { id: 'lv_seed_5', staffId: 'stf_rasheed', type: 'off_day', from: dateOnly(days(3)), to: dateOnly(days(3)), days: 1, reason: 'Using an accumulated off day', status: 'approved', decidedBy: 'admin', decidedAt: t(days(4)), remarks: '', createdAt: t(days(5)), updatedAt: t(days(4)) },
+      { id: 'lv_seed_6', staffId: 'stf_nazim', type: 'off_day', from: dateOnly(-days(4)), to: dateOnly(-days(4)), days: 1, reason: 'Family event', status: 'pending', decidedBy: null, decidedAt: null, remarks: '', createdAt: t(240), updatedAt: t(240) },
       { id: 'lv_seed_4', staffId: 'stf_faisal', type: 'annual', from: dateOnly(days(10)), to: dateOnly(days(9)), days: 2, reason: 'Wedding', status: 'rejected', decidedBy: 'admin', decidedAt: t(days(12)), remarks: 'School season, please pick another week', createdAt: t(days(13)), updatedAt: t(days(12)) },
     ];
 
@@ -565,6 +699,15 @@
       ['product_updated', 'Stock updated: Shipping label roll (0 left)', 'operator:stf_fayaz', days(2)],
     ].forEach((a, i) => events.push({ id: 'evt_audit_' + i, orderId: null, code: null, at: t(a[3]), type: a[0], label: a[1], by: a[2], visibility: 'internal', createdAt: t(a[3]), updatedAt: t(a[3]) }));
     events.sort((a, b) => a.at < b.at ? -1 : 1);
+    // Operational messages for drivers, the operations desk and businesses (not the end customer).
+    const staffNote = (code, audience, to, name, title, message, at) => { const o = orders.find(x => x.code === code); notifications.push({ id: 'ntf_staff_' + notifications.length, orderId: o.id, code, to, name, audience, channel: 'app', event: 'staff_' + audience, title, message: code + ': ' + message, status: 'sent', at, createdAt: at, updatedAt: at }); };
+    const c1060 = orders.find(o => o.code === 'MDM-1060');
+    const cAt = (c1060.statusHistory.find(h => h.to === 'cancelled') || {}).at || t(25);
+    staffNote('MDM-1060', 'driver', '7745566', 'Mohamed Faisal', 'Order cancelled by the business', 'out for delivery: do not deliver, bring it back', cAt);
+    staffNote('MDM-1060', 'operations', 'operations', 'Operations', 'Order cancelled by the business', 'out for delivery: do not deliver, bring it back', cAt);
+    const b1067 = orders.find(o => o.code === 'MDM-1067').delivery.boat.history[0];
+    const r1067 = (MDM.BOAT_CHANGE_REASONS.find(r => r.value === b1067.reason) || {}).label || '';
+    staffNote('MDM-1067', 'operations', 'operations', 'Operations', 'Boat details changed', 'now on ' + b1067.to.name + ', departs ' + b1067.to.departureTime + (r1067 ? ' (' + r1067.toLowerCase() + ')' : ''), b1067.at);
     notifications.sort((a, b) => a.at < b.at ? -1 : 1);
 
     return { settings, customers, drivers, staff, zones, attendance, leaves, products, notifications, batches, business_requests, business_accounts, invoices, orders, positions, events, files };

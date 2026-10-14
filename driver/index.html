@@ -5,7 +5,7 @@
 <script>(function(){try{var t=localStorage.getItem('mdm:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Driver console · Mr. Delivery Man</title>
-<meta name="description" content="Driver console for Mr. Delivery Man: duty punch in and out, today's jobs, proof of collection and delivery, failed attempts and leave requests.">
+<meta name="description" content="Driver console for Mr. Delivery Man: duty punch in and out, today's jobs, boat and cargo details, proof of collection and delivery, cash collected, returns and leave requests.">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -61,6 +61,13 @@
             <button type="button" class="btn btn--primary btn--lg" data-testid="driver-punch"></button>
           </div>
           <p class="driver-duty__line" data-testid="driver-zones"></p>
+          <div class="driver-offdays" data-testid="driver-offdays" hidden>
+            <div class="driver-offdays__main">
+              <span class="driver-offdays__label">Accumulated off days</span>
+              <span class="driver-offdays__value" data-testid="driver-offday-balance"></span>
+            </div>
+            <p class="driver-duty__line" data-testid="driver-offday-detail"></p>
+          </div>
         </div>
         <div class="card__body">
           <fieldset class="segmented" data-testid="driver-online" disabled>
@@ -77,16 +84,45 @@
           <div data-testid="driver-gps-alert" hidden></div>
           <p class="driver-duty__line driver-duty__note">Keep this screen open while on route; phones pause location sharing in the background.</p>
         </div>
-        <div class="card__body">
-          <div class="driver-duty__top">
-            <h3 class="driver-card-sub">Leave</h3>
-            <button type="button" class="btn btn--secondary btn--sm" data-testid="driver-leave-request">Request leave</button>
-          </div>
-          <div data-testid="driver-leave"></div>
+        <div class="card__body driver-leave-body">
+          <details class="driver-fold" data-testid="driver-leave-section">
+            <summary class="driver-fold__summary" data-testid="driver-leave-summary">
+              <span class="driver-card-sub">Leave requests</span>
+              <span class="driver-fold__count" data-testid="driver-leave-count"></span>
+              <span class="driver-fold__chevron" aria-hidden="true"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+            </summary>
+            <div class="driver-fold__body">
+              <p class="driver-duty__line" data-testid="driver-leave-balance"></p>
+              <div data-slot="leave-form"></div>
+              <h4 class="driver-fold__sub">Your requests</h4>
+              <div data-testid="driver-leave"></div>
+            </div>
+          </details>
         </div>
         <div class="card__body driver-duty__foot">
           <span class="driver-duty__line" data-testid="driver-signed-in"></span>
           <button type="button" class="btn btn--ghost btn--sm" data-testid="driver-switch">Switch driver</button>
+        </div>
+      </section>
+
+      <section class="card driver-notes" aria-labelledby="driver-notes-title" data-testid="driver-notes" hidden>
+        <div class="card__header driver-notes__head">
+          <h2 id="driver-notes-title" class="driver-card-title">Messages from the office <span class="driver-notes__new" data-testid="driver-notes-unread"></span></h2>
+        </div>
+        <ul class="list driver-notes__list" data-testid="driver-notes-list"></ul>
+        <div class="card__footer driver-notes__foot">
+          <button type="button" class="btn btn--secondary btn--sm" data-testid="driver-notes-read">Mark all as read</button>
+          <button type="button" class="btn btn--ghost btn--sm" data-testid="driver-notes-more"></button>
+        </div>
+      </section>
+
+      <section class="card driver-cash" aria-labelledby="driver-cash-title" data-testid="driver-cash" hidden>
+        <div class="card__body">
+          <h2 id="driver-cash-title" class="driver-card-title" data-testid="driver-cash-title"></h2>
+          <p class="driver-duty__line" data-testid="driver-cash-note"></p>
+          <ul class="list driver-cash__list" data-testid="driver-cash-list"></ul>
+          <p class="driver-duty__line driver-cash__pending" data-testid="driver-cash-pending" hidden></p>
+          <p class="driver-duty__line driver-cash__owed" data-testid="driver-cash-owed" hidden></p>
         </div>
       </section>
 

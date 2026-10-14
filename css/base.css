@@ -527,7 +527,10 @@ body.page-track .maplibregl-ctrl-group button, body.page-driver .maplibregl-ctrl
 
 /* ---------- Toast ---------- */
 .toasts { position: fixed; right: 20px; bottom: calc(20px + var(--bottombar-h, 0px) + env(safe-area-inset-bottom)); z-index: 80; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
-.toast { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); font-size: 14px; line-height: 1.45; color: var(--text); pointer-events: auto; animation: toast-in .2s ease; overflow-wrap: anywhere; }
+/* Toasts never take a click meant for the page under them (a form's Save button sits bottom-right too): only the action and close
+   buttons catch the pointer, and hovering one of them pauses the timer (ui.js). */
+.toast { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); font-size: 14px; line-height: 1.45; color: var(--text); pointer-events: none; animation: toast-in .2s ease; overflow-wrap: anywhere; }
+.toast__action, .toast__close { pointer-events: auto; }
 .toast > .icon { width: 16px; height: 16px; margin-top: 2px; color: var(--text-2); }
 .toast--ok > .icon { color: var(--ok); }
 .toast--warn > .icon { color: var(--warn); }

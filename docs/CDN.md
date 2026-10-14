@@ -28,3 +28,10 @@ QR codes on shipping labels (`labels/` only), qrcode-generator 1.4.4 from cdnjs;
 ```html
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1" crossorigin="anonymous"></script>
 ```
+
+Excel import and the downloadable template (business bulk orders, `business/` only), SheetJS 0.18.5 from cdnjs. Load it only when
+the Excel step opens (inject the tag on demand) so the portal stays light; it exposes `window.XLSX`:
+
+```html
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
+```

@@ -16,8 +16,13 @@
   const CHANNEL_ON = { sms: 'by SMS', whatsapp: 'on WhatsApp', viber: 'on Viber', email: 'by email' };
   const MEET_AT = { door: 'At the door', lobby: 'At the lobby', reception: 'At reception or security' };
   const DOC_KIND = { collection_doc: 'Collection document', invoice: 'Shop invoice', quotation: 'Quotation', payment_slip: 'Payment slip', document: 'Document' };
+  // Web app updates §3, §6: labels for the delivery method details and the charge stage shown beside a billable charge.
+  const BOAT_FIELD = { vesselType: 'Vessel', name: 'Boat', departureDate: 'Departure date', departureTime: 'Departure time', jetty: 'Jetty', island: 'Island', address: 'Destination address', contact: 'Contact' };
+  const CHARGE_STAGE = { collection: 'at collection', delivery: 'at delivery' };
+  const FIXED_FEES = ['airport', 'cargo', 'shopping'];
+  const SIZE_ORDER = ['bag', 'box', 'xl'];
 
-  const state = { settings: null, order: null, stops: [], driver: null, pos: null, posDriverId: null, unsubPos: null, timer: null, map: null, refs: null, share: false, code: '', isNew: false };
+  const state = { settings: null, account: null, order: null, stops: [], driver: null, pos: null, posDriverId: null, unsubPos: null, timer: null, map: null, refs: null, share: false, code: '', isNew: false, receiver: false };
   let renderSeq = 0;
   let form, input, fieldEl, emptyEl, resultEl;
 
@@ -41,12 +46,67 @@
   const row = (label, value, opts) => MDM.ui.rateRow(label, value, opts);
   function badgeNode(kind, label, status) { return html(MDM.ui.badge(kind, label, { 'data-status': status })).firstElementChild; }
   const priceConfirmed = o => !!(o.pricing && o.pricing.status === 'confirmed');
+  const rangeText = (min, max) => (min === max ? fmt(min) : fmt(min) + ' to ' + fmt(max).replace('MVR ', ''));
+  // The estimate the customer was given: { min, max } from order.estimate, or the current total for orders without one.
+  function estimateOf(o) {
+    const est = o.estimate || {}, t = o.totals.total;
+    return est.min != null ? { min: est.min, max: est.max != null ? est.max : est.min } : { min: t, max: t };
+  }
   const canPay = o => {
     const p = o.payment || {};
     if (p.method === 'invoice' || o.status === 'cancelled') return false;
     if (p.status === 'requested') return true;
     return p.status === 'pending' && priceConfirmed(o);
   };
+  const vesselLabel = v => ((MDM.VESSEL_TYPES.find(x => x.value === v) || {}).label || 'Boat');
+  const jettyLabel = v => ((MDM.geo.terminals().find(t => t.value === v) || {}).label || v || '');
+  const pointLabel = v => ((MDM.geo.airportPoints().find(x => x.value === v) || {}).label || v || '');
+  const dayText = d => (d ? fmtDate(/^\d{4}-\d{2}-\d{2}$/.test(d) ? d + 'T12:00:00' : d, { dateOnly: true }) : '');
+  const departText = (date, time) => [dayText(date), time].filter(Boolean).join(' at ');
+  // The receiver's number is shown only by its last digits: anyone with the order code can open this page.
+  function phoneTail(raw) { const n = MDM.ui.phone.normalize(raw) || String(raw || '').replace(/\D/g, ''); return n.length >= 4 ? 'phone ending ' + n.slice(-4) : ''; }
+  const isBusinessCancel = o => !!((o.cancellation && o.cancellation.byBusiness) || String(o.cancelledBy || '').indexOf('business:') === 0);
+  const businessName = o => (state.account && state.account.id === o.accountId && state.account.name) || (o.customer && o.customer.name) || 'the business';
+  // A business order (§1.3, §5) is opened mostly by its receiver, from the label or the message with the code. The receiver never sees
+  // the business's agreed rate or invoice amounts: only who arranged the delivery and the cash to pay the driver. The business itself
+  // (signed in on this browser, localStorage mdm:business with the same accountId) still sees its prices.
+  const isBusinessOrder = o => !!(o.accountId || o.service === 'business' || o.requestType === 'bulk' || o.requestType === 'business');
+  function signedInBusiness() { try { const b = JSON.parse(localStorage.getItem('mdm:business') || 'null'); return b && b.accountId ? b.accountId : null; } catch (e) { return null; } }
+  const receiverView = o => isBusinessOrder(o) && signedInBusiness() !== o.accountId;
+  // Public events that carry the business's price, invoice or cash remittance are left out of the receiver's activity log.
+  const RECEIVER_HIDDEN = ['price_confirmed', 'adjustment', 'size_updated', 'payment_requested', 'payment_submitted', 'payment_verified', 'payment_rejected', 'refund', 'settled', 'cod_remitted', 'cancel_requested', 'cancel_rejected'];
+  const tierLabel = v => { const t = MDM.pricing.businessTiers(state.settings).find(x => x.value === v); return t ? t.label + ' (' + MDM.pricing.sizeLabel(t.size) + ')' : String(v || ''); };
+  const who = by => { const n = String(MDM.byName(by) || ''); return n.charAt(0).toUpperCase() + n.slice(1); };
+  // Cash on delivery as the receiver sees it: to pay, paid (whatever the office did with it afterwards), or not collected.
+  function codText(o, forReceiver) {
+    const cod = o.cod;
+    if (!cod || !(cod.amount > 0)) return '';
+    const got = cod.collectedAmount != null ? cod.collectedAmount : cod.amount;
+    if (cod.status === 'pending') return fmt(cod.amount) + ' to pay the driver in cash';
+    if (cod.status === 'not_collected') return fmt(cod.amount) + ', not collected' + (o.status === 'cancelled' ? ' (order cancelled)' : '');
+    return fmt(got) + (forReceiver ? ' paid in cash' : ' collected') + (cod.collectedAt ? ' on ' + fmtDate(cod.collectedAt) : '');
+  }
+  // Package category changes made by our team (operator or driver), from the order's change log: [{ n, pkgId, from, to, at, by }].
+  function sizeChanges(o) {
+    const idx = {};
+    (o.packages || []).forEach((p, i) => { idx[p.id] = i + 1; });
+    return (o.changes || []).map(c => { const m = /^package (.+) size$/.exec(c.field || ''); return m && c.from !== c.to ? { n: idx[m[1]], pkgId: m[1], from: c.from, to: c.to, at: c.at, by: c.by } : null; }).filter(Boolean);
+  }
+  // Fee rows the customer sees: airport, cargo and shopping fees, then price adjustments (extra vehicle, billable charges). A charge is on
+  // the price only while it is billable; a voided or non-billable charge (naalu the driver paid, by default) is never listed (§6).
+  function feeRows(o) {
+    const adjs = {}, charges = o.charges || [];
+    ((o.fees || {}).adjustments || []).forEach(a => { adjs[a.id] = a; });
+    return MDM.pricing.feeLines(o, state.settings).map(f => {
+      if (f.key !== 'adjustment') return f;
+      const a = adjs[f.id] || {};
+      const ch = charges.find(c => (a.chargeId && c.id === a.chargeId) || (c.adjustmentId && c.adjustmentId === a.id));
+      if (ch && (ch.void || !ch.billable)) return null;
+      if (ch) return Object.assign({}, f, { key: 'charge-' + ch.type, reason: [ch.type !== 'other' ? ch.description : '', CHARGE_STAGE[ch.stage]].filter(Boolean).join(', ') });
+      if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: a.remarks || '' });
+      return f;
+    }).filter(Boolean);
+  }
 
   // ---- Loading ------------------------------------------------------------------------------------------------------------
   async function loadFromUrl() {
@@ -228,6 +288,7 @@
     state.settings = await MDM.store.settings();
     const stops = o.route && o.route.stops && o.route.stops.length ? o.route.stops : (o.status === 'cancelled' ? [] : await MDM.store.buildStops(o));
     const driver = o.driverId ? await MDM.store.get('drivers', o.driverId) : null;
+    const account = o.accountId ? await MDM.store.get('business_accounts', o.accountId) : null;
     const ids = new Set();
     stops.forEach(s => { [s.photoId, s.proofPhotoId].forEach(id => { if (id) ids.add(id); }); });
     (o.packages || []).forEach(p => { if (p.photoId) ids.add(p.photoId); });
@@ -236,13 +297,16 @@
     for (const id of ids) files[id] = await MDM.store.get('files', id);
     await watchDriver(driver ? o.driverId : null);
     if (seq !== renderSeq) return;
-    state.stops = stops; state.driver = driver;
+    state.stops = stops; state.driver = driver; state.account = account;
+    state.receiver = receiverView(o);
     const refs = {};
     const parts = [buildHead(o, refs), buildNotices(o, stops), buildProgress(o)];
     if (NO_MAP.indexOf(o.status) < 0 || stops.length) parts.push(buildRoute(o, stops));
     else destroyMap();
     if (driver) parts.push(buildDriver(o, driver, refs));
-    parts.push(buildPrice(o), buildPayment(o));
+    parts.push(buildDelivery(o));
+    if (state.receiver) parts.push(buildArranged(o));
+    else parts.push(buildPrice(o), buildPayment(o));
     const details = buildDetails(o);
     if (details) parts.push(details);
     const proofs = buildProofs(o, stops, files);
@@ -255,14 +319,22 @@
     updateLive();
   }
 
-  function summaryLine(o) {
+  // '1 × Bag, 2 × Box': the packages by size category.
+  function pkgText(o) {
     const counts = {};
     (o.packages || []).forEach(p => { counts[p.size] = (counts[p.size] || 0) + 1; });
-    const pk = Object.keys(counts).map(k => counts[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(', ');
+    return Object.keys(counts).sort((a, b) => SIZE_ORDER.indexOf(a) - SIZE_ORDER.indexOf(b)).map(k => counts[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(', ');
+  }
+  function summaryLine(o) {
+    const pk = pkgText(o);
     const parts = [MDM.requestTypeLabel(o.requestType)];
     if (o.serviceLevel === 'express') parts.push('Express');
     if (pk) parts.push(pk);
     parts.push(MDM.geo.zoneShort((o.collection || {}).zone) + ' to ' + MDM.geo.zoneShort((o.delivery || {}).zone));
+    const d = o.delivery || {};
+    if (d.method === 'boat') parts.push(vesselLabel((d.boat || {}).vesselType).replace(' (dhoni)', '') + ((d.boat || {}).island ? ' to ' + d.boat.island : ''));
+    else if (d.method === 'cargo') parts.push('Maldivian Cargo' + ((d.cargo || {}).island ? ' to ' + d.cargo.island : ''));
+    else if (d.method === 'airport') parts.push('Airport delivery' + ((d.airport || {}).resort ? ' for ' + d.airport.resort : ''));
     const s = o.schedule || {};
     if (s.type === 'advance' && s.collectDate) parts.push('collect ' + fmtDate(s.collectDate, { dateOnly: true }) + ' ' + (s.collectTime || ''));
     return parts.join(' · ');
@@ -328,13 +400,14 @@
     if (state.isNew && o.status === 'requested') items.push(notice('ok', 'Request sent', 'Your order code is ' + o.code + '. Keep it to track this delivery. We message you ' + channelOn + ' once the price is confirmed.', { testid: 'track-new' }));
     switch (o.status) {
       case 'requested': {
-        const est = o.estimate || {};
-        const range = est.min != null ? (est.min === est.max ? fmt(est.min) : fmt(est.min) + ' to ' + fmt(est.max).replace('MVR ', '')) : fmt(o.totals.total);
+        if (state.receiver) { items.push(notice('info', 'Delivery booked by ' + businessName(o), 'We confirm the booking and assign a driver.')); break; }
+        const est = estimateOf(o), range = rangeText(est.min, est.max);
         const photo = (o.packages || []).some(x => x.photoId);
         items.push(notice('warn', 'We are confirming your price', 'Estimated ' + range + '. ' + (photo ? 'We are checking your package photo' : 'Our team checks the details') + (ops.reviewText ? ', usually within ' + ops.reviewText : '') + ', then message you ' + channelOn + '.'));
         break;
       }
       case 'confirmed':
+        if (state.receiver) { items.push(notice('info', 'Order confirmed', 'We are assigning a driver.')); break; }
         items.push(notice('info', 'Order confirmed', 'Final price ' + fmt(o.totals.total) + '. We are assigning a driver' + (o.schedule && o.schedule.type === 'advance' ? ' for your booked time' : '') + '.'));
         break;
       case 'assigned': case 'dispatched':
@@ -356,6 +429,15 @@
         items.push(notice('info', null, 'We could not deliver this package, so it went back to the sender.'));
         break;
       case 'cancelled': {
+        // A business cancelled one of its orders (§5.5): after collection the package goes back to the sender.
+        if (isBusinessCancel(o)) {
+          const c0 = o.cancellation || {}, why = o.cancelReason || c0.reason;
+          const body = [why ? 'Reason: ' + why + '.' : '',
+            c0.returnStatus === 'pending' ? 'The package was already with us, so it is being returned to the sender.' : '',
+            c0.returnStatus === 'done' ? 'Returned to the sender' + (c0.returnedAt ? ' on ' + fmtDate(c0.returnedAt) : '') + '.' : ''].filter(Boolean).join(' ');
+          items.push(notice('danger', 'Cancelled by ' + businessName(o), body || 'This delivery will not go ahead.', { testid: 'track-business-cancel' }));
+          break;
+        }
         const refund = p.refund;
         let body = (o.cancelledBy === 'customer' || (o.cancellation && o.cancellation.status === 'approved') ? 'Cancelled at your request' : 'We cancelled this order') + (o.cancelReason ? ': ' + o.cancelReason : '') + '.';
         if (refund) body += ' ' + fmt(refund.amount) + ' was sent to ' + (bankName(refund.toBank) || 'your bank') + (refund.at ? ' on ' + fmtDate(refund.at, { time: false }) : '') + '.';
@@ -365,6 +447,13 @@
       }
       default: break;
     }
+    // Extra vehicle (§2.3): the customer asked for it; our team confirms the charge with the price.
+    if (o.extraVehicle && !priceConfirmed(o) && o.status !== 'cancelled' && !state.receiver) items.push(notice('info', 'Extra vehicle requested, charge confirmed by our team', 'More than one box or XL package can need a second vehicle. We add the vehicle charge when we confirm your price, before collection.', { testid: 'track-extra-vehicle' }));
+    // Cash on delivery on a business order (§5.6): the receiver pays the driver.
+    const cod = o.cod;
+    if (cod && cod.amount > 0 && cod.status === 'pending' && TERMINAL.indexOf(o.status) < 0) items.push(state.receiver
+      ? notice('warn', 'Pay ' + fmt(cod.amount) + ' in cash to the driver', 'Cash on delivery for ' + businessName(o) + '. Have ' + fmt(cod.amount) + ' ready in cash when the package arrives.', { testid: 'track-cod' })
+      : notice('warn', 'Cash on delivery ' + fmt(cod.amount), 'The receiver pays the driver ' + fmt(cod.amount) + ' in cash when the package is delivered.', { testid: 'track-cod' }));
     // Cancellation request (requirements §9)
     const c = o.cancellation || {};
     if (c.status === 'requested') items.push(notice('warn', 'Cancellation requested', 'We received your request' + (c.reason ? ' (' + c.reason + ')' : '') + ' and will confirm shortly.', { testid: 'track-cancel-pending' }));
@@ -401,7 +490,7 @@
       const cls = ['timeline__item', current ? 'is-current' : done ? 'is-done' : 'is-upcoming'];
       return el('li', { class: cls, 'data-status': st, 'data-testid': 'track-step' },
         el('div', { class: 'timeline__label' }, MDM.STATUS[st].customer),
-        h ? el('div', { class: 'timeline__time' }, fmtDate(h.at) + ' · ' + MDM.byName(h.by)) : null);
+        h ? el('div', { class: 'timeline__time' }, fmtDate(h.at) + ' · ' + who(h.by)) : null);
     });
     if (stopped) {
       const h = reached[o.status];
@@ -409,9 +498,27 @@
       // A cancelled or returned order ends here; a failed one can still resume, so its remaining steps stay listed.
       if (o.status !== 'failed') items.splice(cut);
       items.splice(cut, 0, el('li', { class: 'timeline__item is-current track-step--stop', 'data-status': o.status, 'data-testid': 'track-step' },
-        el('div', { class: 'timeline__label' }, MDM.STATUS[o.status].customer), h ? el('div', { class: 'timeline__time' }, fmtDate(h.at) + ' · ' + MDM.byName(h.by)) : null));
+        el('div', { class: 'timeline__label' }, MDM.STATUS[o.status].customer), h ? el('div', { class: 'timeline__time' }, fmtDate(h.at) + ' · ' + who(h.by)) : null));
+      const ret = (o.cancellation || {}).returnStatus;
+      if (o.status === 'cancelled' && (ret === 'pending' || ret === 'done')) {
+        const cx = o.cancellation;
+        items.splice(cut + 1, 0, el('li', { class: ['timeline__item', ret === 'done' ? 'is-done' : 'is-upcoming'], 'data-status': 'return', 'data-testid': 'track-step' },
+          el('div', { class: 'timeline__label' }, ret === 'done' ? 'Returned to the sender' : 'Being returned to the sender'),
+          ret === 'done' && cx.returnedAt ? el('div', { class: 'timeline__time' }, fmtDate(cx.returnedAt) + (cx.returnedBy ? ' · ' + who(cx.returnedBy) : '')) : null));
+      }
     }
     const p = o.payment || {};
+    if (state.receiver) {
+      // The receiver's only payment is the cash on delivery; the delivery itself is on the business's account.
+      const cod = o.cod;
+      if (cod && cod.amount > 0 && !(o.status === 'cancelled' && cod.status === 'not_collected')) {
+        const paid = ['collected', 'with_office', 'remitted'].indexOf(cod.status) >= 0;
+        items.push(el('li', { class: ['timeline__item', paid ? 'is-done' : 'is-upcoming'], 'data-status': 'payment', 'data-testid': 'track-step' },
+          el('div', { class: 'timeline__label' }, paid ? 'Cash paid to the driver' : cod.status === 'not_collected' ? 'Cash on delivery not collected' : 'Cash on delivery ' + fmt(cod.amount)),
+          paid && cod.collectedAt ? el('div', { class: 'timeline__time' }, fmtDate(cod.collectedAt)) : null));
+      }
+      return section('track-progress-h', 'Progress', el('ol', { class: 'timeline track-progress', 'data-testid': 'track-progress' }, items));
+    }
     const payDone = p.status === 'paid' || p.status === 'refunded';
     const payCurrent = p.status === 'requested' || p.status === 'received';
     const payLabel = p.method === 'invoice' ? 'Payment on the monthly invoice' : 'Payment';
@@ -435,7 +542,7 @@
       if (x.meetAt && MEET_AT[x.meetAt]) meta.push(MEET_AT[x.meetAt]);
       if (x.type !== 'pickup' && x.contact && x.contact.name) meta.push('Recipient ' + x.contact.name);
       if (x.cargo && x.cargo.boat) meta.push('Boat ' + x.cargo.boat + (x.cargo.time ? ', ' + x.cargo.time : ''));
-      const aside = x.status === 'done' ? fmtWhen(x.at) : x.status === 'failed' ? "Couldn't complete" : x.status === 'arrived' ? 'Driver arrived' : x.status === 'skipped' ? 'Skipped' : isCurrent ? 'Next' : 'Pending';
+      const aside = x.status === 'done' ? fmtWhen(x.at) : x.status === 'failed' ? "Couldn't complete" : x.status === 'skipped' ? 'Skipped' : o.status === 'cancelled' ? 'Cancelled' : x.status === 'arrived' ? 'Driver arrived' : isCurrent ? 'Next' : 'Pending';
       const shopName = x.shop ? String(x.label || '').replace(/^Shop: /, '') : '';
       const title = shopName ? shopName + (x.address && x.address !== shopName ? ' · ' + x.address : '') : x.address;
       const attrs = { class: cls, 'data-testid': 'track-stop', dataset: { stopId: x.id, status: x.status } };
@@ -465,33 +572,146 @@
     return section('track-driver-h', 'Your driver', el('div', { class: 'card', 'data-testid': 'track-driver' }, el('div', { class: 'rate-table' }, rows)));
   }
 
+  // ---- Delivery method and its details (web app updates §3) ---------------------------------------------------------------------
+  function boatChangeText(h) {
+    const val = (k, v) => {
+      if (v == null || v === '') return 'not set';
+      if (k === 'vesselType') return vesselLabel(v);
+      if (k === 'jetty') return jettyLabel(v);
+      if (k === 'departureDate') return dayText(v);
+      if (k === 'contact') return MDM.ui.phone.format(v) || v;
+      return String(v);
+    };
+    return Object.keys(h.to || {}).map(k => (BOAT_FIELD[k] || k) + ': ' + val(k, (h.from || {})[k]) + ' to ' + val(k, h.to[k])).join(' · ');
+  }
+  function buildDelivery(o) {
+    const d = o.delivery || {}, method = d.method || 'home';
+    const rows = [row('Method', el('span', { 'data-testid': 'track-method' }, MDM.deliveryMethodLabel(method)))];
+    const add = (label, v, opts) => { if (v != null && String(v).trim()) rows.push(row(label, String(v), opts)); };
+    const receiver = [d.recipientName, phoneTail(d.recipientPhone)].filter(Boolean).join(', ');
+    const extra = [];
+    if (method === 'boat') {
+      const b = d.boat || {};
+      add('Vessel', vesselLabel(b.vesselType) + (b.name ? ', ' + b.name : ''));
+      add('Departure', departText(b.departureDate, b.departureTime));
+      add('Harbour or jetty', jettyLabel(b.jetty));
+      add('Island', b.island);
+      add('Destination address', b.address);
+      add('Receiver', receiver);
+      const hist = (b.history || []).slice().reverse();
+      if (hist.length) extra.push(el('div', { class: 'track-sub' }, el('h3', { class: 'track-h3' }, 'Boat changes'),
+        el('ol', { class: 'timeline', 'data-testid': 'track-boat-history' }, hist.map(h => {
+          const reason = (MDM.BOAT_CHANGE_REASONS.find(r => r.value === h.reason) || {}).label;
+          return el('li', { class: 'timeline__item is-done', 'data-testid': 'track-boat-change' },
+            el('div', { class: 'timeline__label' }, 'Boat details updated' + (reason ? ': ' + reason.charAt(0).toLowerCase() + reason.slice(1) : '')),
+            el('div', { class: 'timeline__detail' }, boatChangeText(h) + (h.note ? '. ' + h.note : '')),
+            el('div', { class: 'timeline__time' }, fmtDate(h.at) + (h.by ? ' · ' + who(h.by) : '')));
+        }))));
+    } else if (method === 'cargo') {
+      const c = d.cargo || {};
+      add('Drop-off', c.counter || MDM.geo.cargoCounter().label);
+      add('Destination island', c.island);
+      add('Consignee', c.consignee);
+      add('Receiver', receiver);
+      // The cargo fee is itemised once, in the Price section (§3.3); a second row here read as a second charge.
+    } else if (method === 'airport') {
+      const a = d.airport || {};
+      add('Collection point', 'Velana International Airport, ' + pointLabel(a.point || 'resort_counters'));
+      add('Counter', a.counter);
+      add('Resort or destination', a.resort);
+      if (a.speedboat) add('Resort speedboat', [a.speedboat, a.departureTime ? 'departs ' + a.departureTime : ''].filter(Boolean).join(', '));
+      else add('Departure', a.departureTime);
+      add('Receiver', receiver);
+      add('Handover instructions', a.instructions);
+    } else {
+      // Several packages to different addresses: one row per drop-off, in the order the route visits them.
+      const drops = [], seen = {};
+      (o.packages || []).forEach(p => { const e = p.dropoff || {}, r = e.recipient || {}, k = (e.address || '') + '|' + (r.name || ''); if (e.address && !seen[k]) { seen[k] = 1; drops.push(e); } });
+      if (drops.length > 1) drops.forEach((e, i) => rows.push(row('Delivery ' + (i + 1), [e.address, e.zone ? MDM.geo.zoneLabel(e.zone) : ''].filter(Boolean).join(', '),
+        { valueSub: [e.recipient && e.recipient.name, phoneTail(e.recipient && e.recipient.phone), (MEET_AT[e.meetAt] || '').toLowerCase()].filter(Boolean).join(', ') || null })));
+      else {
+        add('Address', [d.address, d.zone ? MDM.geo.zoneLabel(d.zone) : ''].filter(Boolean).join(', '));
+        add('Landmark', d.landmark);
+        add('Handover', MEET_AT[d.meetAt] || '');
+        add('Receiver', receiver);
+      }
+    }
+    add('Instructions', d.instructions);
+    return section('track-delivery-h', 'Delivery', el('div', { class: 'rate-table', 'data-testid': 'track-delivery', 'data-method': method }, rows), extra);
+  }
+
   // ---- Price: estimated until our team confirms it (requirements §3 step 4, §15) ---------------------------------------------
+  // Confirmed: every line (store items, packages, shopping budget, fees, extra vehicle, billable charges). Estimated: the delivery
+  // range, the shopping budget and the fixed fees (airport, cargo, shopping), which add up to the estimated total; the rest waits for
+  // our team. Packages show their size category only, never measurements (§2.2).
+  function priceLine(desc, sub, amount, opts) {
+    opts = opts || {};
+    return el('div', { class: ['summary__line', opts.fee ? 'summary__line--fee' : null], dataset: opts.key ? { fee: opts.key } : null, 'data-testid': opts.testid || null },
+      el('span', { class: 'summary__desc' }, desc, sub ? el('span', { class: 'summary__sub' }, sub) : null),
+      el('span', { class: 'summary__amount mono' }, typeof amount === 'string' ? amount : fmt(amount)));
+  }
   function buildPrice(o) {
     const confirmed = priceConfirmed(o);
+    const changes = confirmed ? sizeChanges(o) : [];
+    const firstFrom = {};
+    changes.forEach(c => { if (!firstFrom[c.pkgId]) firstFrom[c.pkgId] = c.from; });
     const lines = [];
-    if (o.items && o.items.length) o.items.forEach(it => lines.push(el('div', { class: 'summary__line' },
-      el('span', { class: 'summary__desc' }, it.qty + ' × ' + it.name), el('span', { class: 'summary__amount mono' }, fmt(it.total)))));
-    o.packages.forEach(p => lines.push(el('div', { class: 'summary__line' },
-      el('span', { class: 'summary__desc' }, MDM.pricing.lineLabel(p, o.service), el('span', { class: 'summary__sub' }, [p.description, p.dims ? p.dims.l + ' × ' + p.dims.w + ' × ' + p.dims.h + ' cm' : null].filter(Boolean).join(' · '))),
-      el('span', { class: 'summary__amount mono' }, fmt(p.price ? p.price.lineTotal : 0)))));
-    if (o.service === 'shop' && o.totals.budget) {
-      const receipt = o.packages.some(p => p.shop && p.shop.receiptTotal > 0);
-      lines.push(el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, receipt ? 'Shopping receipt' : 'Shopping budget'), el('span', { class: 'summary__amount mono' }, fmt(o.totals.budget))));
+    const budget = o.service === 'shop' ? o.totals.budget || 0 : 0;
+    const budgetLine = sub => priceLine((o.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) ? 'Shopping receipt' : 'Shopping budget', sub, budget, { testid: 'track-budget-line' });
+    const fees = feeRows(o).filter(f => confirmed || FIXED_FEES.indexOf(f.key) >= 0);
+    const est = estimateOf(o);
+    if (confirmed) {
+      (o.items || []).forEach(it => lines.push(priceLine(it.qty + ' × ' + it.name, null, it.total)));
+      o.packages.forEach(p => lines.push(priceLine(MDM.pricing.lineLabel(p, o.service),
+        [p.description, p.price && p.price.businessRate && p.tier ? tierLabel(p.tier) + ' business rate' : null,
+          firstFrom[p.id] && firstFrom[p.id] !== p.size ? 'changed from ' + MDM.pricing.sizeLabel(firstFrom[p.id]) + ' by our team' : null].filter(Boolean).join(' · '),
+        p.price ? p.price.lineTotal : 0, { testid: 'track-package-line' })));
+      if (budget) lines.push(budgetLine(null));
+    } else {
+      // The delivery part of the estimate is what is left once the budget and the fixed fees are taken out.
+      const fixed = fees.reduce((n, f) => n + (Number(f.amount) || 0), 0) + budget;
+      lines.push(priceLine('Delivery', pkgText(o), rangeText(Math.max(0, est.min - fixed), Math.max(0, est.max - fixed)), { testid: 'track-delivery-line' }));
+      if (budget) lines.push(budgetLine('Paid upfront; we refund what is not spent'));
     }
-    MDM.pricing.feeLines(o, state.settings).forEach(f => lines.push(el('div', { class: 'summary__line summary__line--fee', dataset: { fee: f.key } },
-      el('span', { class: 'summary__desc' }, f.label, f.reason ? el('span', { class: 'summary__sub' }, f.reason) : null),
-      el('span', { class: 'summary__amount mono' }, fmt(f.amount)))));
-    const est = o.estimate || {};
-    const total = confirmed ? fmt(o.totals.total) : (est.min != null && est.min !== est.max ? fmt(est.min) + ' to ' + fmt(est.max).replace('MVR ', '') : fmt(o.totals.total));
-    const card = el('div', { class: 'summary', 'data-testid': 'track-summary' }, confirmed ? lines : null, confirmed ? el('div', { class: 'summary__rule' }) : null,
+    fees.forEach(f => lines.push(priceLine(f.label, f.key === 'cargo' ? 'Charged only for this delivery method' : f.reason, f.amount, { fee: true, key: f.key, testid: f.key === 'cargo' ? 'track-cargo-fee' : null })));
+    const total = confirmed ? fmt(o.totals.total) : rangeText(est.min, est.max);
+    const card = el('div', { class: 'summary', 'data-testid': 'track-summary' }, lines, lines.length ? el('div', { class: 'summary__rule' }) : null,
       el('div', { class: 'summary__total' }, el('span', null, confirmed ? 'Confirmed total' : 'Estimated total'), el('span', { class: 'mono', 'data-testid': 'track-total' }, total)));
-    const body = [card];
+    const body = [];
+    if (changes.length) body.push(MDM.ui.notice('info', el('ul', { class: 'track-changes' }, changes.map(c =>
+      el('li', null, (o.packages.length > 1 && c.n ? 'Package ' + c.n + ': ' : '') + MDM.pricing.sizeLabel(c.from) + ' to ' + MDM.pricing.sizeLabel(c.to) + ' · ' + fmtDate(c.at)))),
+      { title: 'Package category changed by our team', testid: 'track-size-changes' }));
+    body.push(card);
     if (!confirmed) body.push(el('p', { class: 'track-summary-note small muted' }, 'Our team confirms the final price, including any vehicle or size charge, before collection.'));
-    else if (o.pricing.confirmedAt) body.push(el('p', { class: 'track-summary-note small muted' }, 'Confirmed ' + fmtDate(o.pricing.confirmedAt) + ' by ' + MDM.byName(o.pricing.confirmedBy) + (o.pricing.remarks ? ': ' + o.pricing.remarks : '') + '.'));
+    else if (o.pricing.confirmedAt) {
+      // A size change or a charge after confirmation updates the price; say when, so the confirmed time does not look stale.
+      const last = (o.pricing.history || []).slice(-1)[0];
+      const later = last && last.at && Date.parse(last.at) > Date.parse(o.pricing.confirmedAt) + 1000 ? ' Updated ' + fmtDate(last.at) + '.' : '';
+      body.push(el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-confirmed-note' }, 'Confirmed ' + fmtDate(o.pricing.confirmedAt) + ' by ' + who(o.pricing.confirmedBy) + (o.pricing.remarks ? ': ' + o.pricing.remarks : '') + '.' + later));
+    }
+    if (isBusinessOrder(o)) body.push(el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-business-only' }, 'You see this price because you are signed in as ' + businessName(o) + '. Your receiver sees who arranged the delivery and the cash to pay, not your rate.'));
     if (confirmed && o.payment.method !== 'invoice') body.push(el('a', { class: 'btn btn--secondary btn--sm track-invoice', href: MDM.href('invoice/?order=' + encodeURIComponent(o.code)), 'data-testid': 'track-invoice' }, html(MDM.icon('receipt', 16)), 'View invoice'));
     return section('track-totals-h', 'Price', body);
   }
 
+  // The receiver of a business order: who arranged the delivery and the cash to pay the driver, never the business's rate or invoice.
+  function codRow(o) {
+    const cod = o.cod && o.cod.amount > 0 ? o.cod : null, st = cod ? cod.status : 'none';
+    const paid = ['collected', 'with_office', 'remitted'].indexOf(st) >= 0;
+    const cancelled = o.status === 'cancelled' && (st === 'not_collected' || st === 'pending');
+    const label = paid ? 'Cash paid to the driver' : st === 'not_collected' && !cancelled ? 'Cash on delivery' : 'Cash to pay the driver';
+    const text = !cod ? 'Nothing to pay' : cancelled ? 'Nothing, the order was cancelled' : st === 'pending' ? fmt(cod.amount) : codText(o, true).replace(' paid in cash', '');
+    return row(label, el('span', { 'data-testid': 'track-cod-status', 'data-status': st }, text), { mono: st === 'pending' });
+  }
+  function buildArranged(o) {
+    const name = businessName(o);
+    const rows = [row('Delivery arranged by', el('span', { 'data-testid': 'track-arranged-by' }, name)),
+      row('Delivery charge', 'Billed to ' + name),
+      codRow(o)];
+    return section('track-payment-h', 'Payment', el('div', { class: 'rate-table', 'data-testid': 'track-arranged' }, rows),
+      el('p', { class: 'track-summary-note small muted' }, 'Questions about the price of your order go to ' + name + '. ',
+        el('a', { href: MDM.href('login/?as=business&next=' + encodeURIComponent('track/?code=' + o.code)), 'data-testid': 'track-business-signin' }, 'Are you ' + name + '? Sign in to see your price')));
+  }
   function buildPayment(o) {
     const p = o.payment || {};
     const rows = [row('Status', html(MDM.payBadge(p.status))), row('Method', p.method === 'invoice' ? 'Monthly business invoice' : 'Bank transfer')];
@@ -504,6 +724,8 @@
       if (p.verifiedAt && p.status === 'paid') rows.push(row('Verified', fmtDate(p.verifiedAt)));
       if (p.refund) rows.push(row('Refund', fmt(p.refund.amount) + (p.refund.at ? ' on ' + fmtDate(p.refund.at, { time: false }) : ''), { mono: true }));
     }
+    const cod = o.cod;
+    if (cod && cod.amount > 0) rows.push(row('Cash on delivery', el('span', { 'data-testid': 'track-cod-status', 'data-status': cod.status }, codText(o, false)), { valueSub: MDM.COD_STATUS[cod.status] && ['collected', 'with_office', 'remitted'].indexOf(cod.status) >= 0 ? MDM.COD_STATUS[cod.status].label : null }));
     const st = o.settlement;
     if (o.service === 'shop' && st) {
       const text = st.status === 'refund_due' ? 'We owe you ' + fmt(st.balance) : st.status === 'topup_due' ? 'Please pay the difference ' + fmt(Math.abs(st.balance)) : 'Settled' + (st.reference ? ' (' + st.reference + ')' : '');
@@ -523,7 +745,8 @@
       add('Carrier', (MDM.CARRIERS.find(c => c.value === d.carrier) || {}).label);
       add('Location', (MDM.PIKPOST_LOCATIONS.find(x => x.value === d.location) || {}).label);
       add('Post office', (MDM.POST_OFFICES.find(x => x.value === d.postOffice) || {}).label);
-      add('Courier', d.courierName); add('Collection code', d.collectionCode); add('Collect before', d.collectBefore); add('Tracking number', d.trackingNo);
+      add('Courier', d.courierName); add('Courier office', d.courierAddress);
+      add(d.carrier === 'dhl' ? 'Waybill or tracking number' : 'Tracking number', d.trackingNo); add('Collection code', d.collectionCode); add('Collect before', d.collectBefore);
       add('Owner', d.ownerName); add('Owner contact', d.ownerContact ? MDM.ui.phone.format(d.ownerContact) : ''); add('Shipping address', d.shippingAddress); add('Note', d.idNote || d.smsNote);
     } else if (t === 'airport') {
       add('Service', (MDM.AIRPORT_MODES.find(x => x.value === d.mode) || {}).label);
@@ -535,10 +758,16 @@
     } else if (t === 'shop_collect') {
       add('Shop', d.shopName); add('Proof', { invoice: 'Invoice', quotation: 'Quotation and payment slip', order_no: 'Order number' }[d.proof]); add('Order number', d.orderNo);
     } else if (t === 'shop_buy' || o.service === 'shop') {
-      const shop = (o.packages.find(p => p.shop) || {}).shop || {};
-      add('Shop', shop.name || d.shopName); add('List', shop.list || d.list); add('Budget', shop.budget ? fmt(shop.budget) : '');
-    } else if (t === 'bulk') {
+      const shop = (o.packages.find(p => p.shop) || {}).shop || {}, ds = d.shop || {};
+      add('Shop', [ds.name || shop.name || d.shopName, ds.address || shop.address].filter(Boolean).join(', '));
+      if (!(d.items && d.items.length)) add('List', shop.list || d.list);
+      const budget = d.budget || shop.budget;
+      add('Budget', budget ? fmt(budget) : '');
+    } else if (t === 'bulk' || t === 'business' || o.service === 'business') {
+      add('Sender', businessName(o));
       add('Reference', d.reference);
+      const tiers = [...new Set((o.packages || []).map(p => p.tier).filter(Boolean))];
+      if (tiers.length) add('Package size', tiers.map(tierLabel).join(', '));
     }
     const s = o.schedule || {};
     if (s.type === 'advance') { add('Collection', fmtDate(s.collectDate, { dateOnly: true }) + ' ' + (s.collectTime || '')); add('Delivery', fmtDate(s.deliverDate, { dateOnly: true }) + ' ' + (s.deliverTime || '')); }
@@ -547,8 +776,13 @@
     if (pr.status === 'approved' && pr.level !== 'normal') add('Priority', (MDM.PRIORITY_LEVELS.find(x => x.value === pr.level) || {}).label);
     const last = (pr.requests || []).slice(-1)[0];
     if (last && last.deadline) add('Deadline', last.deadline);
-    if (!rows.length) return null;
-    return section('track-details-h', MDM.requestTypeLabel(t) + ' details', el('div', { class: 'rate-table', 'data-testid': 'track-details' }, rows));
+    const items = (o.service === 'shop' || t === 'shop_buy') && Array.isArray(d.items) ? d.items.filter(i => i && i.name) : [];
+    if (!rows.length && !items.length) return null;
+    const list = items.length ? el('div', { class: 'track-sub' }, el('h3', { class: 'track-h3' }, 'Items to buy'),
+      el('ul', { class: 'list track-items', 'data-testid': 'track-items' }, items.map(i => el('li', { class: 'list__item', 'data-testid': 'track-item' },
+        el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, (i.qty || 1) + ' × ' + i.name),
+          i.details || i.instructions ? el('div', { class: 'list__meta' }, [i.details, i.instructions].filter(Boolean).join(' · ')) : null))))) : null;
+    return section('track-details-h', MDM.requestTypeLabel(t) + ' details', rows.length ? el('div', { class: 'rate-table', 'data-testid': 'track-details' }, rows) : null, list);
   }
 
   // ---- Documents and proof photos (requirements §8, §13) -----------------------------------------------------------------------
@@ -584,10 +818,12 @@
   }
 
   function buildTimeline(o) {
-    const evs = (o.events || []).filter(e => e.visibility === 'public');
+    const confirmedLabel = MDM.STATUS.confirmed.customer;
+    const evs = (o.events || []).filter(e => e.visibility === 'public' && !(state.receiver && (RECEIVER_HIDDEN.indexOf(e.type) >= 0 || /MVR\s?\d/.test(e.label || ''))))
+      .map(e => state.receiver && e.type === 'confirmed' ? Object.assign({}, e, { label: confirmedLabel }) : e);
     const terminal = TERMINAL.indexOf(o.status) >= 0;
     const items = evs.slice().reverse().map((e, i) => el('li', { class: ['timeline__item', i === 0 && !terminal ? 'is-current' : 'is-done'], dataset: { eventId: e.id, type: e.type } },
-      el('div', { class: 'timeline__label' }, e.label), el('div', { class: 'timeline__time' }, fmtDate(e.at) + (e.by ? ' · ' + MDM.byName(e.by) : ''))));
+      el('div', { class: 'timeline__label' }, e.label), el('div', { class: 'timeline__time' }, fmtDate(e.at) + (e.by ? ' · ' + who(e.by) : ''))));
     return section('track-activity-h', 'Activity', el('ol', { class: 'timeline', 'data-testid': 'track-timeline' }, items));
   }
 

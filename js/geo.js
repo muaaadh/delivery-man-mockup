@@ -31,8 +31,11 @@
     { value: 'hulhumale_ferry', label: 'Hulhumalé ferry terminal', zone: 'hulhumale_p1', point: [4.2105, 73.5372] },
     { value: 'villimale_ferry', label: 'Villimalé ferry terminal', zone: 'villimale', point: [4.1745, 73.4870] },
     { value: 'mpl_harbour', label: 'MPL commercial harbour', zone: 'male', point: [4.1710, 73.5060] },
+    { value: 'male_jetties', label: 'Malé jetties 1 to 5 (speedboats)', zone: 'male', point: [4.1781, 73.5132] },
+    { value: 'maldivian_cargo', label: 'Maldivian Cargo counter, main bus terminal', zone: 'male', point: [4.1773, 73.5066], cargo: true },
   ];
   const AIRPORT_POINTS = [
+    { value: 'resort_counters', label: 'Resort counters, arrivals hall', point: [4.1913, 73.5277] },
     { value: 'arrivals', label: 'Arrivals hall', point: [4.1915, 73.5280] },
     { value: 'departures', label: 'Departures entrance', point: [4.1925, 73.5282] },
     { value: 'cargo', label: 'MACL cargo terminal', point: [4.1880, 73.5300] },
@@ -196,7 +199,8 @@
     island: k => (ZONES[k] || {}).island || 'other',
     zoneOptions: () => ZONE_LIST.map(z => ({ value: z.key, label: z.label })).concat([{ value: 'other', label: "Other (we'll confirm)" }]),
     isCrossIsland: (a, b) => { const ia = (ZONES[a] || {}).island, ib = (ZONES[b] || {}).island; return !!ia && !!ib && ia !== ib; },
-    terminals: () => TERMINALS.slice(), airportPoints: () => AIRPORT_POINTS.slice(), meetAtOptions: () => MEET_AT.slice(),
+    terminals: () => TERMINALS.slice(), jetties: () => TERMINALS.filter(t => !t.cargo), cargoCounter: () => TERMINALS.find(t => t.cargo),
+    airportPoints: () => AIRPORT_POINTS.slice(), meetAtOptions: () => MEET_AT.slice(),
     terminalPoint: v => (TERMINALS.find(t => t.value === v) || {}).point || null,
     airportPoint: v => (AIRPORT_POINTS.find(t => t.value === v) || {}).point || null,
     haversine, distanceKm, bearing, inHighway, geocodeZone, nearestNode, routeBetween, routeThrough,

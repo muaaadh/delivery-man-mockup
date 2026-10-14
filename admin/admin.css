@@ -18,6 +18,9 @@ body.page-admin .orders-toolbar + .filters__chips { margin-top: 12px; }
 body.page-admin .filters__chips + .card { margin-top: 12px; }
 body.page-admin .table .badge, body.page-admin .table td.table__primary, body.page-admin .table td.mono, body.page-admin .table .table__sub.mono { white-space: nowrap; }
 body.page-admin .card > .empty { padding-left: 16px; padding-right: 16px; }
+/* The request type under the order code ('Postal & courier collection') may wrap, so the table still fits 1280px. */
+body.page-admin .table td.table__primary > .table__sub:not(.mono) { white-space: normal; }
+@media (max-width: 720px) { body.page-admin .table--stack [data-testid="orders-row-method"] { text-align: right; } }
 
 /* Drawer content */
 body.page-admin .drawer__body > .drawer__section:first-child { padding-top: 16px; }
@@ -34,6 +37,43 @@ body.page-admin .thumb-btn:focus-visible { box-shadow: var(--focus); }
 body.page-admin .thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 body.page-admin .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 body.page-admin .timeline__flag { margin-left: 6px; }
+/* Order drawer, web app updates 11/10/2026: delivery methods, package categories, charges, cash on delivery, returns. */
+body.page-admin .drawer h4 { font-size: 13px; font-weight: 600; color: var(--text-2); }
+body.page-admin .vehicle-request { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 6px; font-weight: 500; }
+body.page-admin .pkg-label { padding: 12px 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface); font-size: 13px; line-height: 1.55; color: var(--text); overflow-wrap: anywhere; }
+body.page-admin .pkg-label__title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
+body.page-admin .drawer .list__aside > .row { flex-wrap: wrap; }
+body.page-admin .drawer .list__aside .badge { margin-top: 4px; }
+body.page-admin .drawer .list__aside > small { display: block; }
+body.page-admin .drawer .list__item.charge { flex-wrap: wrap; row-gap: 8px; }
+body.page-admin .charge__actions { flex: 1 1 100%; gap: 8px; }
+body.page-admin .charge.is-void .list__title, body.page-admin .charge.is-void .charge__amount { text-decoration: line-through; color: var(--text-3); }
+body.page-admin .item-list { margin-top: 16px; }
+body.page-admin .neworder-tier { margin-top: 8px; max-width: 340px; }
+/* New order, Shop & Deliver item rows: item, details and quantity on one line, special instructions under them. */
+body.page-admin .neworder-items { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 10px; }
+body.page-admin .neworder-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 88px; grid-template-areas: "head head head" "name details qty" "notes notes notes"; gap: 10px; padding: 10px 14px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+body.page-admin .neworder-item .field + .field { margin-top: 0; }
+body.page-admin .neworder-item__head { grid-area: head; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; color: var(--text); }
+body.page-admin .neworder-item__name { grid-area: name; }
+body.page-admin .neworder-item__details { grid-area: details; }
+body.page-admin .neworder-item__qty { grid-area: qty; }
+body.page-admin .neworder-item__notes { grid-area: notes; }
+body.page-admin .file-list { margin-top: 12px; }
+body.page-admin .file-grid + .file-list { margin-top: 16px; }
+body.page-admin .neworder-tier .select { width: 100%; }
+@media (max-width: 720px) {
+  /* Phones: small drawer buttons keep their look but get a 44px hit area, and list rows stack their actions under the text. */
+  body.page-admin .drawer .btn--sm { position: relative; }
+  body.page-admin .drawer .btn--sm::after { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
+  body.page-admin .drawer .row--wrap, body.page-admin .drawer .drawer-alert__actions { row-gap: 12px; }
+  body.page-admin .drawer .list__item[data-testid="drawer-package"], body.page-admin .drawer .list__item[data-testid="drawer-charge"], body.page-admin .drawer .list__item[data-testid="neworder-package"] { flex-wrap: wrap; }
+  body.page-admin .drawer .list__item[data-testid="drawer-package"] .list__main, body.page-admin .drawer .list__item[data-testid="drawer-charge"] .list__main, body.page-admin .drawer .list__item[data-testid="neworder-package"] .list__main { flex: 1 1 100%; }
+  body.page-admin .drawer .list__item[data-testid="drawer-package"] .list__aside, body.page-admin .drawer .list__item[data-testid="drawer-charge"] .list__aside, body.page-admin .drawer .list__item[data-testid="neworder-package"] .list__aside { flex: 1 1 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
+  body.page-admin .drawer .list__aside .row { margin-top: 0; }
+  body.page-admin .neworder-tier { max-width: none; }
+  body.page-admin .neworder-item { grid-template-columns: minmax(0, 1fr) 88px; grid-template-areas: "head head" "name name" "details details" "notes qty"; }
+}
 /* While a drawer is open its sticky footer sits bottom-right, exactly where toasts stack; move them out of the way. */
 body.page-admin.has-drawer .toasts { right: auto; left: 20px; }
 

@@ -90,6 +90,7 @@ MDM.packageEditor.create({
   first: pkg | null,              // package 1, enables "Same drop-off and recipient as package 1" (checked by default) for later packages
   me: { name, phone } | null,     // the customer, for "Same as me" / "Deliver to me"
   savedAddresses: [{ label, address, zone, meetAt }],   // optional, offers "Use a saved address"
+  dropoffKinds: 'address',        // optional: drop-off is a street address only (no cargo terminal, boat or airport zone); boat, Maldivian Cargo and airport are order-level delivery methods since 11/10/2026. The admin New order drawer passes it
   onSave(pkg), onCancel(),
 }) → { el: HTMLElement, validate() → boolean, getValue() → pkg, focus(), destroy() }
 MDM.packageEditor.summary(pkg, service) → { title, pickupLine, dropoffLine, flags: ['Fragile', 'Vehicle'] }

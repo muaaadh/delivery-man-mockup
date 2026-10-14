@@ -32,7 +32,9 @@ body.page-admin .filters__dash { font-size: 13px; color: var(--text-2); }
 body.page-admin .row-flags { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 body.page-admin td .row-flags { display: flex; margin-top: 4px; }
 body.page-admin td .row-flags .badge { font-size: 11px; }
-@media (max-width: 720px) { body.page-admin .filters__dates { flex: 1 1 100%; } body.page-admin .filters__dates .input { flex: 1 1 0; width: auto; } }
+@media (max-width: 720px) { body.page-admin .filters__dates { flex: 1 1 100%; min-width: 0; } body.page-admin .filters__dates .input { flex: 1 1 0; width: auto; } }
+/* A native date input will not shrink below about 170px, so on narrow phones the From / To pair stacks instead of overflowing. */
+@media (max-width: 400px) { body.page-admin .filters__dates { flex-wrap: wrap; row-gap: 4px; } body.page-admin .filters__dates .input { flex: 1 1 100%; } }
 
 /* ---------- Order drawer ---------- */
 body.page-admin .drawer__footer { flex-wrap: wrap; }
@@ -94,3 +96,54 @@ body.page-admin .chip-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 body.page-admin .table--compact td.num, body.page-admin .table--compact th.num { white-space: nowrap; }
 body.page-admin .auth__note { margin-top: 12px; font-size: 13px; text-align: center; }
 body.page-admin .view--forbidden .card__body { padding: 20px; }
+
+/* ---------- Bulk order detail: delivery method, size and rate, cash, business cancellations ---------- */
+body.page-admin .bulk-delivery__method { color: var(--text-2); }
+body.page-admin .table td.table__actions .bulk-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+body.page-admin .bulk-delivery__action { display: block; margin-top: 4px; }
+
+body.page-admin .bulk-status .table__sub .badge { margin-top: 2px; }
+body.page-admin .bulk-zone .table td .table__sub .badge { font-size: 11px; }
+@media (max-width: 720px) { body.page-admin .table td.table__actions .bulk-actions { flex-direction: row; flex-wrap: wrap; align-items: center; } }
+
+/* ---------- Cash & COD: one card per driver / business, naalu by day ---------- */
+body.page-admin .cash-tabs .tabs { margin-bottom: 0; }
+body.page-admin .cash-filters .filters { gap: 8px 12px; }
+body.page-admin .cash-group__title { min-width: 0; }
+body.page-admin .cash-group__title h3 { font-size: 15px; line-height: 1.4; }
+body.page-admin .cash-group__sub { display: block; font-size: 13px; color: var(--text-2); }
+body.page-admin .cash-group__total { font-size: 15px; font-weight: 600; white-space: nowrap; }
+body.page-admin .card__header:has(.cash-group__title) { flex-wrap: wrap; }
+body.page-admin .cash-diff--short { color: var(--danger); font-weight: 500; }
+body.page-admin .cash-diff--over { color: var(--warn); font-weight: 500; }
+body.page-admin .naalu-day + .naalu-day { border-top: 1px solid var(--border); }
+body.page-admin .naalu-day__head { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--text-2); background: var(--surface); }
+body.page-admin .naalu-day .list__item { padding-left: 16px; padding-right: 16px; }
+body.page-admin .naalu-day .list__title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.page-admin .naalu-aside { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+body.page-admin .naalu-aside .mono { font-size: 15px; color: var(--text); }
+@media (min-width: 721px) { body.page-admin .naalu-day__head, body.page-admin .naalu-day .list__item { padding-left: 20px; padding-right: 20px; } }
+@media (max-width: 720px) { body.page-admin .cash-filters .filters__dates { flex: 1 1 100%; } }
+
+/* ---------- Team: accumulated off days ---------- */
+body.page-admin .offdays { display: block; }
+body.page-admin .offdays__value { display: flex; align-items: center; gap: 8px; }
+body.page-admin .offdays__value .mono { font-size: 15px; font-weight: 600; min-width: 1.5em; }
+body.page-admin .table .offdays__sub { white-space: normal; max-width: 200px; }
+@media (max-width: 720px) { body.page-admin .offdays__value { justify-content: flex-end; } body.page-admin .table .offdays__sub { max-width: none; text-align: right; } }
+
+body.page-admin .kpi-row--bulk { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+body.page-admin .kpi-row--bulk .kpi__value { font-size: 22px; }
+body.page-admin .bulk-status { display: block; }
+body.page-admin .table td.table__primary .bulk-status__note, body.page-admin .table td .bulk-tier .table__sub, body.page-admin .table td .bulk-delivery .table__sub { white-space: normal; max-width: 180px; overflow-wrap: anywhere; }
+@media (max-width: 1100px) { body.page-admin .kpi-row--bulk { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) { body.page-admin .kpi-row--bulk { grid-template-columns: repeat(2, minmax(0, 1fr)); } body.page-admin .table td.table__primary .bulk-status__note { max-width: none; } }
+
+/* ---------- Phones: every button, field, tab and chip of these views (and of dialogs and drawers) gets a 44px tap height ---------- */
+@media (max-width: 720px) {
+  body.page-admin :is(.view--orders, .view--cash, .view--bulk, .view--business, .view--rates, .view--settings, .view--team, .view--reports, .view--notifications) :is(.btn, .btn--sm, .chip),
+  body.page-admin :is(.dialog, .drawer) :is(.btn, .btn--sm) { min-height: 44px; height: auto; }
+  body.page-admin :is(.view--orders, .view--cash, .view--bulk, .view--business, .view--rates, .view--settings, .view--team, .view--reports, .view--notifications) :is(.input, .select, .tab),
+  body.page-admin :is(.dialog, .drawer) :is(.input, .select) { height: 44px; }
+}
+body.page-admin .filters > .range-warning { flex: 1 1 100%; margin-top: 4px; }

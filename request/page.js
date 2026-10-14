@@ -1,61 +1,83 @@
-// Request a delivery (client requirements §3, §5, §6, §12): six steps in one form.
-//   1 Service: request type (home, shop, postal, airport, office) with its own fields, and normal / express / advance timing
-//   2 Collection: address, zone, landmark, contact, instructions (postal and airport types fill this in for you)
-//   3 Packages: quantity per size with a live estimated range, optional dimensions and a package photo per size
-//   4 Delivery: address, zone (airport areas included), recipient, instructions
-//   5 Your details: name, phone, how we message you, pay after delivery or upfront
-//   6 Review, then one MDM.store.createOrder() call. The operator confirms the final price before collection.
+// Request a delivery (web app updates 11/10/2026 §1 to §3): six steps in one form.
+//   1 Service: "Order again" for a signed-in customer, the category (Pick & Deliver, Shop & Deliver, Business Delivery), the
+//     Pick & Deliver collection type with its own fields, and normal / express / advance timing. Business Delivery shows a short
+//     panel that points to the business portal instead of the form.
+//   2 Collection (saved addresses or a new labelled one, contact) or, for Shop & Deliver, the shop, the items table and the budget
+//     with the shopping charges.
+//   3 Packages: Bag / Box / XL quantities with an optional photo per size (no measurements), the live estimate and Extra vehicle.
+//   4 Delivery: home delivery, boat / ferry / speedboat, Maldivian Cargo or airport, each with the fields its handover needs.
+//   5 Your details, 6 Review with the itemised estimate, then one MDM.store.createOrder() call. The team confirms the final price.
 // The draft lives in sessionStorage so a reload keeps it; uploaded photos and documents go into the `files` collection at once.
 (function (MDM) { 'use strict';
   const { el, html, setError, phone } = MDM.ui;
-  const DRAFT_KEY = 'mdm:request:v2', ME_KEY = 'mdm:me';
-  const STEPS = [{ n: 1, label: 'Service' }, { n: 2, label: 'Collection' }, { n: 3, label: 'Packages' }, { n: 4, label: 'Delivery' }, { n: 5, label: 'Your details' }, { n: 6, label: 'Review' }];
+  const DRAFT_KEY = 'mdm:request:v3', ME_KEY = 'mdm:me';
   const SIZES = ['bag', 'box', 'xl'];
-  const MAX_PER_SIZE = 20;
+  const MAX_PER_SIZE = 20, MAX_ITEMS = 40;
+  const MAXLEN = { text: '160', tel: '24', email: '120', textarea: '1000' };   // keeps a pasted essay out of labels and the driver's screen
   const NOTIFY = [{ value: 'whatsapp', label: 'WhatsApp' }, { value: 'sms', label: 'SMS' }, { value: 'viber', label: 'Viber' }, { value: 'email', label: 'Email' }];
   const COURIERS = ['FedEx', 'CPEX', 'PDU', 'UPS', 'Aramex', 'Other courier'];
-  const SHOP_PROOF = [{ value: 'invoice', label: 'Invoice', hint: 'Upload the shop invoice' }, { value: 'quotation', label: 'Quotation', hint: 'Quotation and your payment slip' }, { value: 'order_no', label: 'Order number', hint: 'The shop gave you a number' }];
+  const SHOP_PROOF = [{ value: 'invoice', label: 'Invoice' }, { value: 'quotation', label: 'Quotation' }];
   const UNAVAILABLE = [{ value: 'call', label: 'Call me' }, { value: 'closest', label: 'Get the closest match' }, { value: 'skip', label: 'Skip it' }];
   const DOC_KIND = { collection_doc: 'Collection document', invoice: 'Shop invoice', quotation: 'Quotation', payment_slip: 'Payment slip', document: 'Document' };
+  const CUSTOM_LABEL = 'custom';
   const clone = v => (v == null ? v : JSON.parse(JSON.stringify(v)));
   const trim = v => String(v == null ? '' : v).trim();
   const fmt = n => MDM.pricing.format(n);
+  const normPhone = v => phone.normalize(v) || trim(v);
+  const slug = v => String(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
   const dom = { steps: {} };
   let settings = {};
   let draft = emptyDraft();
   let step = 1;
-  let me = null, savedAddresses = [], submitting = false;
+  let me = null, savedAddresses = [], reorderChoices = [], submitting = false;
   let checks = {};   // step → [{ wrap, check() → message|null, focus() }]
 
   // ---- Draft -----------------------------------------------------------------------------------------------------------------
+  function blankItem() { return { name: '', details: '', qty: '1', instructions: '' }; }
+  function blankPhoto() { return { photoId: null, photoName: '' }; }
   function emptyDraft() {
-    const size = () => ({ l: '', w: '', h: '', kg: '', photoId: null, photoName: '' });
     return {
-      type: 'home', level: 'normal',
+      category: 'pick', type: 'home', level: 'normal',
       schedule: { collectDate: '', collectTime: '', deliverDate: '', deliverTime: '' },
-      details: { carrier: '', courierName: '', location: '', postOffice: '', mode: 'collect', area: 'arrivals', proof: 'invoice', task: 'submit', unavailable: 'call', bags: '1' },
+      details: { carrier: '', courierName: '', courierOther: '', courierAddress: '', courierZone: 'male', location: '', postOffice: '', collectionCode: '', collectBefore: '', trackingNo: '', ownerName: '', ownerContact: '', shippingAddress: '', idSent: false,
+        shopName: '', shopAddress: '', shopZone: 'male', proof: 'invoice', orderNo: '', task: 'submit', organisation: '', reference: '', details: '', returnDocs: false },
+      shop: { name: '', address: '', zone: 'male', landmark: '', phone: '', budget: '', unavailable: 'call' },
+      items: [blankItem()],
       docs: [],
-      collection: { address: '', zone: 'male', landmark: '', contactName: '', contactPhone: '', instructions: '', auto: false },
-      counts: { bag: 1, box: 0, xl: 0 }, sizes: { bag: size(), box: size(), xl: size() },
-      description: '', fragile: false, vehicle: false,
-      delivery: { address: '', zone: 'male', landmark: '', recipientName: '', recipientPhone: '', instructions: '', meetAt: 'door', self: false, auto: false },
+      collection: { address: '', zone: 'male', landmark: '', contactName: '', contactPhone: '', instructions: '', auto: false, autoContact: false, savedId: '', save: false, label: 'Home', labelCustom: '' },
+      counts: { bag: 1, box: 0, xl: 0 }, photos: { bag: blankPhoto(), box: blankPhoto(), xl: blankPhoto() },
+      description: '', fragile: false, extraVehicle: false,
+      method: 'home',
+      delivery: { address: '', zone: 'male', landmark: '', recipientName: '', recipientPhone: '', instructions: '', meetAt: 'door', self: false, savedId: '', save: false, label: 'Home', labelCustom: '' },
+      boat: { vesselType: 'speedboat', name: '', departureDate: '', departureTime: '', jetty: '', island: '', address: '' },
+      cargo: { island: '' },
+      airport: { point: 'resort_counters', counter: '', resort: '', speedboat: '', departureTime: '', instructions: '' },
       customer: { name: '', phone: '', email: '', notify: 'whatsapp' },
-      pay: 'after', remember: true,
+      pay: 'after', remember: true, reorderFrom: null,
     };
   }
+  function normalizeDraft(d) {
+    if (!MDM.requestTypes().some(t => t.value === d.type)) d.type = 'home';
+    if (!MDM.SERVICE_CATEGORIES.some(c => c.value === d.category)) d.category = MDM.categoryOf(d.type);
+    if (d.category !== 'business' && MDM.categoryOf(d.type) !== d.category) d.type = MDM.requestTypes(d.category)[0].value;
+    if (!MDM.DELIVERY_METHODS.some(m => m.value === d.method)) d.method = 'home';
+    if (!MDM.VESSEL_TYPES.some(v => v.value === d.boat.vesselType)) d.boat.vesselType = 'speedboat';
+    if (!MDM.geo.airportPoints().some(p => p.value === d.airport.point)) d.airport.point = 'resort_counters';
+    if (!SHOP_PROOF.some(p => p.value === d.details.proof)) d.details.proof = 'invoice';
+    return d;
+  }
+  function mergeDraft(d) {
+    const base = emptyDraft();
+    ['schedule', 'details', 'shop', 'collection', 'counts', 'delivery', 'boat', 'cargo', 'airport', 'customer'].forEach(k => { if (d[k] && typeof d[k] === 'object') Object.assign(base[k], d[k]); });
+    SIZES.forEach(s => { base.photos[s] = Object.assign(blankPhoto(), (d.photos || {})[s] || {}); });
+    ['category', 'type', 'level', 'description', 'fragile', 'extraVehicle', 'method', 'pay', 'remember', 'reorderFrom'].forEach(k => { if (d[k] != null) base[k] = d[k]; });
+    base.docs = Array.isArray(d.docs) ? d.docs : [];
+    base.items = Array.isArray(d.items) && d.items.length ? d.items.map(it => Object.assign(blankItem(), it)) : [blankItem()];
+    return normalizeDraft(base);
+  }
   function loadDraft() {
-    try {
-      const d = JSON.parse(sessionStorage.getItem(DRAFT_KEY));
-      if (d && typeof d === 'object') {
-        const base = emptyDraft();
-        ['schedule', 'details', 'collection', 'counts', 'delivery', 'customer'].forEach(k => { base[k] = Object.assign(base[k], d[k] || {}); });
-        SIZES.forEach(s => { base.sizes[s] = Object.assign(base.sizes[s], (d.sizes || {})[s] || {}); });
-        ['type', 'level', 'description', 'fragile', 'vehicle', 'pay', 'remember'].forEach(k => { if (d[k] != null) base[k] = d[k]; });
-        base.docs = Array.isArray(d.docs) ? d.docs : [];
-        return base;
-      }
-    } catch (e) { /* no draft or unreadable */ }
+    try { const d = JSON.parse(sessionStorage.getItem(DRAFT_KEY)); if (d && typeof d === 'object') return mergeDraft(d); } catch (e) { /* no draft or unreadable */ }
     return emptyDraft();
   }
   function saveDraft() { try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (e) { /* private mode: the form still works on this page view */ } }
@@ -66,77 +88,166 @@
 
   // ---- Type rules ---------------------------------------------------------------------------------------------------------------
   const typeOf = () => MDM.REQUEST_TYPES.find(t => t.value === draft.type) || MDM.REQUEST_TYPES[0];
-  const service = () => draft.type === 'shop_buy' ? 'shop' : 'pick';
+  const categoryInfo = () => MDM.SERVICE_CATEGORIES.find(c => c.value === draft.category) || MDM.SERVICE_CATEGORIES[0];
+  const isShop = () => draft.category === 'shop';
+  const isBusiness = () => draft.category === 'business';
+  const service = () => (isShop() ? 'shop' : 'pick');
+  const rates = () => settings.rates || {};
+  const rules = () => settings.rules || {};
+  // Fee wording follows the pricing rules: the cargo fee is charged per package unless rules.cargoFeePer is 'order'.
+  const cargoFeeText = () => fmt(rates().cargo) + (rules().cargoFeePer === 'order' ? '' : ' a package');
+  const airportFeeText = () => fmt(rates().airport) + (rules().airportFeePer === 'package' ? ' a package' : '');
   const carrier = () => MDM.CARRIERS.find(c => c.value === draft.details.carrier) || null;
-  const airportCollect = () => draft.type === 'airport' && draft.details.mode === 'collect';
-  const airportDeliver = () => draft.type === 'airport' && draft.details.mode !== 'collect';
-  const areaLabel = v => ((MDM.geo.airportPoints().find(p => p.value === v) || {}).label) || 'Airport';
-  // The collection end that a postal or airport type dictates: { address, zone, contactName } or null.
+  const otherCourier = () => draft.details.carrier === 'courier' && draft.details.courierName === 'Other courier';
+  // postalKeys() → the details fields the chosen carrier asks for; fields typed for another carrier stay in the draft (so switching
+  // back keeps them) but never reach the review or the order. Every carrier asks for the tracking number (§1.1); the SMS collection
+  // code and collect-before time are extra fields where the carrier sends them. 'Other courier' adds the courier's name and office.
+  function postalKeys() {
+    const d = draft.details, noCode = !trim(d.collectionCode);
+    return ({
+      redbox_maafannu: ['trackingNo', 'collectionCode', 'collectBefore'],
+      redbox_main: ['trackingNo', 'ownerName', 'shippingAddress', 'ownerContact'],
+      pikpost: ['location', 'trackingNo', 'collectionCode', 'collectBefore'],
+      post_office: ['postOffice', 'trackingNo', 'collectionCode'].concat(noCode ? ['idSent', 'ownerName', 'ownerContact', 'shippingAddress'] : []),
+      courier: ['courierName'].concat(otherCourier() ? ['courierOther', 'courierAddress', 'courierZone'] : [], ['trackingNo', 'ownerName', 'ownerContact']),
+      dhl: ['trackingNo'],
+    })[d.carrier] || [];
+  }
+  const stepLabels = () => ['Service', isShop() ? 'Shop and items' : 'Collection', 'Packages', 'Delivery', 'Your details', 'Review'];
+  // The collection end that the type dictates (postal carrier or the shop / godown from step 1): { address, zone, contactName } or null.
   function dictatedCollection() {
     const d = draft.details;
     if (draft.type === 'postal' && carrier()) {
       const c = carrier();
       if (c.value === 'pikpost') { const loc = MDM.PIKPOST_LOCATIONS.find(x => x.value === d.location); return loc ? { address: 'Pikpost locker, ' + loc.label, zone: loc.zone, contactName: 'Pikpost' } : null; }
       if (c.value === 'post_office') { const po = MDM.POST_OFFICES.find(x => x.value === d.postOffice); return po ? { address: po.label, zone: po.zone, contactName: 'Post collections counter' } : null; }
-      if (c.value === 'courier') return { address: (d.courierName && d.courierName !== 'Other courier' ? d.courierName : 'Courier') + ' office, Malé', zone: 'male', contactName: d.courierName || 'Courier counter' };
+      if (c.value === 'courier' && otherCourier()) return trim(d.courierAddress) ? { address: [trim(d.courierOther), trim(d.courierAddress)].filter(Boolean).join(', '), zone: d.courierZone || 'male', contactName: trim(d.courierOther) || 'Courier counter' } : null;
+      if (c.value === 'courier') return d.courierName ? { address: d.courierName + ' office, Malé', zone: 'male', contactName: d.courierName } : null;
       return { address: c.address, zone: c.zone, contactName: c.label };
     }
-    if (airportCollect()) return { address: 'Velana International Airport, ' + areaLabel(d.area), zone: 'airport', contactName: d.passengerName || '' };
+    if (draft.type === 'shop_collect' && !isShop() && trim(d.shopAddress)) return { address: [trim(d.shopName), trim(d.shopAddress)].filter(Boolean).join(', '), zone: d.shopZone || 'male', contactName: trim(d.shopName) };
     return null;
   }
-  function dictatedDelivery() {
-    if (airportDeliver()) return { address: 'Velana International Airport, ' + areaLabel(draft.details.area), zone: 'airport' };
-    return null;
-  }
-  // Fill (or release) the addresses that the type decides, keeping whatever the customer typed for the other types.
+  // Fill (or release) the collection address that the type decides, keeping whatever the customer typed for the other types.
   function applyDictated() {
-    const c = dictatedCollection(), dl = dictatedDelivery();
-    if (c) { Object.assign(draft.collection, { address: c.address, zone: c.zone, auto: true }); if (!trim(draft.collection.contactName) || draft.collection.autoContact) { draft.collection.contactName = c.contactName; draft.collection.autoContact = true; } }
-    else if (draft.collection.auto) { Object.assign(draft.collection, { address: '', zone: 'male', auto: false }); if (draft.collection.autoContact) { draft.collection.contactName = ''; draft.collection.autoContact = false; } }
-    if (dl) Object.assign(draft.delivery, { address: dl.address, zone: dl.zone, auto: true });
-    else if (draft.delivery.auto) Object.assign(draft.delivery, { address: '', zone: 'male', auto: false });
-    if (draft.collection.zone === 'airport' && !airportCollect()) Object.assign(draft.collection, { zone: 'male' });
-    if (draft.delivery.zone === 'airport' && !airportDeliver()) Object.assign(draft.delivery, { zone: 'male' });
+    const c = dictatedCollection(), col = draft.collection;
+    if (c) {
+      Object.assign(col, { address: c.address, zone: c.zone, auto: true, savedId: '', save: false });
+      if (!trim(col.contactName) || col.autoContact) { col.contactName = c.contactName; col.autoContact = true; }
+    } else if (col.auto) {
+      Object.assign(col, { address: '', zone: 'male', landmark: '', auto: false });
+      if (col.autoContact) { col.contactName = ''; col.autoContact = false; }
+    }
+    if (col.zone === 'airport') col.zone = 'male';
+    if (draft.delivery.zone === 'airport') draft.delivery.zone = 'male';
+  }
+  function chooseCategory(v) {
+    draft.category = v;
+    if (v === 'shop') draft.type = 'shop_buy';
+    else if (v === 'pick' && MDM.categoryOf(draft.type) !== 'pick') draft.type = 'home';
+    applyDictated();
   }
 
-  // ---- Pricing -------------------------------------------------------------------------------------------------------------------
+  // ---- Delivery and packages -----------------------------------------------------------------------------------------------------
   const totalCount = () => SIZES.reduce((n, s) => n + (Number(draft.counts[s]) || 0), 0);
+  const countsAsPackages = () => SIZES.flatMap(s => Array.from({ length: Math.max(0, Number(draft.counts[s]) || 0) }, () => ({ size: s })));
+  const vehicleEligible = () => MDM.extraVehicleEligible(countsAsPackages());
+  function itemsSummary() {
+    return draft.items.filter(it => trim(it.name)).map(it => trim(it.name) + (trim(it.details) ? ' ' + trim(it.details) : '') + ' ×' + (Math.max(1, Math.round(Number(it.qty) || 1))) + (trim(it.instructions) ? ' (' + trim(it.instructions) + ')' : '')).join(', ');
+  }
+  function pickupEnd() {
+    if (isShop()) {
+      const s = draft.shop;
+      return { address: [trim(s.name), trim(s.address)].filter(Boolean).join(', '), zone: s.zone || 'male', landmark: trim(s.landmark), instructions: '', contact: { name: trim(s.name), phone: normPhone(s.phone) }, meetAt: '' };
+    }
+    const c = draft.collection, cust = draft.customer;
+    return { address: trim(c.address), zone: c.zone || 'male', landmark: trim(c.landmark), instructions: trim(c.instructions), contact: { name: trim(c.contactName) || trim(cust.name), phone: normPhone(c.contactPhone) || normPhone(cust.phone) }, meetAt: '' };
+  }
+  // deliveryData() → the order's delivery object for the chosen method (store.createOrder points the packages at its end).
+  function deliveryData() {
+    const d = draft.delivery, cust = draft.customer, m = draft.method;
+    const self = m === 'home' && d.self;
+    const recipientName = self ? trim(cust.name) : trim(d.recipientName);
+    const recipientPhone = self ? normPhone(cust.phone) : normPhone(d.recipientPhone);
+    const out = { method: m, address: '', zone: 'male', landmark: '', recipientName, recipientPhone, instructions: trim(d.instructions), meetAt: '', boat: null, cargo: null, airport: null };
+    if (m === 'home') Object.assign(out, { address: trim(d.address), zone: d.zone || 'male', landmark: trim(d.landmark), meetAt: d.meetAt || 'door' });
+    if (m === 'boat') {
+      const b = draft.boat;
+      out.boat = { vesselType: b.vesselType, name: trim(b.name), departureDate: b.departureDate, departureTime: b.departureTime, jetty: b.jetty, island: trim(b.island), address: trim(b.address), contact: recipientPhone };
+      out.address = trim(b.address) ? trim(b.address) + ', ' + trim(b.island) : trim(b.island);
+    }
+    if (m === 'cargo') {
+      out.cargo = { counter: MDM.geo.cargoCounter().label, island: trim(draft.cargo.island), consignee: recipientName };
+      out.address = trim(draft.cargo.island);
+    }
+    if (m === 'airport') {
+      const a = draft.airport;
+      out.airport = { point: a.point, counter: trim(a.counter), resort: trim(a.resort), speedboat: trim(a.speedboat), departureTime: a.departureTime, instructions: trim(a.instructions) };
+      out.instructions = trim(a.instructions);
+      out.meetAt = a.point;
+    }
+    return out;
+  }
   function buildPackages(forPricing) {
-    const c = draft.collection, d = draft.delivery, cust = draft.customer, det = draft.details;
-    const pickup = { address: trim(c.address), zone: c.zone || 'male', landmark: trim(c.landmark), instructions: trim(c.instructions), contact: { name: trim(c.contactName) || trim(cust.name), phone: trim(c.contactPhone) || trim(cust.phone) }, meetAt: c.zone === 'airport' ? det.area : '' };
-    const recipient = d.self ? { name: trim(cust.name), phone: trim(cust.phone) } : { name: trim(d.recipientName), phone: trim(d.recipientPhone) };
-    const dropoff = { address: trim(d.address), zone: d.zone || 'male', landmark: trim(d.landmark), instructions: trim(d.instructions), recipient, meetAt: d.zone === 'airport' ? det.area : (d.meetAt || 'door') };
+    const pickup = pickupEnd();
+    const dd = deliveryData();
+    const dropoff = Object.assign({}, MDM.deliveryEndpoint(dd), { instructions: dd.instructions });
     const out = [];
     SIZES.forEach(size => {
       const n = Math.max(0, Math.min(MAX_PER_SIZE, Number(draft.counts[size]) || 0));
-      const sz = draft.sizes[size] || {};
-      const dims = sz.l && sz.w && sz.h ? { l: Number(sz.l), w: Number(sz.w), h: Number(sz.h) } : null;
+      const ph = draft.photos[size] || {};
       for (let i = 0; i < n; i++) {
-        const shop = draft.type === 'shop_buy' && !out.length ? { name: trim(det.shopName), address: trim(c.address), zone: c.zone || 'male', list: trim(det.list), budget: Math.round(Number(det.budget) || 0), unavailable: det.unavailable || 'call', receiptTotal: null, receiptPhotoId: null } : null;
-        out.push({ id: forPricing ? 'p' + out.length : MDM.id('pkg'), size, description: trim(draft.description), fragile: !!draft.fragile, needsVehicle: size === 'xl' && !!draft.vehicle, underOneFt: size !== 'xl',
-          dims, weightKg: sz.kg ? Number(sz.kg) : null, photoId: sz.photoId || null, sizeSource: dims || sz.photoId ? 'customer' : 'estimate',
-          pickup: clone(pickup), dropoff: clone(dropoff), shop, notes: '' });
+        const shop = isShop() && !out.length ? { name: trim(draft.shop.name), address: trim(draft.shop.address), zone: draft.shop.zone || 'male', list: itemsSummary(), budget: Math.round(Number(draft.shop.budget) || 0), unavailable: draft.shop.unavailable || 'call', receiptTotal: null, receiptPhotoId: null } : null;
+        out.push({ id: forPricing ? 'p' + out.length : MDM.id('pkg'), size, description: trim(draft.description), fragile: !!draft.fragile, needsVehicle: false, underOneFt: size !== 'xl',
+          photoId: (!isShop() && ph.photoId) || null, sizeSource: !isShop() && ph.photoId ? 'customer' : 'estimate', pickup: clone(pickup), dropoff: clone(dropoff), shop, notes: '' });
       }
     });
+    if (draft.extraVehicle && MDM.extraVehicleEligible(out)) out.forEach(p => { if (p.size === 'box' || p.size === 'xl') p.needsVehicle = true; });
     return out;
   }
-  // estimate() → { min, max, exact, xl, budget } or null when no packages. The range comes from the rate card (same island to across the bridge).
-  function estimate() {
+  // priceModel() → { delivery, fees, budget, total, xl, vehicle } with ranges { min, max }, or null when there is no package yet.
+  function priceModel() {
     if (!totalCount()) return null;
-    const pk = buildPackages(true);
-    const r = MDM.pricing.estimateRange(pk, settings, service());
-    return Object.assign(r, { xl: (Number(draft.counts.xl) || 0) > 0, zonesKnown: step >= 4 || !!trim(draft.delivery.address) });
+    const pk = buildPackages(true), svc = service();
+    const q = MDM.pricing.quote({ service: svc, packages: pk }, settings);
+    const r = MDM.pricing.estimateRange(pk, settings, svc);
+    const extra = q.totals.fees + (q.totals.budget || 0);
+    return { delivery: { min: r.min - extra, max: r.max - extra }, fees: q.feeLines, budget: q.totals.budget || 0, total: { min: r.min, max: r.max },
+      xl: (Number(draft.counts.xl) || 0) > 0, vehicle: !!draft.extraVehicle && vehicleEligible() };
   }
-  function rangeText(r) {
+  function rangeText(r, xl) {
     if (!r) return 'Add a package';
-    if (r.xl) return 'From ' + fmt(r.min);
-    return r.min === r.max ? fmt(r.min) : fmt(r.min) + ' to ' + fmt(r.max).replace('MVR ', '');
+    if (xl) return 'From ' + fmt(r.min);
+    return r.min === r.max ? fmt(r.min) : fmt(r.min) + '–' + fmt(r.max).replace('MVR ', '');
   }
+  const FEE_TEXT = {
+    cargo: () => ({ label: 'Maldivian Cargo fee', sub: 'Only for Maldivian Cargo deliveries' + (rules().cargoFeePer === 'order' ? '' : ', ' + cargoFeeText()) }),
+    airport: () => ({ label: 'Airport fee', sub: 'Airport delivery' + (rules().airportFeePer === 'package' ? ', ' + airportFeeText() : '') }),
+  };
+  // chargeLines(model, prefix) → .summary rows: delivery range, each fee as its own line, the budget, extra vehicle, estimated total.
+  function chargeLines(model, prefix) {
+    const pk = packagesText();
+    if (!model) return [el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, 'Add a package to see the estimate'))];
+    const line = (key, label, sub, amount, fee) => el('div', { class: ['summary__line', fee ? 'summary__line--fee' : null], 'data-testid': prefix + '-line-' + key },
+      el('span', { class: 'summary__desc' }, label, sub ? el('span', { class: 'summary__sub' }, sub) : null), el('span', { class: 'summary__amount mono' }, amount));
+    const rows = [line('delivery', 'Delivery', pk, rangeText(model.delivery, model.xl))];
+    model.fees.forEach(f => {
+      const t = FEE_TEXT[f.key] ? FEE_TEXT[f.key]() : null;
+      const times = (/ × \d+$/.exec(f.label) || [''])[0];
+      if (f.key === 'shopping') rows.push(line('shopping', f.label, 'Of the ' + fmt(model.budget) + ' budget, then of the receipt', fmt(f.amount), true));
+      else rows.push(line(f.key, t ? t.label + times : f.label, t ? t.sub : f.reason, fmt(f.amount), true));
+    });
+    if (isShop()) rows.push(line('budget', 'Shopping budget', 'Paid upfront; we refund what is not spent', fmt(model.budget), true));
+    if (model.vehicle) rows.push(line('vehicle', 'Extra vehicle', null, 'Confirmed by our team', true));
+    rows.push(el('div', { class: 'summary__rule' }), el('div', { class: 'summary__total' }, el('span', null, 'Estimated total'), el('span', { class: 'mono', 'data-testid': prefix + '-total' }, rangeText(model.total, model.xl))));
+    return rows;
+  }
+  function packagesText() { return SIZES.filter(s => draft.counts[s]).map(s => draft.counts[s] + ' × ' + MDM.pricing.sizeLabel(s)).join(', ') || 'No packages yet'; }
 
   // ---- Field helpers -------------------------------------------------------------------------------------------------------------
   let uid = 0;
-  function reg(n, wrap, check, focusEl) { (checks[n] = checks[n] || []).push({ wrap, check, focus: () => { const f = focusEl ? focusEl() : wrap.querySelector('input, select, textarea, button'); if (f) f.focus(); } }); }
-  // F(path, label, { type, options, required, hint, placeholder, validate, intl, rows, testid, onChange, attrs }) → .field wrapper bound to draft[path]
+  function reg(n, wrap, check, focusEl) { (checks[n] = checks[n] || []).push({ wrap, check, focus: () => { const f = focusEl ? focusEl() : wrap.querySelector('input:not([type="file"]), select, textarea, button'); if (f) f.focus(); } }); }
+  // F(n, path, label, { type, options, required, hint, placeholder, validate, intl, landline, rows, testid, onChange, attrs, readonly }) → .field bound to draft[path]
   function F(n, path, label, o) {
     o = o || {};
     const id = 'rq-' + path.replace(/\./g, '-') + '-' + (++uid);
@@ -148,23 +259,20 @@
       ctrl = el('select', { class: 'select', id, 'data-testid': testid }, o.placeholder ? el('option', { value: '' }, o.placeholder) : null, (o.options || []).map(x => el('option', { value: x.value }, x.label)));
       ctrl.value = value == null ? '' : value;
     } else if (type === 'textarea') {
-      ctrl = el('textarea', { class: 'textarea', id, rows: o.rows || 3, placeholder: o.placeholder || null, 'data-testid': testid, value: value == null ? '' : value });
+      ctrl = el('textarea', { class: 'textarea', id, rows: o.rows || 3, maxlength: MAXLEN.textarea, placeholder: o.placeholder || null, 'data-testid': testid, value: value == null ? '' : value });
     } else {
-      const attrs = Object.assign({ class: 'input', id, type: type === 'tel' ? 'tel' : type, placeholder: o.placeholder || null, 'data-testid': testid, value: value == null ? '' : value }, o.attrs || {});
+      const attrs = Object.assign({ class: 'input', id, type: type === 'tel' ? 'tel' : type, placeholder: o.placeholder || null, 'data-testid': testid, value: value == null ? '' : value }, MAXLEN[type] ? { maxlength: MAXLEN[type] } : null, o.attrs || {});
       if (type === 'tel') { attrs.inputmode = 'tel'; attrs.autocomplete = attrs.autocomplete || 'tel'; }
       if (type === 'number') { attrs.inputmode = attrs.inputmode || 'numeric'; attrs.min = attrs.min || '0'; }
       ctrl = el('input', attrs);
     }
-    const wrap = MDM.ui.field({ name: path, control: ctrl, label, hint: o.hint || null, optional: !o.required && !o.noOptional });
-    const onValue = () => {
-      const v = type === 'number' ? ctrl.value : ctrl.value;
-      setPath(path, v);
-      if (o.auto) draft[o.auto].auto = false;
-      saveDraft(); updateSummary();
+    const wrap = MDM.ui.field({ name: path, control: ctrl, label, hint: o.hint || null, optional: !o.required && !o.noOptional, class: o.fieldClass || null });
+    ctrl.addEventListener(type === 'select' ? 'change' : 'input', () => {
+      setPath(path, ctrl.value);
       if (wrap.classList.contains('is-invalid')) setError(wrap, null);
-      if (o.onChange) o.onChange(v);
-    };
-    ctrl.addEventListener(type === 'select' ? 'change' : 'input', onValue);
+      if (o.onChange) o.onChange(ctrl.value);
+      saveDraft(); updateSummary();
+    });
     if (o.disabled) ctrl.disabled = true;
     reg(n, wrap, () => {
       const v = trim(getPath(path));
@@ -176,7 +284,7 @@
     });
     return wrap;
   }
-  // seg(path, label, options, { onChange, testid, hint }) → segmented radio group bound to draft[path]
+  // seg(n, path, label, options, { onChange, testid, hint, stack, required }) → segmented radio group bound to draft[path]
   function seg(n, path, label, options, o) {
     o = o || {};
     const name = 'rq-' + path.replace(/\./g, '-');
@@ -199,8 +307,22 @@
     const id = 'rq-' + path.replace(/\./g, '-') + '-' + (++uid);
     const input = el('input', { type: 'checkbox', id, checked: !!getPath(path), 'data-testid': o.testid || 'request-' + path.split('.').pop() });
     input.addEventListener('change', () => { setPath(path, input.checked); saveDraft(); updateSummary(); if (o.onChange) o.onChange(input.checked); const w = input.closest('.field'); if (w) setError(w, null); });
-    const wrap = el('div', { class: 'field', 'data-field': path }, el('div', null, el('label', { class: 'checkbox', for: id }, input, el('span', null, label, o.hint ? el('span', { class: 'checkbox__hint' }, o.hint) : null))), el('div', { class: 'field__error', hidden: true }));
+    const wrap = el('div', { class: ['field', o.fieldClass], 'data-field': path }, el('div', null, el('label', { class: 'checkbox', for: id }, input, el('span', null, label, o.hint ? el('span', { class: 'checkbox__hint' }, o.hint) : null))), el('div', { class: 'field__error', hidden: true }));
     if (o.required) reg(n, wrap, () => (getPath(path) ? null : o.requiredMessage || 'Tick the box to continue'), () => input);
+    return wrap;
+  }
+  // cards(n, { name, label, options: [{ value, label, hint, meta }], value, testid, onChange, cols }) → a radio group of large cards
+  function cards(n, o) {
+    const labelId = 'rq-' + o.name + '-label';
+    const group = el('div', { class: ['request-cards', 'request-cards--' + (o.cols || 2)], role: 'radiogroup', 'aria-labelledby': labelId, 'data-testid': o.testid },
+      o.options.map(opt => el('label', { class: ['request-card', o.value === opt.value ? 'is-selected' : null], 'data-testid': o.testid + '-' + opt.value },
+        el('input', { class: 'sr-only', type: 'radio', name: 'rq-' + o.name, value: opt.value, checked: o.value === opt.value }),
+        el('span', { class: 'request-card__label' }, opt.label),
+        opt.hint ? el('span', { class: 'request-card__hint' }, opt.hint) : null,
+        opt.meta ? el('span', { class: 'request-card__meta' }, opt.meta) : null)));
+    group.addEventListener('change', e => { if (e.target && e.target.checked) o.onChange(e.target.value); });
+    const wrap = el('div', { class: 'field', 'data-field': o.name }, el('span', { class: o.hideLabel ? 'field__label sr-only' : 'field__label', id: labelId }, o.label), group, el('div', { class: 'field__error', hidden: true }));
+    if (o.check) reg(n, wrap, o.check, () => group.querySelector('input:checked') || group.querySelector('input'));
     return wrap;
   }
   const grid = (...kids) => el('div', { class: 'grid-2' }, kids);
@@ -212,7 +334,7 @@
     renderStep(n);
     if (key) {
       const again = dom.steps[n].querySelector('[data-testid="' + key + '"]');
-      const target = again && (again.matches('input,select,textarea,button') ? again : again.querySelector('input[value="' + (val || '') + '"]') || again.querySelector('input:checked') || again.querySelector('input,select,textarea,button'));
+      const target = again && (again.matches('input,select,textarea,button') ? again : again.querySelector('input[value="' + CSS.escape(val || '') + '"]') || again.querySelector('input:checked') || again.querySelector('input,select,textarea,button'));
       if (target) target.focus({ preventScroll: true });
     }
   }
@@ -235,13 +357,14 @@
     try { return await MDM.store.insert('files', Object.assign({ kind, orderId: null, at: new Date().toISOString() }, p)); }
     catch (e) { throw new Error(e && e.code === 'quota' ? 'This browser is out of storage for the demo. Try a smaller file.' : 'Could not save the file. Try again.'); }
   }
-  // docField(kind, label, { required, multiple, hint }) → list of uploaded documents of that kind plus a picker
+  // docField(n, kind, label, { required, multiple, hint }) → list of uploaded documents of that kind plus a picker
   function docField(n, kind, label, o) {
     o = o || {};
     const id = 'rq-doc-' + kind + '-' + (++uid);
     const listEl = el('div', { class: 'stack-2' });
-    const input = el('input', { class: 'sr-only', type: 'file', id, accept: 'image/*,application/pdf', tabindex: '-1', multiple: !!o.multiple, 'data-testid': 'request-doc-' + kind });
-    const btn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'request-doc-' + kind + '-pick', on: { click: () => input.click() } }, html(MDM.icon('upload', 16)), o.multiple ? 'Add files' : 'Choose a file');
+    const input = el('input', { class: 'sr-only', type: 'file', id, accept: 'image/*,application/pdf', tabindex: '-1', multiple: !!o.multiple, 'aria-labelledby': id + '-label', 'data-testid': 'request-doc-' + kind });
+    const btnText = el('span', null, o.multiple ? 'Add files' : 'Choose a file');
+    const btn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'aria-describedby': id + '-label', 'data-testid': 'request-doc-' + kind + '-pick', on: { click: () => input.click() } }, html(MDM.icon('upload', 16)), btnText);
     const wrap = el('div', { class: 'field', 'data-field': 'doc-' + kind },
       el('span', { class: 'field__label', id: id + '-label' }, label, o.required ? null : el('span', { class: 'optional' }, ' (optional)')),
       el('div', { class: 'dropzone request-doc' }, listEl, el('div', { class: 'request-doc__pick' }, btn, el('span', { class: 'dropzone__hint' }, 'JPG, PNG or PDF, up to 8 MB'))), input,
@@ -253,7 +376,7 @@
         el('div', { class: 'dropzone__file' }, el('div', { class: 'dropzone__name' }, d.name), el('div', { class: 'dropzone__size' }, DOC_KIND[kind] || 'Document')),
         el('button', { type: 'button', class: 'btn btn--ghost btn--sm', on: { click: () => { draft.docs = draft.docs.filter(x => x.fileId !== d.fileId); MDM.store.remove('files', d.fileId).catch(() => {}); saveDraft(); paint(); updateSummary(); } } }, 'Remove', el('span', { class: 'sr-only' }, ' ' + d.name)))));
       listEl.hidden = !mine.length;
-      btn.lastChild.textContent = mine.length && !o.multiple ? 'Replace file' : (o.multiple ? 'Add files' : 'Choose a file');
+      btnText.textContent = mine.length && !o.multiple ? 'Replace file' : (o.multiple ? 'Add files' : 'Choose a file');
     }
     input.addEventListener('change', async () => {
       const filesIn = Array.from(input.files || []);
@@ -274,21 +397,22 @@
     return wrap;
   }
   function photoPicker(size) {
-    const sz = draft.sizes[size];
+    const ph = draft.photos[size];
+    const label = MDM.pricing.sizeLabel(size);
     const id = 'rq-photo-' + size;
-    const input = el('input', { class: 'sr-only', type: 'file', id, accept: 'image/*', capture: 'environment', tabindex: '-1', 'data-testid': 'request-photo-' + size });
+    const input = el('input', { class: 'sr-only', type: 'file', id, accept: 'image/*', capture: 'environment', tabindex: '-1', 'aria-label': 'Photo of the ' + label + ' package', 'data-testid': 'request-photo-' + size });
     const box = el('div', { class: 'request-photo' });
     const err = el('div', { class: 'field__error', hidden: true });
     async function paint() {
       box.textContent = '';
-      if (sz.photoId) {
-        const f = await MDM.store.get('files', sz.photoId);
+      if (ph.photoId) {
+        const f = await MDM.store.get('files', ph.photoId);
         box.append(el('div', { class: 'dropzone__preview', 'data-testid': 'request-photo-preview' },
-          f && f.dataUrl ? el('img', { class: 'dropzone__thumb', src: f.dataUrl, alt: 'Photo of the ' + MDM.pricing.sizeLabel(size) + ' package' }) : null,
-          el('div', { class: 'dropzone__file' }, el('div', { class: 'dropzone__name' }, sz.photoName || 'Package photo'), el('div', { class: 'dropzone__size' }, 'Our team checks it before confirming the price')),
-          el('button', { type: 'button', class: 'btn btn--ghost btn--sm', on: { click: () => { MDM.store.remove('files', sz.photoId).catch(() => {}); sz.photoId = null; sz.photoName = ''; saveDraft(); paint(); updateSummary(); } } }, 'Remove')));
+          f && f.dataUrl ? el('img', { class: 'dropzone__thumb', src: f.dataUrl, alt: 'Photo of the ' + label + ' package' }) : null,
+          el('div', { class: 'dropzone__file' }, el('div', { class: 'dropzone__name' }, ph.photoName || 'Package photo'), el('div', { class: 'dropzone__size' }, 'Our team checks it before confirming the price')),
+          el('button', { type: 'button', class: 'btn btn--ghost btn--sm', on: { click: () => { MDM.store.remove('files', ph.photoId).catch(() => {}); ph.photoId = null; ph.photoName = ''; saveDraft(); paint(); updateSummary(); } } }, 'Remove', el('span', { class: 'sr-only' }, ' the ' + label + ' photo'))));
       } else {
-        box.append(el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'request-photo-' + size + '-pick', on: { click: () => input.click() } }, html(MDM.icon('camera', 16)), 'Add a photo'));
+        box.append(el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'request-photo-' + size + '-pick', on: { click: () => input.click() } }, html(MDM.icon('camera', 16)), 'Add a photo', el('span', { class: 'sr-only' }, ' of the ' + label + ' package')));
       }
     }
     input.addEventListener('change', async () => {
@@ -297,12 +421,185 @@
       err.hidden = true;
       try {
         const row = await storeFile(f, 'package');
-        if (sz.photoId) MDM.store.remove('files', sz.photoId).catch(() => {});
-        sz.photoId = row.id; sz.photoName = row.name; saveDraft(); paint(); updateSummary();
+        if (ph.photoId) MDM.store.remove('files', ph.photoId).catch(() => {});
+        ph.photoId = row.id; ph.photoName = row.name; saveDraft(); paint(); updateSummary();
       } catch (e) { err.textContent = e.message; err.hidden = false; }
     });
     paint();
-    return el('div', { class: 'field' }, el('span', { class: 'field__label' }, 'Package photo'), box, input, err);
+    return el('div', { class: 'field request-photo-field' }, el('span', { class: 'field__label' }, 'Package photo', el('span', { class: 'optional' }, ' (optional)')), box, input, err);
+  }
+
+  // ---- Saved addresses (§2.1) --------------------------------------------------------------------------------------------------
+  const labelOf = meta => (meta.label === CUSTOM_LABEL ? trim(meta.labelCustom) : meta.label) || 'Other';
+  const savedById = id => savedAddresses.find(a => a.id === id) || null;
+  // A new address is typed when the customer has no saved ones or chose "Add a new address"; with saved ones and no choice yet,
+  // only the cards show until one is picked.
+  const isNewAddress = target => !savedAddresses.length || draft[target].savedId === 'new';
+  function chooseSaved(target, id) {
+    const t = draft[target];
+    if (id === 'new') {
+      if (t.savedId && t.savedId !== 'new') Object.assign(t, { address: '', zone: 'male', landmark: '' });
+      t.savedId = 'new';
+      return;
+    }
+    const a = savedById(id); if (!a) return;
+    Object.assign(t, { savedId: a.id, address: a.address, zone: a.zone && a.zone !== 'airport' ? a.zone : 'male', landmark: a.landmark || '', save: false, auto: false });
+    if (target === 'delivery') {
+      if (a.meetAt) t.meetAt = a.meetAt;
+      if (a.contactName && !trim(t.recipientName)) t.recipientName = a.contactName;
+      if (a.contactPhone && !trim(t.recipientPhone)) t.recipientPhone = a.contactPhone;
+    }
+  }
+  function savedPicker(n, target) {
+    if (!savedAddresses.length) return null;
+    const selected = draft[target].savedId === 'new' ? 'new' : (savedById(draft[target].savedId) ? draft[target].savedId : '');
+    return cards(n, {
+      name: 'saved-' + target, label: target === 'collection' ? 'Collect from' : 'Deliver to', testid: 'request-' + target + '-saved', value: selected, cols: 2,
+      options: savedAddresses.map(a => ({ value: a.id, label: a.label || 'Saved address', hint: a.address, meta: [a.landmark, MDM.geo.zoneLabel(a.zone || 'male')].filter(Boolean).join(' · ') }))
+        .concat([{ value: 'new', label: 'Add a new address', hint: 'Type it below and save it with a label if you like' }]),
+      onChange: v => { chooseSaved(target, v); saveDraft(); rerender(n); updateSummary(); },
+      check: () => (selected ? null : 'Choose a saved address or add a new one'),
+    });
+  }
+  function labelPicker(n, target) {
+    const meta = draft[target];
+    const options = MDM.ADDRESS_LABELS.map(l => ({ value: l, label: l })).concat([{ value: CUSTOM_LABEL, label: 'Custom label' }]);
+    const name = 'rq-label-' + target;
+    const fs = el('fieldset', { class: 'request-labels', 'data-testid': 'request-' + target + '-label' },
+      options.map(opt => el('label', { class: 'chip request-label', 'data-testid': 'request-' + target + '-label-' + slug(opt.value) },
+        el('input', { class: 'sr-only', type: 'radio', name, value: opt.value, checked: meta.label === opt.value }), el('span', null, opt.label))));
+    fs.addEventListener('change', e => { if (!e.target || !e.target.checked) return; meta.label = e.target.value; saveDraft(); rerender(n); });
+    const out = [MDM.ui.field({ name: target + '.label', control: fs, label: 'Label for this address' })];
+    if (meta.label === CUSTOM_LABEL) out.push(F(n, target + '.labelCustom', 'Custom label', { required: true, placeholder: "For example Mum's home", testid: 'request-' + target + '-label-text', attrs: { maxlength: '40' } }));
+    return out;
+  }
+  function saveControls(n, target) {
+    const where = me ? 'Saved under ' + phone.format(me.phone) + ' for your next order' : 'Saved under the mobile number you give in step 5';
+    const out = [check(n, target + '.save', 'Save to my addresses', { testid: 'request-' + target + '-save', hint: where, onChange: () => rerender(n) })];
+    if (draft[target].save) out.push(...labelPicker(n, target));
+    return el('div', { class: 'request-save' }, out);
+  }
+  function zoneOptions() { return MDM.geo.zoneOptions().filter(z => z.value !== 'airport'); }
+  function addressFields(n, target, label) {
+    return [F(n, target + '.address', label, { required: true, placeholder: 'House or building name, street', testid: 'request-' + target + '-address', attrs: { autocomplete: 'street-address' } }),
+      grid(F(n, target + '.zone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: 'request-' + target + '-zone' }),
+        F(n, target + '.landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school', testid: 'request-' + target + '-landmark' })),
+      saveControls(n, target)];
+  }
+
+  // ---- Re-order (§2.1) ---------------------------------------------------------------------------------------------------------
+  const ORDERABLE = () => MDM.requestTypes().map(t => t.value).concat(['airport']);
+  const REORDER_MAX = 3;   // cards in the "Order again" block, the most frequent order included
+  // Only the customer's own pick & deliver / shop & deliver orders: business and e-store orders are booked elsewhere.
+  const canReorder = o => !o.accountId && o.service !== 'business' && o.service !== 'store' && o.source !== 'store' && ORDERABLE().indexOf(o.requestType || 'home') >= 0;
+  // "Your most frequent order": the rule (MDM.frequentRoute and its route key) lives in store.js, shared with account/page.js.
+  const reorderType = MDM.reorderType, routeOf = MDM.reorderRoute, reorderKey = MDM.reorderKey, frequentRoute = MDM.frequentRoute, routeText = MDM.reorderRouteText;
+  const frequentMeta = g => 'Placed ' + g.count + ' times, last on ' + MDM.ui.fmtDate(g.latest.createdAt, { dateOnly: true }) + ' (' + g.latest.code + ')';
+  // The "Order again" cards: the most frequent order first, then the latest orders on other routes (one on the frequent route would
+  // repeat that card), REORDER_MAX in all.
+  async function loadReorderChoices() {
+    if (!me) return [];
+    const ph = normPhone(me.phone);
+    const mine = (await MDM.store.list('orders')).filter(o => o.customer && normPhone(o.customer.phone) === ph && canReorder(o))
+      .sort((a, b) => (String(b.createdAt) > String(a.createdAt) ? 1 : String(b.createdAt) < String(a.createdAt) ? -1 : 0));
+    if (!mine.length) return [];
+    const pkText = o => { const c = {}; (o.packages || []).forEach(p => { c[p.size] = (c[p.size] || 0) + 1; }); return SIZES.filter(s => c[s]).map(s => c[s] + ' × ' + MDM.pricing.sizeLabel(s)).join(', '); };
+    const top = frequentRoute(mine);
+    const out = top ? [{ key: 'frequent', order: top.latest, label: 'Your most frequent order', hint: routeText(top.latest), meta: frequentMeta(top) }] : [];
+    mine.filter(o => !top || reorderKey(o) !== top.key).slice(0, REORDER_MAX - out.length).forEach(o => {
+      const r = routeOf(o);
+      out.push({ key: o.id, order: o, label: o.code + ' · ' + MDM.requestTypeLabel(reorderType(o)), hint: r.from + ' to ' + r.to, meta: MDM.ui.fmtDate(o.createdAt, { dateOnly: true }) + ' · ' + pkText(o) });
+    });
+    return out;
+  }
+  // reorderRefusal(order) → null when the signed-in customer may start a new request from this order, else the message to show.
+  // Only the customer's own pick & deliver / shop & deliver orders qualify: a link with someone else's order code must not fill in
+  // their addresses and receivers, and business or e-store orders are booked elsewhere.
+  function reorderRefusal(o) {
+    if (!o) return 'We could not find that order. Start a new request below.';
+    if (!canReorder(o)) return 'That order cannot be repeated here. Start a new request below.';
+    if (!me) return 'Sign in to order again from one of your orders. Start a new request below.';
+    if (!o.customer || normPhone(o.customer.phone) !== normPhone(me.phone)) return 'We could not find that order in your orders. Start a new request below.';
+    return null;
+  }
+  // draftFromOrder(order) → a new draft with the order's type, details, collection, packages and delivery (no codes, files or dates).
+  function draftFromOrder(o) {
+    const d = emptyDraft();
+    const type = reorderType(o), det = o.details || {}, col = o.collection || {}, dl = o.delivery || {};
+    const pk0 = (o.packages || [])[0] || {};
+    d.type = type; d.category = MDM.categoryOf(type);
+    const copy = keys => keys.forEach(k => { if (det[k] != null && det[k] !== '') d.details[k] = det[k]; });
+    if (type === 'postal') {
+      copy(['carrier', 'courierName', 'location', 'postOffice', 'ownerName', 'ownerContact', 'shippingAddress']);
+      // A courier outside the list was saved under its own name: open it again as 'Other courier' with that name and office.
+      if (det.carrier === 'courier' && det.courierName && COURIERS.indexOf(det.courierName) < 0) Object.assign(d.details, { courierName: 'Other courier', courierOther: det.courierName, courierAddress: det.courierAddress || '', courierZone: col.zone && col.zone !== 'airport' ? col.zone : 'male' });
+    }
+    if (type === 'office') copy(['task', 'organisation', 'reference', 'details', 'returnDocs']);
+    if (type === 'shop_collect') {
+      copy(['shopName', 'proof']);
+      d.details.shopAddress = det.shopAddress || String(col.address || '').replace(new RegExp('^' + String(det.shopName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ',\\s*'), '');
+      d.details.shopZone = det.shopZone || col.zone || 'male';
+    }
+    if (type === 'shop_buy') {
+      const s = det.shop || pk0.shop || {};
+      const ps = pk0.shop || {};
+      Object.assign(d.shop, { name: s.name || '', address: s.address || ps.address || '', zone: s.zone || ps.zone || 'male', phone: s.phone || '', budget: String(det.budget || ps.budget || ''), unavailable: det.unavailable || ps.unavailable || 'call' });
+      const items = Array.isArray(det.items) && det.items.length ? det.items : String(ps.list || det.list || '').split(/,|\n/).map(x => x.trim()).filter(Boolean).map(x => ({ name: x, details: '', qty: 1, instructions: '' }));
+      d.items = items.length ? items.map(it => ({ name: it.name || '', details: it.details || '', qty: String(it.qty || 1), instructions: it.instructions || '' })) : [blankItem()];
+    }
+    // Older airport orders collected at the airport; the form no longer offers that, so the customer types a new collection address
+    // (re-zoning the airport address as Malé would price and route it wrongly).
+    const airportCollection = col.zone === 'airport';
+    if (type !== 'shop_buy' && !airportCollection) {
+      Object.assign(d.collection, { address: col.address || '', zone: col.zone || 'male', landmark: col.landmark || '', contactName: col.contactName || '', contactPhone: col.contactPhone || '', instructions: col.instructions || '' });
+      const hit = savedAddresses.find(a => trim(a.address).toLowerCase() === trim(col.address).toLowerCase());
+      d.collection.savedId = hit ? hit.id : (savedAddresses.length ? 'new' : '');
+    } else if (type !== 'shop_buy') d.collection.savedId = savedAddresses.length ? 'new' : '';
+    d.counts = { bag: 0, box: 0, xl: 0 };
+    (o.packages || []).forEach(p => { if (d.counts[p.size] != null) d.counts[p.size] = Math.min(MAX_PER_SIZE, d.counts[p.size] + 1); });
+    if (!totalCountOf(d.counts)) d.counts.bag = 1;
+    d.description = pk0.description || '';
+    d.fragile = (o.packages || []).some(p => p.fragile);
+    d.extraVehicle = !!o.extraVehicle;
+    d.method = MDM.DELIVERY_METHODS.some(m => m.value === dl.method) ? dl.method : 'home';
+    // Orders from before delivery methods existed dropped at the airport as a "home" delivery in the airport zone: re-order them as an
+    // Airport delivery at the same point, not as a Malé address.
+    const legacyAirport = d.method === 'home' && (dl.zone === 'airport' || (pk0.dropoff && pk0.dropoff.zone === 'airport'));
+    if (legacyAirport) {
+      const point = MDM.geo.airportPoints().find(p => p.value === (dl.meetAt || (pk0.dropoff || {}).meetAt));
+      d.method = 'airport';
+      Object.assign(d.airport, { point: point ? point.value : 'resort_counters', instructions: dl.instructions || '' });
+    }
+    Object.assign(d.delivery, { recipientName: dl.recipientName || '', recipientPhone: dl.recipientPhone || '', instructions: dl.instructions || '' });
+    if (d.method === 'home') {
+      Object.assign(d.delivery, { address: dl.address || '', zone: dl.zone && dl.zone !== 'airport' ? dl.zone : 'male', landmark: dl.landmark || '', meetAt: MDM.geo.meetAtOptions().some(m => m.value === dl.meetAt) ? dl.meetAt : 'door' });
+      const hit = savedAddresses.find(a => trim(a.address).toLowerCase() === trim(dl.address).toLowerCase());
+      d.delivery.savedId = hit ? hit.id : (savedAddresses.length ? 'new' : '');
+    }
+    if (d.method === 'boat' && dl.boat) Object.assign(d.boat, { vesselType: dl.boat.vesselType || 'speedboat', name: dl.boat.name || '', departureDate: '', departureTime: dl.boat.departureTime || '', jetty: dl.boat.jetty || '', island: dl.boat.island || '', address: dl.boat.address || '' });
+    if (d.method === 'cargo') d.cargo.island = (dl.cargo && dl.cargo.island) || dl.address || '';
+    if (d.method === 'airport' && dl.airport) Object.assign(d.airport, { point: dl.airport.point || 'resort_counters', counter: dl.airport.counter || '', resort: dl.airport.resort || '', speedboat: dl.airport.speedboat || '', departureTime: dl.airport.departureTime || '', instructions: dl.airport.instructions || dl.instructions || '' });
+    d.reorderFrom = { id: o.id, code: o.code };
+    applyDictatedTo(d);
+    return normalizeDraft(d);
+  }
+  const totalCountOf = c => SIZES.reduce((n, s) => n + (Number(c[s]) || 0), 0);
+  function applyDictatedTo(d) { const keep = draft; draft = d; applyDictated(); draft = keep; }
+  function startFrom(order, o) {
+    const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember };
+    draft = Object.assign(draftFromOrder(order), keep);
+    saveDraft();
+    if (!(o && o.silent)) MDM.ui.toast('Filled in from ' + order.code + '. Check each step, then send.', 'ok');
+    if (o && o.direct) setStep(6, { initial: true }); else go(6);
+  }
+  function renderNotice() {
+    if (!dom.notice) return;
+    const r = draft.reorderFrom;
+    dom.notice.hidden = !r;
+    if (!r) { dom.notice.replaceChildren(); return; }
+    dom.notice.replaceChildren(MDM.ui.notice('info', 'Filled in from your order ' + r.code + '. Check each step before you send it.', {
+      action: el('button', { type: 'button', class: 'btn btn--ghost btn--sm request-notice__reset', 'data-testid': 'request-start-over', on: { click: () => { const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember }; draft = Object.assign(emptyDraft(), keep); saveDraft(); go(1); renderNotice(); } } }, 'Start a new request instead'),
+    }));
   }
 
   // ---- Steps -------------------------------------------------------------------------------------------------------------------------
@@ -315,46 +612,52 @@
     return el('div', { class: 'form-actions' }, back, next);
   }
   function group(title, ...kids) { return el('div', { class: 'request-group' }, el('h3', { class: 'request-group__title' }, title), kids); }
+  const today = () => MDM.ui.dayKey(new Date());
+  const nowTime = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 
   function typeFields(n) {
     const d = draft.details, t = draft.type;
     const out = [];
+    const dictate = () => { applyDictated(); };
     if (t === 'postal') {
-      out.push(F(n, 'details.carrier', 'Carrier or collection point', { type: 'select', placeholder: 'Choose one', required: true, options: MDM.CARRIERS.map(c => ({ value: c.value, label: c.label })), testid: 'request-carrier', requiredMessage: 'Choose where to collect from', onChange: () => { applyDictated(); saveDraft(); rerender(n); updateSummary(); } }));
+      out.push(F(n, 'details.carrier', 'Carrier or collection point', { type: 'select', placeholder: 'Choose one', required: true, options: MDM.CARRIERS.map(c => ({ value: c.value, label: c.label })), testid: 'request-carrier', requiredMessage: 'Choose where to collect from', onChange: () => { applyDictated(); saveDraft(); rerender(n); } }));
       const c = d.carrier;
-      if (c === 'redbox_maafannu') out.push(grid(F(n, 'details.collectionCode', 'Collection code', { required: true, placeholder: 'From the Redbox SMS' }), F(n, 'details.collectBefore', 'Collect before', { type: 'datetime-local', required: true, hint: 'The time in the Redbox SMS' })));
-      if (c === 'redbox_main') out.push(grid(F(n, 'details.trackingNo', 'Tracking number', { required: true }), F(n, 'details.ownerName', 'Owner name', { required: true })), F(n, 'details.shippingAddress', 'Shipping address on the parcel', { required: true }), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true }));
-      if (c === 'pikpost') out.push(F(n, 'details.location', 'Pikpost location', { type: 'select', placeholder: 'Choose a location', required: true, options: MDM.PIKPOST_LOCATIONS, onChange: () => { applyDictated(); saveDraft(); updateSummary(); } }), grid(F(n, 'details.collectionCode', 'Collection code', { required: true }), F(n, 'details.collectBefore', 'Collect before (SMS time)', { type: 'datetime-local', required: true })));
+      const tracking = label => F(n, 'details.trackingNo', label || 'Tracking number', { required: true, testid: 'request-tracking-no' });
+      if (c === 'redbox_maafannu') out.push(tracking(), grid(F(n, 'details.collectionCode', 'Collection code', { required: true, placeholder: 'From the Redbox SMS' }), F(n, 'details.collectBefore', 'Collect before', { type: 'datetime-local', required: true, hint: 'The time in the Redbox SMS' })));
+      if (c === 'redbox_main') out.push(grid(tracking(), F(n, 'details.ownerName', 'Owner name', { required: true })), F(n, 'details.shippingAddress', 'Shipping address on the parcel', { required: true }), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true }));
+      if (c === 'pikpost') out.push(F(n, 'details.location', 'Pikpost location', { type: 'select', placeholder: 'Choose a location', required: true, options: MDM.PIKPOST_LOCATIONS, onChange: dictate }), tracking(), grid(F(n, 'details.collectionCode', 'Collection code', { required: true }), F(n, 'details.collectBefore', 'Collect before (SMS time)', { type: 'datetime-local', required: true })));
       if (c === 'post_office') {
-        out.push(F(n, 'details.postOffice', 'Post office', { type: 'select', placeholder: 'Choose a post office', required: true, options: MDM.POST_OFFICES, onChange: () => { applyDictated(); saveDraft(); updateSummary(); } }),
+        out.push(F(n, 'details.postOffice', 'Post office', { type: 'select', placeholder: 'Choose a post office', required: true, options: MDM.POST_OFFICES, onChange: dictate }), tracking(),
           F(n, 'details.collectionCode', 'Collection code', { hint: 'No code? Leave it empty, then send your ID details to the post collections contact and fill in the owner details below.', onChange: v => { if (!trim(v) !== !!dom.steps[n].querySelector('[data-testid="request-id-sent"]')) rerender(n); } }));
         if (!trim(d.collectionCode)) out.push(check(n, 'details.idSent', 'I will give my ID details to the post collections contact', { required: true, testid: 'request-id-sent' }),
           grid(F(n, 'details.ownerName', 'Owner name', { required: true }), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true })), F(n, 'details.shippingAddress', 'Shipping address on the parcel', { required: true }));
       }
-      if (c === 'courier') out.push(F(n, 'details.courierName', 'Courier', { type: 'select', placeholder: 'Choose the courier', required: true, options: COURIERS.map(x => ({ value: x, label: x })), onChange: () => { applyDictated(); saveDraft(); updateSummary(); } }),
-        grid(F(n, 'details.trackingNo', 'Tracking number', { required: true }), F(n, 'details.ownerName', 'Owner name', { required: true })), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true }));
-      if (c === 'dhl') out.push(F(n, 'details.trackingNo', 'Waybill or tracking number'), docField(n, 'collection_doc', 'DHL collection document', { required: true, hint: 'The authorisation document DHL asks for at the counter.' }));
+      if (c === 'courier') {
+        out.push(F(n, 'details.courierName', 'Courier', { type: 'select', placeholder: 'Choose the courier', required: true, options: COURIERS.map(x => ({ value: x, label: x })), onChange: () => { applyDictated(); saveDraft(); rerender(n); } }));
+        // A courier outside the list: its name and the office our driver collects from (that office becomes the collection address).
+        if (otherCourier()) out.push(F(n, 'details.courierOther', 'Courier name', { required: true, placeholder: 'For example Island Express', testid: 'request-courier-other', onChange: dictate }),
+          grid(F(n, 'details.courierAddress', 'Courier office address', { required: true, placeholder: 'Building name, street', testid: 'request-courier-address', onChange: dictate }),
+            F(n, 'details.courierZone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: 'request-courier-zone', onChange: dictate })));
+        out.push(grid(tracking(), F(n, 'details.ownerName', 'Owner name', { required: true })), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true }));
+      }
+      if (c === 'dhl') out.push(tracking('Waybill or tracking number'), docField(n, 'collection_doc', 'DHL collection document', { required: true, hint: 'The authorisation document DHL asks for at the counter.' }));
     }
-    if (t === 'shop_buy') out.push(F(n, 'details.shopName', 'Shop', { required: true, placeholder: 'For example STO People\'s Choice' }),
-      F(n, 'details.list', 'Shopping list', { type: 'textarea', required: true, rows: 4, placeholder: 'One item per line, with quantities' }),
-      grid(F(n, 'details.budget', 'Budget', { type: 'number', required: true, min: 1, hint: 'Paid upfront with the delivery fee. We refund what is left.' }), seg(n, 'details.unavailable', 'If something is not available', UNAVAILABLE)));
     if (t === 'shop_collect') {
-      out.push(F(n, 'details.shopName', 'Shop', { required: true, placeholder: 'Where you bought it' }), seg(n, 'details.proof', 'What do you have from the shop?', SHOP_PROOF, { onChange: () => rerender(n) }));
-      if (d.proof === 'invoice') out.push(docField(n, 'invoice', 'Shop invoice', { required: true }));
-      if (d.proof === 'quotation') out.push(docField(n, 'quotation', 'Quotation', { required: true }), docField(n, 'payment_slip', 'Payment slip', { required: true }));
-      if (d.proof === 'order_no') out.push(F(n, 'details.orderNo', 'Order number', { required: true }));
+      out.push(F(n, 'details.shopName', 'Shop or godown', { required: true, placeholder: 'For example Agora Mall, electronics counter', testid: 'request-shop-name', onChange: dictate }),
+        grid(F(n, 'details.shopAddress', 'Shop or godown address', { required: true, placeholder: 'Building name, street', testid: 'request-shop-address', onChange: dictate }),
+          F(n, 'details.shopZone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: 'request-shop-zone', onChange: dictate })),
+        seg(n, 'details.proof', 'What do you have from the shop?', SHOP_PROOF, { testid: 'request-proof', hint: 'Upload the invoice or the quotation, plus the payment slip.', onChange: () => { saveDraft(); rerender(n); updateSummary(); } }),
+        d.proof === 'quotation' ? docField(n, 'quotation', 'Quotation', { required: true }) : docField(n, 'invoice', 'Invoice', { required: true }),
+        docField(n, 'payment_slip', 'Payment slip', { required: true, hint: 'The transfer slip or receipt that shows you paid.' }),
+        F(n, 'details.orderNo', 'Order number', { placeholder: 'If the shop gave you one', testid: 'request-order-no' }));
     }
-    if (t === 'office') out.push(F(n, 'details.task', 'What do you need?', { type: 'select', required: true, options: MDM.OFFICE_TASKS }),
-      grid(F(n, 'details.organisation', 'Office or organisation', { required: true, placeholder: 'For example Ministry of Economic Development' }), F(n, 'details.reference', 'Reference numbers', { placeholder: 'Application or file numbers' })),
-      F(n, 'details.details', 'Details and instructions', { type: 'textarea', required: true, rows: 3, placeholder: 'What to submit or collect, who to ask for, what to bring back' }),
-      docField(n, 'document', 'Documents', { multiple: true, hint: 'Forms, letters or ID copies the office needs. Originals are collected from you.' }),
-      check(n, 'details.returnDocs', 'Bring the receipt or documents back to me'));
-    if (t === 'airport') {
-      out.push(seg(n, 'details.mode', 'Airport service', MDM.AIRPORT_MODES.map(m => ({ value: m.value, label: m.label })), { stack: true, onChange: () => { applyDictated(); saveDraft(); rerender(n); updateSummary(); } }),
-        F(n, 'details.area', 'Airport area', { type: 'select', required: true, options: MDM.geo.airportPoints().map(p => ({ value: p.value, label: p.label })), onChange: () => { applyDictated(); saveDraft(); updateSummary(); } }),
-        grid(F(n, 'details.flight', 'Flight number', { required: d.mode !== 'deliver', placeholder: 'For example EK 652' }), F(n, 'details.flightTime', d.mode === 'collect' ? 'Arrival time' : 'Departure time', { type: 'time', required: d.mode !== 'deliver' })),
-        grid(F(n, 'details.passengerName', 'Passenger name', { required: d.mode !== 'deliver' }), F(n, 'details.passengerPhone', 'Passenger phone', { type: 'tel', intl: true })));
-      if (d.mode === 'baggage') out.push(F(n, 'details.bags', 'Number of bags', { type: 'number', required: true, min: 1 }));
+    if (t === 'office') {
+      out.push(grid(F(n, 'details.organisation', 'Office or ministry', { required: true, placeholder: 'For example Ministry of Economic Development', testid: 'request-organisation' }),
+        F(n, 'details.task', 'What do you need?', { type: 'select', required: true, options: MDM.OFFICE_TASKS, testid: 'request-task' })),
+        F(n, 'details.reference', 'Reference numbers', { placeholder: 'Application, file or token numbers', testid: 'request-reference' }),
+        F(n, 'details.details', 'Details and instructions', { type: 'textarea', required: true, rows: 3, placeholder: 'What to submit or collect, who to ask for, what to bring back', testid: 'request-office-details' }),
+        docField(n, 'document', 'Documents', { multiple: true, hint: 'Forms, letters or ID copies the office needs. Originals are collected from you.' }),
+        check(n, 'details.returnDocs', 'Bring the receipt or documents back to me'));
     }
     return out;
   }
@@ -362,165 +665,313 @@
     const out = [seg(n, 'level', 'When', MDM.SERVICE_LEVELS, { stack: true, testid: 'request-level', onChange: () => { saveDraft(); rerender(n); updateSummary(); } })];
     if (draft.level === 'express') out.push(MDM.ui.notice('info', 'Express is subject to availability. We confirm it, and any express fee, with your final price.'));
     if (draft.level === 'advance') {
-      const today = MDM.ui.dayKey(new Date());
-      const later = v => { const s = draft.schedule; if (!s.collectDate || !s.deliverDate) return null; return (s.deliverDate + 'T' + (s.deliverTime || '00:00')) < (s.collectDate + 'T' + (s.collectTime || '00:00')) ? 'Delivery must be after collection' : null; };
-      out.push(grid(F(n, 'schedule.collectDate', 'Collection date', { type: 'date', required: true, attrs: { min: today }, validate: v => (v < today ? 'Choose today or a later date' : null) }), F(n, 'schedule.collectTime', 'Collection time', { type: 'time', required: true })),
-        grid(F(n, 'schedule.deliverDate', 'Delivery date', { type: 'date', required: true, attrs: { min: today }, validate: later }), F(n, 'schedule.deliverTime', 'Delivery time', { type: 'time', required: true, validate: later })));
+      const later = () => { const s = draft.schedule; if (!s.collectDate || !s.deliverDate) return null; return (s.deliverDate + 'T' + (s.deliverTime || '00:00')) < (s.collectDate + 'T' + (s.collectTime || '00:00')) ? 'Delivery must be after collection' : null; };
+      out.push(grid(F(n, 'schedule.collectDate', 'Collection date', { type: 'date', required: true, attrs: { min: today() }, validate: v => (v < today() ? 'Choose today or a later date' : null) }), F(n, 'schedule.collectTime', 'Collection time', { type: 'time', required: true })),
+        grid(F(n, 'schedule.deliverDate', 'Delivery date', { type: 'date', required: true, attrs: { min: today() }, validate: later }), F(n, 'schedule.deliverTime', 'Delivery time', { type: 'time', required: true, validate: later })));
     }
     return out;
   }
+  function reorderGroup(n) {
+    if (!reorderChoices.length) return null;
+    return el('div', { class: 'request-group request-group--first', 'data-testid': 'request-reorder' },
+      el('h3', { class: 'request-group__title' }, 'Order again'),
+      el('p', { class: 'request-group__desc' }, 'Start from one of your orders. We fill in every step for you to check.'),
+      el('div', { class: 'request-cards request-again' }, reorderChoices.map(c => el('button', { type: 'button', class: 'request-card request-card--button', 'data-testid': 'request-reorder-' + c.key, on: { click: () => startFrom(c.order) } },
+        el('span', { class: 'request-card__label' }, c.label), el('span', { class: 'request-card__hint' }, c.hint), el('span', { class: 'request-card__meta' }, c.meta)))));
+  }
+  function businessPanel() {
+    const tiers = MDM.pricing.businessTiers(settings);
+    return el('div', { class: 'request-business card', 'data-testid': 'request-business' },
+      el('div', { class: 'card__body stack-4' },
+        el('div', null, el('h3', { class: 'request-group__title' }, 'Business deliveries are booked in the business portal'),
+          el('p', { class: 'request-group__desc' }, 'Approved businesses get a fixed delivery rate for each agreed package size, bulk orders from a form or a spreadsheet, cash on delivery collected from your customers, and one monthly invoice.')),
+        el('div', { class: 'rate-table', 'data-testid': 'request-business-tiers', 'aria-label': 'Business starting rates by package size' },
+          tiers.map(t => MDM.ui.rateRow(t.label + ' (' + MDM.pricing.sizeLabel(t.size) + ')', 'from ' + fmt(t.rate), { sub: t.hint, mono: true }))),
+        el('p', { class: 'request-group__desc' }, 'These are starting rates per package; each business gets its own agreed rates. To open an account, send a photo of a typical package with your request; we use it to agree your package size categories and rates.'),
+        el('div', { class: 'request-business__actions' },
+          el('a', { class: 'btn btn--brand', href: MDM.href('business/'), 'data-testid': 'request-business-portal' }, 'Go to the business portal'),
+          el('a', { class: 'btn btn--secondary', href: MDM.href('login/?as=business'), 'data-testid': 'request-business-signin' }, 'Business sign-in'))));
+  }
   function step1(n) {
+    const out = [head(n, 'What do you need?', 'Choose a service. Each one asks only for what our driver needs.'), reorderGroup(n)];
+    out.push(cards(n, {
+      name: 'category', label: 'Service', testid: 'request-category', value: draft.category, cols: 3,
+      options: MDM.SERVICE_CATEGORIES.map(c => ({ value: c.value, label: c.label, hint: c.hint })),
+      onChange: v => { chooseCategory(v); saveDraft(); rerender(n); renderStepper(); updateSummary(); },
+      check: () => (isBusiness() ? 'Business deliveries are booked in the business portal' : null),
+    }));
+    if (isBusiness()) { out.push(businessPanel()); return out; }
+    if (draft.category === 'pick') {
+      out.push(cards(n, {
+        name: 'type', label: 'What do we collect?', testid: 'request-type', value: draft.type, cols: 2,
+        options: MDM.requestTypes('pick').map(t => ({ value: t.value, label: t.label, hint: t.hint })),
+        onChange: v => { draft.type = v; applyDictated(); saveDraft(); rerender(n); updateSummary(); },
+      }));
+    }
     const extra = typeFields(n);
-    const types = el('div', { class: 'request-types', role: 'radiogroup', 'aria-labelledby': 'rq-type-label', 'data-testid': 'request-type' },
-      MDM.REQUEST_TYPES.map(t => el('label', { class: ['request-type', draft.type === t.value ? 'is-selected' : null], 'data-testid': 'request-type-' + t.value },
-        el('input', { class: 'sr-only', type: 'radio', name: 'rq-type', value: t.value, checked: draft.type === t.value }),
-        el('span', { class: 'request-type__label' }, t.label), el('span', { class: 'request-type__hint' }, t.hint))));
-    types.addEventListener('change', e => {
-      if (!e.target || !e.target.checked) return;
-      draft.type = e.target.value; applyDictated(); saveDraft(); rerender(n); updateSummary();
-    });
-    return [head(n, 'What do you need?', 'Pick the kind of job. Each one asks only for what our driver needs.'),
-      el('div', { class: 'field' }, el('span', { class: 'field__label', id: 'rq-type-label' }, 'Request type'), types),
-      extra.length ? group(typeOf().label, extra) : null,
-      group('Timing', scheduleFields(n)),
-      actions()];
+    if (extra.length) out.push(group(typeOf().label, extra));
+    out.push(group('Timing', scheduleFields(n)), actions());
+    return out;
   }
-  function savedChips(target) {
-    if (!savedAddresses.length) return null;
-    return el('div', { class: 'request-saved' }, el('span', { class: 'field__label' }, 'Saved addresses'),
-      el('div', { class: 'row row--wrap' }, savedAddresses.map(a => el('button', { type: 'button', class: 'chip', 'data-testid': 'request-saved-address', on: { click: () => {
-        Object.assign(draft[target], { address: a.address, zone: a.zone || 'male', landmark: a.landmark || draft[target].landmark, auto: false });
-        saveDraft(); renderStep(step); updateSummary();
-      } } }, (a.label ? a.label + ': ' : '') + a.address))));
-  }
-  function zoneOptions(allowAirport) { return MDM.geo.zoneOptions().filter(z => allowAirport || z.value !== 'airport'); }
   function step2(n) {
+    if (isShop()) return shopStep(n);
     applyDictated();
     const locked = !!dictatedCollection();
-    const shop = draft.type === 'shop_buy' || draft.type === 'shop_collect';
-    const title = shop ? 'Where is the shop?' : 'Where do we collect from?';
-    const desc = locked ? 'We filled this in from your ' + (draft.type === 'airport' ? 'airport details' : 'carrier') + '. Add anything that helps the driver.' : 'The address our driver goes to first.';
-    return [head(n, title, desc),
-      locked ? null : savedChips('collection'),
-      F(n, 'collection.address', shop ? 'Shop address' : 'Collection address', { required: true, placeholder: 'House or building name, street', auto: 'collection', attrs: { autocomplete: 'street-address', readonly: locked ? true : null } }),
-      grid(F(n, 'collection.zone', 'Area', { type: 'select', required: true, disabled: locked, options: zoneOptions(airportCollect()), onChange: () => { draft.collection.auto = false; } }),
-        F(n, 'collection.landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school' })),
-      grid(F(n, 'collection.contactName', shop ? 'Shop contact' : 'Contact person', { required: !shop && draft.type !== 'postal', placeholder: 'Who hands it over', onChange: () => { draft.collection.autoContact = false; } }),
-        F(n, 'collection.contactPhone', 'Contact number', { type: 'tel', intl: true, required: !shop && draft.type !== 'postal' && draft.type !== 'airport' })),
+    const t = draft.type;
+    const title = t === 'shop_collect' ? 'Collect from the shop or godown' : t === 'postal' ? 'Collect from the carrier' : t === 'office' ? 'Where do we collect the documents?' : 'Where do we collect from?';
+    const desc = locked ? (t === 'shop_collect' ? 'We filled this in from the shop details in step 1. Add anything that helps the driver.' : 'We filled this in from your carrier. Add anything that helps the driver.')
+      : t === 'office' ? 'Where our driver picks up your documents, or the office address if we collect from the office.' : 'The address our driver goes to first.';
+    const out = [head(n, title, desc)];
+    if (locked) {
+      out.push(F(n, 'collection.address', 'Collection address', { required: true, testid: 'request-collection-address', attrs: { readonly: true } }),
+        grid(F(n, 'collection.zone', 'Area', { type: 'select', required: true, disabled: true, options: zoneOptions(), testid: 'request-collection-zone' }),
+          F(n, 'collection.landmark', 'Landmark', { placeholder: 'Floor, counter or gate', testid: 'request-collection-landmark' })));
+    } else {
+      out.push(savedPicker(n, 'collection'));
+      if (isNewAddress('collection')) out.push(...addressFields(n, 'collection', 'Collection address'));
+    }
+    const contactRequired = t === 'home' || t === 'office';
+    out.push(grid(F(n, 'collection.contactName', t === 'shop_collect' ? 'Shop contact' : 'Contact person', { required: contactRequired, placeholder: 'Who hands it over', onChange: () => { draft.collection.autoContact = false; } }),
+        F(n, 'collection.contactPhone', 'Contact number', { type: 'tel', intl: true, landline: t !== 'home', required: contactRequired })),
       F(n, 'collection.instructions', 'Instructions for the driver', { type: 'textarea', rows: 2, placeholder: 'Floor, gate, best time to call' }),
+      actions());
+    return out;
+  }
+  const blankItem_ = it => !it || (!trim(it.name) && !trim(it.details) && !trim(it.instructions));
+  function itemsEditor(n) {
+    const rows = draft.items.map((it, i) => {
+      const p = 'items.' + i + '.';
+      return el('div', { class: 'request-item', 'data-testid': 'request-item' },
+        el('div', { class: 'request-item__num', 'aria-hidden': 'true' }, 'Item ' + (i + 1)),
+        F(n, p + 'name', 'Item', { noOptional: true, placeholder: 'For example basmati rice', testid: 'request-item-name', fieldClass: 'request-item__name',
+          // An untouched extra row (no name, details or instructions) is skipped instead of blocking the step.
+          validate: v => (v || (blankItem_(draft.items[i]) && draft.items.some(x => trim(x.name))) ? null : 'Name the item') }),
+        F(n, p + 'details', 'Details', { noOptional: true, placeholder: 'Brand, size or colour', testid: 'request-item-details', fieldClass: 'request-item__details' }),
+        F(n, p + 'qty', 'Quantity', { type: 'number', required: true, min: 1, testid: 'request-item-qty', attrs: { min: '1', max: '999', step: '1' }, validate: v => (Number.isInteger(Number(v)) && Number(v) <= 999 ? null : 'Enter a whole number up to 999'), fieldClass: 'request-item__qty' }),
+        F(n, p + 'instructions', 'Special instructions', { noOptional: true, placeholder: 'Anything to check', testid: 'request-item-instructions', fieldClass: 'request-item__notes' }),
+        el('div', { class: 'request-item__remove' }, el('button', { type: 'button', class: 'btn btn--ghost btn--icon', 'aria-label': 'Remove item ' + (i + 1), 'data-testid': 'request-item-remove', disabled: draft.items.length < 2,
+          on: { click: () => { draft.items.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="request-item-add"]'); if (b) b.focus({ preventScroll: true }); } } }, html(MDM.icon('trash', 16)))));
+    });
+    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'request-item-add', disabled: draft.items.length >= MAX_ITEMS,
+      on: { click: () => { draft.items.push(blankItem()); saveDraft(); renderStep(n); updateSummary(); const all = dom.steps[n].querySelectorAll('[data-testid="request-item-name"]'); if (all.length) all[all.length - 1].focus(); } } }, html(MDM.icon('plus', 16)), 'Add an item');
+    const wrap = el('div', { class: 'field request-items-field', 'data-field': 'items' },
+      el('div', { class: 'request-items__head', 'aria-hidden': 'true' }, el('span', null, 'Item'), el('span', null, 'Details'), el('span', null, 'Quantity'), el('span', null, 'Special instructions'), el('span', null, '')),
+      el('div', { class: 'request-items', 'data-testid': 'request-items' }, rows), el('div', { class: 'request-items__add' }, addBtn), el('div', { class: 'field__error', hidden: true }));
+    reg(n, wrap, () => (draft.items.some(it => trim(it.name)) ? null : 'Add at least one item'));
+    return wrap;
+  }
+  function shopStep(n) {
+    const pct = Number(rates().shoppingPct) || 0;
+    return [head(n, 'Shop and items', 'Tell us where to buy and what to buy. We buy the items and deliver them to you.'),
+      group('Shop or supplier',
+        F(n, 'shop.name', 'Shop or supplier name', { required: true, placeholder: "For example STO People's Choice", testid: 'request-shop-name' }),
+        grid(F(n, 'shop.address', 'Shop address', { required: true, placeholder: 'Building name, street', testid: 'request-shop-address' }),
+          F(n, 'shop.zone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: 'request-shop-zone' })),
+        grid(F(n, 'shop.landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school', testid: 'request-shop-landmark' }),
+          F(n, 'shop.phone', 'Shop phone', { type: 'tel', intl: true, landline: true, testid: 'request-shop-phone' }))),
+      group('Items to buy', itemsEditor(n)),
+      group('Budget and charges',
+        F(n, 'shop.budget', 'Budget', { type: 'number', required: true, min: 1, testid: 'request-budget', attrs: { min: '1', step: '1' }, hint: 'The most we spend on the items. The ' + pct + '% shopping fee is worked out on it, then on the receipt.' }),
+        seg(n, 'shop.unavailable', 'If something is not available', UNAVAILABLE, { testid: 'request-unavailable' }),
+        el('div', { class: 'summary request-charges', 'data-live-charges': 'request-shop', 'data-testid': 'request-shop-charges' }, chargeLines(priceModel(), 'request-shop')),
+        MDM.ui.notice('info', 'Shopping orders are paid upfront: the budget, the shopping fee and the delivery charge, once our team confirms the price. We refund what is not spent.')),
       actions()];
   }
   function step3(n) {
-    const sg = settings.sizeGuide || {}, sizes = (settings.rates || {}).sizes || {};
-    const priceOf = s => { const c = sizes[s] || {}; return s === 'xl' ? 'from ' + fmt(c.same) : fmt(c.same) + ' to ' + fmt(c.cross).replace('MVR ', ''); };
+    const sg = settings.sizeGuide || {};
+    const shop = isShop();
     const rows = SIZES.map(size => {
       const count = Number(draft.counts[size]) || 0;
       const out = el('output', { class: 'request-qty__value mono', 'aria-live': 'polite', 'data-testid': 'request-qty-' + size }, String(count));
-      const setCount = v => { draft.counts[size] = Math.max(0, Math.min(MAX_PER_SIZE, v)); saveDraft(); rerender(n); updateSummary(); };
+      const setCount = v => { draft.counts[size] = Math.max(0, Math.min(MAX_PER_SIZE, v)); if (!vehicleEligible()) draft.extraVehicle = false; saveDraft(); rerender(n); updateSummary(); };
       const label = MDM.pricing.sizeLabel(size);
-      const detail = count ? el('div', { class: 'request-size__detail', 'data-testid': 'request-size-detail-' + size },
-        el('div', { class: 'request-size__caption' }, 'Size, weight and photo help us confirm the price faster. All optional.'),
-        el('div', { class: 'grid-3 request-dims' },
-          F(n, 'sizes.' + size + '.l', 'Length (cm)', { type: 'number', noOptional: true, testid: 'request-dim-' + size + '-l' }), F(n, 'sizes.' + size + '.w', 'Width (cm)', { type: 'number', noOptional: true, testid: 'request-dim-' + size + '-w' }), F(n, 'sizes.' + size + '.h', 'Height (cm)', { type: 'number', noOptional: true, testid: 'request-dim-' + size + '-h' })),
-        el('div', { class: 'grid-2' }, F(n, 'sizes.' + size + '.kg', 'Weight (kg)', { type: 'number', noOptional: true, testid: 'request-dim-' + size + '-kg' }), photoPicker(size))) : null;
       return el('div', { class: ['request-size', count ? 'is-on' : null], 'data-size': size },
         el('div', { class: 'request-size__row' },
-          el('div', { class: 'request-size__main' }, el('div', { class: 'request-size__label' }, label, el('span', { class: 'request-size__price mono' }, priceOf(size))), el('div', { class: 'request-size__hint' }, sg[size] || '')),
+          el('div', { class: 'request-size__main' }, el('div', { class: 'request-size__label' }, label === 'XL' ? 'XL-size package' : label, el('span', { class: 'request-size__price mono', 'data-testid': 'request-range-' + size }, MDM.pricing.rangeLabel(size, settings))), el('div', { class: 'request-size__hint' }, sg[size] || '')),
           el('div', { class: 'request-qty', role: 'group', 'aria-label': label + ' quantity' },
             el('button', { type: 'button', class: 'btn btn--secondary btn--icon btn--sm', 'aria-label': 'Fewer ' + label + ' packages', 'data-testid': 'request-qty-' + size + '-minus', disabled: !count, on: { click: () => setCount(count - 1) } }, html(MDM.icon('minus', 16))),
             out,
             el('button', { type: 'button', class: 'btn btn--secondary btn--icon btn--sm', 'aria-label': 'More ' + label + ' packages', 'data-testid': 'request-qty-' + size + '-plus', disabled: count >= MAX_PER_SIZE, on: { click: () => setCount(count + 1) } }, html(MDM.icon('plus', 16))))),
-        detail);
+        count && !shop ? el('div', { class: 'request-size__detail', 'data-testid': 'request-size-detail-' + size }, photoPicker(size)) : null);
     });
     const qtyField = el('div', { class: 'field request-sizes', 'data-field': 'counts' }, rows, el('div', { class: 'field__error', hidden: true }));
     reg(n, qtyField, () => (totalCount() ? null : 'Add at least 1 package'), () => qtyField.querySelector('[data-testid="request-qty-bag-plus"]'));
-    const r = estimate();
-    return [head(n, 'What are we carrying?', 'Choose how many of each size. Sizes are checked at collection.'),
+    const m = priceModel();
+    return [head(n, shop ? 'How big will the shopping be?' : 'What are we carrying?', shop ? 'Choose the size the items are likely to fill. Our team checks it when the shopping is done.' : 'Choose how many of each size. No measuring: add a photo if you like and our team confirms the size.'),
       qtyField,
-      el('div', { class: 'request-estimate', 'data-testid': 'request-estimate' }, el('span', { class: 'request-estimate__label' }, 'Estimated price'), el('span', { class: 'request-estimate__value mono' }, rangeText(r))),
-      MDM.ui.notice('info', 'Sizes and photos are optional. Without a photo, our driver photographs the package at collection and our team confirms the final price, including any vehicle fee, before you pay.'),
-      F(n, 'description', 'What is inside?', { required: true, placeholder: 'For example documents, a cake box, a phone charger', testid: 'request-description' }),
-      el('div', { class: 'row row--wrap request-flags' }, check(n, 'fragile', 'Fragile, handle with care'), draft.counts.xl ? check(n, 'vehicle', 'May need a car or pickup', { hint: 'We confirm the vehicle charge with the price' }) : null),
+      el('div', { class: 'request-estimate', 'data-testid': 'request-estimate' }, el('span', { class: 'request-estimate__label' }, 'Estimated delivery price'), el('span', { class: 'request-estimate__value mono' }, m ? rangeText(m.delivery, m.xl) : 'Add a package')),
+      vehicleEligible() ? el('div', { class: 'request-option', 'data-testid': 'request-extra-vehicle-box' },
+        check(n, 'extraVehicle', 'Extra vehicle', { testid: 'request-extra-vehicle', hint: 'More than one box or XL package may need a car or a pickup. Our team confirms the vehicle charge with your final price, before you pay.' })) : null,
+      MDM.ui.notice('info', shop ? 'The size sets the delivery price. If the shopping turns out bigger, our team changes the size and you see the new price before you pay.'
+        : 'Photos are optional. Without one, our driver photographs the package at collection. If a package does not match its size, our team changes the size and you see the new price before you pay.'),
+      F(n, 'description', shop ? 'What kind of shopping is it?' : 'What is inside?', { required: true, placeholder: shop ? 'For example groceries, medicine, a gift' : 'For example documents, a cake box, a phone charger', testid: 'request-description' }),
+      el('div', { class: 'row row--wrap request-flags' }, check(n, 'fragile', 'Fragile, handle with care')),
       actions()];
   }
+  function receiverFields(n) {
+    return grid(F(n, 'delivery.recipientName', 'Receiver name', { required: true, testid: 'request-recipient-name', attrs: { autocomplete: 'off' } }),
+      F(n, 'delivery.recipientPhone', "Receiver's contact number", { type: 'tel', intl: true, landline: true, required: true, testid: 'request-recipient-phone' }));
+  }
+  function methodFields(n) {
+    const m = draft.method, out = [];
+    if (m === 'home') {
+      out.push(savedPicker(n, 'delivery'));
+      if (isNewAddress('delivery')) out.push(...addressFields(n, 'delivery', 'Delivery address'));
+      out.push(seg(n, 'delivery.meetAt', 'Hand over at', MDM.geo.meetAtOptions(), { testid: 'request-meet-at' }),
+        check(n, 'delivery.self', "I'm receiving it myself", { testid: 'request-self', onChange: () => rerender(n) }),
+        draft.delivery.self ? null : receiverFields(n),
+        F(n, 'delivery.instructions', 'Additional delivery instructions', { type: 'textarea', rows: 2, placeholder: 'Floor, gate, who to ask for', testid: 'request-delivery-instructions' }));
+    }
+    if (m === 'boat') {
+      const vessel = (MDM.VESSEL_TYPES.find(v => v.value === draft.boat.vesselType) || MDM.VESSEL_TYPES[0]).label.replace(' (dhoni)', '');
+      out.push(grid(F(n, 'boat.island', 'Destination island', { required: true, placeholder: 'For example Thoddoo, Alifu Alifu', testid: 'request-boat-island' }),
+          F(n, 'boat.address', 'Destination address', { placeholder: 'House name on the island', testid: 'request-boat-address' })),
+        receiverFields(n),
+        seg(n, 'boat.vesselType', 'Vessel', MDM.VESSEL_TYPES, { testid: 'request-boat-vessel', required: true, onChange: () => { saveDraft(); rerender(n); updateSummary(); } }),
+        grid(F(n, 'boat.name', vessel + ' name', { required: true, placeholder: 'For example Alihaa Express', testid: 'request-boat-name' }),
+          F(n, 'boat.jetty', 'Harbour or jetty', { type: 'select', required: true, placeholder: 'Choose the harbour or jetty', options: MDM.geo.jetties().map(j => ({ value: j.value, label: j.label })), testid: 'request-boat-jetty' })),
+        grid(F(n, 'boat.departureDate', 'Departure date', { type: 'date', required: true, attrs: { min: today() }, validate: v => (v < today() ? 'Choose today or a later date' : null), testid: 'request-boat-date' }),
+          F(n, 'boat.departureTime', 'Departure time', { type: 'time', required: true, testid: 'request-boat-time', validate: v => (v && draft.boat.departureDate === today() && v <= nowTime() ? 'This time has passed today. Choose a later time or another date' : null) })),
+        F(n, 'delivery.instructions', 'Instructions for the driver', { type: 'textarea', rows: 2, placeholder: 'For example ask for the captain, hand to the boat crew', testid: 'request-delivery-instructions' }),
+        MDM.ui.notice('info', 'These details are printed on the package label: the destination, the island and the receiver\'s contact. Our operator and driver use them to hand the package to the right ' + vessel.toLowerCase() + '.'));
+    }
+    if (m === 'cargo') {
+      out.push(MDM.ui.notice('info', 'We deliver the package to the Maldivian Cargo counter at the main bus terminal, and Maldivian Cargo takes it to the island. The Maldivian Cargo fee of ' + cargoFeeText() + ' is added to your total.', { testid: 'request-cargo-note' }),
+        F(n, 'cargo.island', 'Destination island', { required: true, placeholder: 'For example Kulhudhuffushi, Haa Dhaalu', testid: 'request-cargo-island' }),
+        receiverFields(n),
+        F(n, 'delivery.instructions', 'Instructions for the counter', { type: 'textarea', rows: 2, placeholder: 'Anything Maldivian Cargo needs to know', testid: 'request-delivery-instructions' }));
+    }
+    if (m === 'airport') {
+      // Counter and resort are needed for a resort counter handover; other airport points (departures, arrivals…) only need the receiver.
+      const atCounter = getPath('airport.point') === 'resort_counters';
+      out.push(MDM.ui.notice('info', 'We hand the package over at Velana International Airport. The airport fee of ' + airportFeeText() + ' is added to your total.', { testid: 'request-airport-note' }),
+        grid(F(n, 'airport.point', 'Collection point at the airport', { type: 'select', required: true, options: MDM.geo.airportPoints().map(p => ({ value: p.value, label: p.label })), testid: 'request-airport-point',
+            onChange: () => { renderStep(n); const s = dom.steps[n].querySelector('[data-testid="request-airport-point"]'); if (s) s.focus({ preventScroll: true }); } }),
+          F(n, 'airport.counter', 'Resort counter or collection point', { required: atCounter, placeholder: 'For example Lagoon Point Resort counter', testid: 'request-airport-counter' })),
+        receiverFields(n),
+        F(n, 'airport.resort', 'Resort or destination', { required: atCounter, placeholder: 'For example Lagoon Point Resort, Baa Atoll', testid: 'request-airport-resort' }),
+        grid(F(n, 'airport.speedboat', 'Resort speedboat', { placeholder: 'If the resort sends one', testid: 'request-airport-speedboat' }),
+          F(n, 'airport.departureTime', 'Speedboat departure time', { type: 'time', testid: 'request-airport-time' })),
+        F(n, 'airport.instructions', 'Instructions for the airport or resort handover', { type: 'textarea', rows: 2, placeholder: 'Who to hand it to, the guest\'s flight, anything the counter needs', testid: 'request-airport-instructions' }));
+    }
+    return out;
+  }
   function step4(n) {
-    applyDictated();
-    const locked = !!dictatedDelivery();
-    return [head(n, 'Where does it go?', locked ? 'We filled in the airport area from step 1.' : 'The address our driver delivers to.'),
-      locked ? null : savedChips('delivery'),
-      F(n, 'delivery.address', 'Delivery address', { required: true, placeholder: 'House or building name, street', auto: 'delivery', attrs: { autocomplete: 'street-address', readonly: locked ? true : null } }),
-      grid(F(n, 'delivery.zone', 'Area', { type: 'select', required: true, disabled: locked, options: zoneOptions(airportDeliver()) }), F(n, 'delivery.landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school' })),
-      locked ? null : seg(n, 'delivery.meetAt', 'Hand over at', MDM.geo.meetAtOptions()),
-      check(n, 'delivery.self', "I'm receiving it myself", { onChange: () => rerender(n) }),
-      draft.delivery.self ? null : grid(F(n, 'delivery.recipientName', 'Recipient name', { required: true }), F(n, 'delivery.recipientPhone', 'Recipient number', { type: 'tel', intl: true, required: true })),
-      F(n, 'delivery.instructions', 'Instructions for the driver', { type: 'textarea', rows: 2, placeholder: 'Floor, gate, who to ask for' }),
+    const feeNote = { cargo: 'Plus the Maldivian Cargo fee, ' + cargoFeeText(), airport: 'Plus the airport fee, ' + airportFeeText() };
+    return [head(n, 'How do we deliver it?', 'Choose where we hand it over. Each option asks only for what the driver needs.'),
+      cards(n, {
+        name: 'method', label: 'Delivery method', testid: 'request-method', value: draft.method, cols: 2,
+        options: MDM.DELIVERY_METHODS.map(m => ({ value: m.value, label: m.label, hint: m.hint, meta: feeNote[m.value] || null })),
+        onChange: v => { draft.method = v; saveDraft(); rerender(n); updateSummary(); },
+      }),
+      group(MDM.deliveryMethodLabel(draft.method), methodFields(n)),
       actions()];
   }
   function step5(n) {
-    const shop = draft.type === 'shop_buy';
-    if (shop) draft.pay = 'upfront';
+    const shop = isShop();   // shopping is always paid upfront; the customer's own choice is kept for their next pick & deliver order
     return [head(n, 'Your details', 'We message you when the price is confirmed and at every step after.'),
       grid(F(n, 'customer.name', 'Your name', { required: true, attrs: { autocomplete: 'name' } }), F(n, 'customer.phone', 'Mobile number', { type: 'tel', required: true, hint: 'We send updates to this number' })),
       seg(n, 'customer.notify', 'Send updates by', NOTIFY, { onChange: () => { saveDraft(); rerender(n); } }),
       F(n, 'customer.email', 'Email', { type: 'email', required: draft.customer.notify === 'email', attrs: { autocomplete: 'email' } }),
-      shop ? MDM.ui.notice('info', 'Shopping orders are paid upfront: the budget plus the delivery fee, once we confirm the price. We refund what is left.')
+      shop ? MDM.ui.notice('info', 'Shopping orders are paid upfront: the budget, the shopping fee and the delivery charge, once we confirm the price. We refund what is not spent.')
         : seg(n, 'pay', 'When do you want to pay?', [{ value: 'after', label: 'After delivery', hint: 'We send the invoice when it is delivered' }, { value: 'upfront', label: 'Upfront', hint: 'Pay once we confirm the price' }], { stack: true, testid: 'request-pay' }),
       check(n, 'remember', 'Remember me on this device', { testid: 'request-remember' }),
       actions({ label: 'Review request' })];
   }
-  function reviewRow(label, value) { return MDM.ui.rateRow(label, value); }
-  function reviewGroup(title, n, rows) {
-    return el('div', { class: 'rate-table request-review__group' },
+  const reviewRow = (label, value) => MDM.ui.rateRow(label, value);
+  function reviewGroup(title, n, rows, testid) {
+    return el('div', { class: 'rate-table request-review__group', 'data-testid': testid || null },
       MDM.ui.rateRow(title, el('button', { type: 'button', class: 'btn btn--ghost btn--sm review__edit', 'data-testid': 'request-edit-' + n, on: { click: () => go(n) } }, 'Edit', el('span', { class: 'sr-only' }, ' ' + title)), { head: true }),
       rows.filter(Boolean));
   }
-  function detailRows() {
+  function relevantDoc(kind) {
+    const t = draft.type, d = draft.details;
+    if (isShop()) return false;
+    if (t === 'postal') return d.carrier === 'dhl' && kind === 'collection_doc';
+    if (t === 'shop_collect') return kind === 'payment_slip' || kind === (d.proof === 'quotation' ? 'quotation' : 'invoice');
+    if (t === 'office') return kind === 'document';
+    return false;
+  }
+  function serviceRows() {
     const d = draft.details, t = draft.type, rows = [];
     const add = (l, v) => { if (trim(v)) rows.push(reviewRow(l, String(v))); };
+    add('Service', categoryInfo().label);
+    if (!isShop()) add('Collection type', typeOf().label);
     if (t === 'postal') {
+      const k = postalKeys(), has = key => k.indexOf(key) >= 0;
       add('Carrier', (carrier() || {}).label);
-      if (d.carrier === 'pikpost') add('Location', (MDM.PIKPOST_LOCATIONS.find(x => x.value === d.location) || {}).label);
-      if (d.carrier === 'post_office') add('Post office', (MDM.POST_OFFICES.find(x => x.value === d.postOffice) || {}).label);
-      if (d.carrier === 'courier') add('Courier', d.courierName);
-      add('Collection code', d.collectionCode); add('Collect before', d.collectBefore ? d.collectBefore.replace('T', ' ') : '');
-      add('Tracking number', d.trackingNo); add('Owner', d.ownerName); add('Owner contact', d.ownerContact); add('Shipping address', d.shippingAddress);
+      if (has('location')) add('Location', (MDM.PIKPOST_LOCATIONS.find(x => x.value === d.location) || {}).label);
+      if (has('postOffice')) add('Post office', (MDM.POST_OFFICES.find(x => x.value === d.postOffice) || {}).label);
+      if (has('courierName')) add('Courier', has('courierOther') ? d.courierOther : d.courierName);
+      if (has('trackingNo')) add(d.carrier === 'dhl' ? 'Waybill or tracking number' : 'Tracking number', d.trackingNo);
+      if (has('collectionCode')) add('Collection code', d.collectionCode);
+      if (has('collectBefore')) add('Collect before', d.collectBefore ? d.collectBefore.replace('T', ' ') : '');
+      if (has('ownerName')) add('Owner', d.ownerName);
+      if (has('ownerContact')) add('Owner contact', d.ownerContact ? phone.format(d.ownerContact) : '');
+      if (has('shippingAddress')) add('Shipping address', d.shippingAddress);
     }
-    if (t === 'shop_buy') { add('Shop', d.shopName); add('List', d.list); add('Budget', d.budget ? fmt(d.budget) : ''); add('If unavailable', (UNAVAILABLE.find(x => x.value === d.unavailable) || {}).label); }
-    if (t === 'shop_collect') { add('Shop', d.shopName); add('Proof', (SHOP_PROOF.find(x => x.value === d.proof) || {}).label); add('Order number', d.proof === 'order_no' ? d.orderNo : ''); }
-    if (t === 'office') { add('Task', (MDM.OFFICE_TASKS.find(x => x.value === d.task) || {}).label); add('Office', d.organisation); add('References', d.reference); add('Details', d.details); if (d.returnDocs) add('Return', 'Bring the receipt or documents back'); }
-    if (t === 'airport') { add('Service', (MDM.AIRPORT_MODES.find(x => x.value === d.mode) || {}).label); add('Area', areaLabel(d.area)); add('Flight', [d.flight, d.flightTime].filter(Boolean).join(' at ')); add('Passenger', [d.passengerName, d.passengerPhone].filter(Boolean).join(', ')); if (d.mode === 'baggage') add('Bags', d.bags); }
+    if (t === 'shop_collect') { add('Shop or godown', [d.shopName, d.shopAddress].filter(trim).join(', ')); add('Proof', d.proof === 'quotation' ? 'Quotation and payment slip' : 'Invoice and payment slip'); add('Order number', d.orderNo); }
+    if (t === 'office') { add('Office or ministry', d.organisation); add('Task', (MDM.OFFICE_TASKS.find(x => x.value === d.task) || {}).label); add('References', d.reference); add('Details', d.details); if (d.returnDocs) add('Return', 'Bring the receipt or documents back'); }
     const docs = draft.docs.filter(x => relevantDoc(x.kind));
     if (docs.length) rows.push(reviewRow('Documents', docs.map(x => x.name).join(', ')));
     add('Timing', draft.level === 'advance' ? 'Collect ' + draft.schedule.collectDate + ' ' + draft.schedule.collectTime + ', deliver ' + draft.schedule.deliverDate + ' ' + draft.schedule.deliverTime : (MDM.SERVICE_LEVELS.find(x => x.value === draft.level) || {}).label);
     return rows;
   }
-  function relevantDoc(kind) {
-    const t = draft.type, d = draft.details;
-    if (t === 'postal') return d.carrier === 'dhl' && kind === 'collection_doc';
-    if (t === 'shop_collect') return (d.proof === 'invoice' && kind === 'invoice') || (d.proof === 'quotation' && (kind === 'quotation' || kind === 'payment_slip'));
-    if (t === 'office') return kind === 'document';
-    return false;
+  function collectionRows() {
+    const c = draft.collection;
+    if (isShop()) {
+      const s = draft.shop;
+      return [reviewRow('Shop', s.name), reviewRow('Address', [s.address, MDM.geo.zoneLabel(s.zone)].filter(trim).join(', ')), trim(s.landmark) ? reviewRow('Landmark', s.landmark) : null, trim(s.phone) ? reviewRow('Phone', phone.format(s.phone)) : null,
+        reviewRow('Items', el('ol', { class: 'request-review__items', 'data-testid': 'request-review-items' }, draft.items.filter(it => trim(it.name)).map(it => el('li', null, (Math.max(1, Math.round(Number(it.qty) || 1))) + ' × ' + trim(it.name) + (trim(it.details) ? ', ' + trim(it.details) : '') + (trim(it.instructions) ? ' (' + trim(it.instructions) + ')' : ''))))),
+        reviewRow('Budget', fmt(Number(s.budget) || 0)), reviewRow('If not available', (UNAVAILABLE.find(x => x.value === s.unavailable) || UNAVAILABLE[0]).label)];
+    }
+    const saved = !isNewAddress('collection') ? savedById(c.savedId) : null;
+    return [reviewRow('Address', (saved ? saved.label + ': ' : '') + c.address + ', ' + MDM.geo.zoneLabel(c.zone)), trim(c.landmark) ? reviewRow('Landmark', c.landmark) : null,
+      trim(c.contactName) || trim(c.contactPhone) ? reviewRow('Contact', [c.contactName, c.contactPhone ? phone.format(c.contactPhone) : ''].filter(Boolean).join(', ')) : null,
+      trim(c.instructions) ? reviewRow('Instructions', c.instructions) : null,
+      isNewAddress('collection') && c.save && !c.auto ? reviewRow('Save address', 'Yes, as ' + labelOf(c)) : null];
+  }
+  function deliveryRows() {
+    const d = draft.delivery, m = draft.method, dd = deliveryData(), rows = [reviewRow('Method', MDM.deliveryMethodLabel(m))];
+    const add = (l, v) => { if (trim(v)) rows.push(reviewRow(l, String(v))); };
+    if (m === 'home') {
+      const saved = !isNewAddress('delivery') ? savedById(d.savedId) : null;
+      add('Address', (saved ? saved.label + ': ' : '') + d.address + ', ' + MDM.geo.zoneLabel(d.zone)); add('Landmark', d.landmark);
+      add('Hand over at', (MDM.geo.meetAtOptions().find(x => x.value === d.meetAt) || {}).label);
+      if (isNewAddress('delivery') && d.save) add('Save address', 'Yes, as ' + labelOf(d));
+    }
+    if (m === 'boat') {
+      const b = draft.boat, vessel = (MDM.VESSEL_TYPES.find(v => v.value === b.vesselType) || {}).label || 'Boat';
+      add('Destination', [b.address, b.island].filter(trim).join(', ')); add('Vessel', vessel + ': ' + trim(b.name));
+      add('Departure', [b.departureDate, b.departureTime].filter(Boolean).join(' at ')); add('Harbour or jetty', (MDM.geo.jetties().find(j => j.value === b.jetty) || {}).label);
+    }
+    if (m === 'cargo') { add('Hand over at', MDM.geo.cargoCounter().label); add('Destination island', draft.cargo.island); }
+    if (m === 'airport') {
+      const a = draft.airport;
+      add('Collection point', (MDM.geo.airportPoints().find(p => p.value === a.point) || {}).label); add('Counter', a.counter); add('Resort or destination', a.resort);
+      add('Resort speedboat', [a.speedboat, a.departureTime ? 'departs ' + a.departureTime : ''].filter(Boolean).join(', '));
+    }
+    add('Receiver', m === 'home' && d.self ? 'You' : [dd.recipientName, dd.recipientPhone ? phone.format(dd.recipientPhone) : ''].filter(Boolean).join(', '));
+    add('Instructions', dd.instructions);
+    return rows;
   }
   function step6(n) {
-    const c = draft.collection, d = draft.delivery, cust = draft.customer;
-    const r = estimate();
-    const pk = SIZES.filter(s => draft.counts[s]).map(s => draft.counts[s] + ' × ' + MDM.pricing.sizeLabel(s)).join(', ');
+    const cust = draft.customer;
+    const model = priceModel();
     const notifyWord = (NOTIFY.find(x => x.value === cust.notify) || NOTIFY[0]).label;
-    const priceBox = el('div', { class: 'summary', 'data-testid': 'request-review-price' },
-      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, 'Delivery', el('span', { class: 'summary__sub' }, pk)), el('span', { class: 'summary__amount mono' }, r ? rangeText(r) : '')),
-      draft.type === 'shop_buy' ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Shopping budget and ' + ((settings.rates || {}).shoppingPct || 10) + '% shopping fee', el('span', { class: 'summary__sub' }, 'Included in the estimate')), el('span', { class: 'summary__amount mono' }, fmt(Number(draft.details.budget) || 0))) : null,
-      el('div', { class: 'summary__rule' }),
-      el('div', { class: 'summary__total' }, el('span', null, 'Estimated total'), el('span', { class: 'mono', 'data-testid': 'request-review-total' }, rangeText(r))));
+    const photos = SIZES.filter(s => draft.counts[s] && draft.photos[s].photoId);
     return [head(n, 'Check and send', 'Nothing is charged now. Our team confirms the final price first.'),
       el('div', { class: 'stack-4' },
-        reviewGroup(typeOf().label, 1, detailRows()),
-        reviewGroup('Collection', 2, [reviewRow('Address', c.address + ', ' + MDM.geo.zoneLabel(c.zone)), trim(c.landmark) ? reviewRow('Landmark', c.landmark) : null, trim(c.contactName) || trim(c.contactPhone) ? reviewRow('Contact', [c.contactName, c.contactPhone ? phone.format(c.contactPhone) : ''].filter(Boolean).join(', ')) : null, trim(c.instructions) ? reviewRow('Instructions', c.instructions) : null]),
-        reviewGroup('Packages', 3, [reviewRow('Packages', pk), reviewRow('Contents', draft.description + (draft.fragile ? ' (fragile)' : '')),
-          SIZES.some(s => draft.counts[s] && draft.sizes[s].photoId) ? reviewRow('Photos', SIZES.filter(s => draft.counts[s] && draft.sizes[s].photoId).map(MDM.pricing.sizeLabel).join(', ')) : reviewRow('Photos', 'Driver photographs it at collection')]),
-        reviewGroup('Delivery', 4, [reviewRow('Address', d.address + ', ' + MDM.geo.zoneLabel(d.zone)), trim(d.landmark) ? reviewRow('Landmark', d.landmark) : null, reviewRow('Recipient', d.self ? 'You' : [d.recipientName, d.recipientPhone ? phone.format(d.recipientPhone) : ''].filter(Boolean).join(', ')), trim(d.instructions) ? reviewRow('Instructions', d.instructions) : null]),
-        reviewGroup('You', 5, [reviewRow('Name', cust.name), reviewRow('Mobile', phone.format(cust.phone)), trim(cust.email) ? reviewRow('Email', cust.email) : null, reviewRow('Updates by', notifyWord), reviewRow('Payment', draft.pay === 'upfront' ? 'Bank transfer, upfront once the price is confirmed' : 'Bank transfer after delivery')]),
-        priceBox,
-        MDM.ui.notice('info', 'Final price confirmed by our team' + (settings.ops && settings.ops.reviewText ? ', usually within ' + settings.ops.reviewText : '') + '. We message you by ' + notifyWord + (draft.pay === 'upfront' ? ' with the amount to transfer.' : ' and you pay after delivery.'))),
+        reviewGroup(isShop() ? 'Shop & Deliver' : typeOf().label, 1, serviceRows(), 'request-review-service'),
+        reviewGroup(isShop() ? 'Shop and items' : 'Collection', 2, collectionRows(), 'request-review-collection'),
+        reviewGroup('Packages', 3, [reviewRow('Packages', packagesText()), reviewRow('Contents', draft.description + (draft.fragile ? ' (fragile)' : '')),
+          isShop() ? null : reviewRow('Photos', photos.length ? photos.map(MDM.pricing.sizeLabel).join(', ') : 'Driver photographs it at collection'),
+          vehicleEligible() ? reviewRow('Extra vehicle', draft.extraVehicle ? 'Yes, charge confirmed by our team' : 'No') : null], 'request-review-packages'),
+        reviewGroup('Delivery', 4, deliveryRows(), 'request-review-delivery'),
+        reviewGroup('You', 5, [reviewRow('Name', cust.name), reviewRow('Mobile', phone.format(cust.phone)), trim(cust.email) ? reviewRow('Email', cust.email) : null, reviewRow('Updates by', notifyWord), reviewRow('Payment', isShop() || draft.pay === 'upfront' ? 'Bank transfer, upfront once the price is confirmed' : 'Bank transfer after delivery')]),
+        el('div', null, el('h3', { class: 'request-group__title request-review__price-title' }, 'Estimated price'),
+          el('div', { class: 'summary', 'data-testid': 'request-review-price' }, chargeLines(model, 'request-review'))),
+        MDM.ui.notice('info', 'Final price confirmed by our team' + (settings.ops && settings.ops.reviewText ? ', usually within ' + settings.ops.reviewText : '') + '. We message you by ' + notifyWord + (isShop() || draft.pay === 'upfront' ? ' with the amount to transfer.' : ' and you pay after delivery.'))),
       el('div', { class: 'field__error', role: 'alert', 'data-testid': 'request-error', hidden: true }),
       actions({ submit: true, label: 'Send request' })];
   }
@@ -545,11 +996,11 @@
     for (let k = 1; k <= 6; k++) renderStep(k);
     n = Math.min(n, firstInvalid(n));
     step = n;
-    if (stepFromHash() !== n) history.replaceState(null, '', '#step-' + n);
+    if (stepFromHash() !== n) history.replaceState(null, '', location.pathname + location.search + '#step-' + n);
     renderStep(n);
     // Only the current step stays in the DOM; the others were rendered just to check them (their checks read the draft).
     Object.keys(dom.steps).forEach(k => { const on = Number(k) === n; dom.steps[k].hidden = !on; if (!on) dom.steps[k].replaceChildren(); });
-    renderStepper(); updateSummary();
+    renderStepper(); renderNotice(); updateSummary();
     if (o && o.initial) return;
     window.scrollTo(0, 0);
     const h = dom.steps[n].querySelector('h2'); if (h) h.focus({ preventScroll: true });
@@ -557,65 +1008,115 @@
   function go(n) { if (stepFromHash() === n) setStep(n); else location.hash = '#step-' + n; }
   function advance() { if (!showErrors(step)) return; go(step + 1); }
   function renderStepper() {
-    dom.stepper.replaceChildren(...STEPS.map(s => {
-      const done = s.n < step, cur = s.n === step;
-      const inner = done ? el('a', { class: 'stepper__link', href: '#step-' + s.n }, html(MDM.icon('check', 16)), el('span', { class: 'stepper__label' }, s.label))
-        : el('span', { class: 'stepper__link' }, el('span', { class: 'stepper__num' }, s.n + '.'), el('span', { class: 'stepper__label' }, s.label));
+    const labels = stepLabels();
+    dom.stepper.hidden = isBusiness();
+    dom.stepper.replaceChildren(...labels.map((label, i) => {
+      const n = i + 1, done = n < step, cur = n === step;
+      const inner = done ? el('a', { class: 'stepper__link', href: '#step-' + n }, html(MDM.icon('check', 16)), el('span', { class: 'stepper__label' }, label))
+        : el('span', { class: 'stepper__link' }, el('span', { class: 'stepper__num' }, n + '.'), el('span', { class: 'stepper__label' }, label));
       return el('li', { class: ['stepper__item', done ? 'is-done' : null], 'aria-current': cur ? 'step' : null }, inner);
-    }), el('li', { class: 'stepper__progress', 'aria-hidden': 'true' }, 'Step ' + step + ' of ' + STEPS.length));
+    }), el('li', { class: 'stepper__progress', 'aria-hidden': 'true' }, 'Step ' + step + ' of ' + labels.length));
   }
   function updateSummary() {
-    const r = estimate();
-    const pk = SIZES.filter(s => draft.counts[s]).map(s => draft.counts[s] + ' × ' + MDM.pricing.sizeLabel(s)).join(', ') || 'No packages yet';
-    const c = draft.collection, d = draft.delivery;
-    const route = (trim(c.address) ? MDM.geo.zoneShort(c.zone) : '…') + ' to ' + (trim(d.address) ? MDM.geo.zoneShort(d.zone) : '…');
-    const est = dom.steps[3] && dom.steps[3].querySelector('.request-estimate__value'); if (est) est.textContent = rangeText(r);
+    const model = priceModel();
+    const est = dom.steps[3] && dom.steps[3].querySelector('.request-estimate__value'); if (est) est.textContent = model ? rangeText(model.delivery, model.xl) : 'Add a package';
+    document.querySelectorAll('.request-step [data-live-charges]').forEach(box => box.replaceChildren(...chargeLines(model, box.dataset.liveCharges)));
+    if (isBusiness()) {
+      dom.panel.replaceChildren(el('div', { class: 'summary' }, el('h2', { class: 'summary__head' }, 'Your request'),
+        el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, 'Business Delivery', el('span', { class: 'summary__sub' }, 'Booked in the business portal at your agreed rates'))),
+        el('p', { class: 'small muted' }, 'Sign in or request an account to send business orders.')));
+      dom.bar.replaceChildren(el('div', { class: 'mobile-bar__info' }, el('div', { class: 'mobile-bar__total' }, 'Business Delivery'), el('div', { class: 'mobile-bar__meta' }, 'Booked in the business portal')),
+        el('a', { class: 'btn btn--brand', href: MDM.href('business/') }, 'Business portal'));
+      return;
+    }
+    const c = draft.collection, d = draft.delivery, m = draft.method;
+    const from = isShop() ? (trim(draft.shop.name) || 'Shop') : (trim(c.address) ? MDM.geo.zoneShort(c.zone) : '…');
+    const to = m === 'home' ? (trim(d.address) ? MDM.geo.zoneShort(d.zone) : '…') : m === 'boat' ? (trim(draft.boat.island) || 'Boat') : m === 'cargo' ? 'Maldivian Cargo' : 'Airport';
     dom.panel.replaceChildren(el('div', { class: 'summary' },
       el('h2', { class: 'summary__head' }, 'Your request'),
-      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, typeOf().label, el('span', { class: 'summary__sub' }, (MDM.SERVICE_LEVELS.find(x => x.value === draft.level) || {}).label))),
-      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, pk, el('span', { class: 'summary__sub' }, route))),
+      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, isShop() ? categoryInfo().label : typeOf().label, el('span', { class: 'summary__sub' }, (MDM.SERVICE_LEVELS.find(x => x.value === draft.level) || {}).label))),
+      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, MDM.deliveryMethodLabel(m), el('span', { class: 'summary__sub' }, from + ' to ' + to))),
       el('div', { class: 'summary__rule' }),
-      el('div', { class: 'summary__total' }, el('span', null, 'Estimate'), el('span', { class: 'mono', 'data-testid': 'request-panel-estimate' }, rangeText(r))),
+      chargeLines(model, 'request-panel'),
       el('p', { class: 'small muted' }, 'Final price confirmed by our team before collection.')));
-    dom.bar.replaceChildren(el('div', { class: 'mobile-bar__info' }, el('div', { class: 'mobile-bar__total mono', 'data-testid': 'request-bar-estimate' }, rangeText(r)), el('div', { class: 'mobile-bar__meta' }, 'Estimate · Step ' + step + ' of 6')),
+    const totalEl = dom.panel.querySelector('[data-testid="request-panel-total"]'); if (totalEl) totalEl.setAttribute('data-testid', 'request-panel-estimate');
+    dom.bar.replaceChildren(el('div', { class: 'mobile-bar__info' }, el('div', { class: 'mobile-bar__total mono', 'data-testid': 'request-bar-estimate' }, model ? rangeText(model.total, model.xl) : 'Add a package'), el('div', { class: 'mobile-bar__meta' }, 'Estimate · Step ' + step + ' of 6')),
       step < 6 ? el('button', { type: 'button', class: 'btn btn--primary', on: { click: advance } }, 'Continue') : el('button', { type: 'submit', form: 'request-form', class: 'btn btn--brand' }, 'Send'));
   }
 
   // ---- Submit -----------------------------------------------------------------------------------------------------------------------
+  function detailsFor() {
+    const det = draft.details, t = draft.type;
+    if (isShop()) {
+      const s = draft.shop;
+      return { shop: { name: trim(s.name), address: trim(s.address), zone: s.zone || 'male', phone: normPhone(s.phone) }, items: draft.items.filter(it => trim(it.name)).map(it => ({ name: trim(it.name), details: trim(it.details), qty: Math.max(1, Math.round(Number(it.qty) || 1)), instructions: trim(it.instructions) })),
+        budget: Math.round(Number(s.budget) || 0), unavailable: s.unavailable || 'call' };
+    }
+    const keep = { postal: ['carrier'].concat(postalKeys()),
+      shop_collect: ['shopName', 'shopAddress', 'shopZone', 'proof', 'orderNo'], office: ['task', 'organisation', 'reference', 'details', 'returnDocs'], home: [] }[t] || [];
+    const details = {};
+    keep.forEach(k => { const v = det[k]; if (v != null && v !== '' && v !== false) details[k] = typeof v === 'string' ? v.trim() : v; });
+    if (t === 'postal') {
+      // An 'Other courier' is saved under the name the customer typed, with its office address (also the collection address).
+      if (details.courierOther) details.courierName = details.courierOther;
+      delete details.courierOther; delete details.courierZone;
+      if (details.ownerContact) details.ownerContact = normPhone(details.ownerContact);
+      if (details.collectBefore) details.collectBefore = details.collectBefore.replace('T', ' ');
+      if (det.carrier === 'post_office' && !trim(det.collectionCode)) details.idNote = 'No collection code; the owner gives their ID details to the post collections contact';
+    }
+    if (t === 'shop_collect') details.paidByCustomer = true;
+    return details;
+  }
+  // Save the new addresses the customer ticked; an address already in the book only gets its label updated.
+  async function saveNewAddresses(bookPhone) {
+    const book = ((await MDM.store.list('customers', { where: { phone: phone.normalize(bookPhone) } }))[0] || {}).addresses || [];
+    const targets = [];
+    if (!isShop() && !draft.collection.auto && isNewAddress('collection') && draft.collection.save && trim(draft.collection.address)) targets.push('collection');
+    if (draft.method === 'home' && isNewAddress('delivery') && draft.delivery.save && trim(draft.delivery.address)) targets.push('delivery');
+    for (const target of targets) {
+      const a = draft[target];
+      const same = book.find(x => trim(x.address).toLowerCase() === trim(a.address).toLowerCase());
+      const rec = { label: labelOf(a), address: trim(a.address), zone: a.zone || 'male', landmark: trim(a.landmark) };
+      if (target === 'delivery') Object.assign(rec, { meetAt: a.meetAt || 'door', contactName: a.self ? '' : trim(a.recipientName), contactPhone: a.self ? '' : normPhone(a.recipientPhone) });
+      if (same) rec.id = same.id;
+      const saved = await MDM.store.saveAddress(bookPhone, rec);
+      book.splice(0, book.length, ...(saved.addresses || []));
+    }
+  }
   async function submit(e) {
     e.preventDefault();
-    if (submitting || step !== 6) return;
+    if (submitting || step !== 6 || isBusiness()) return;
     const bad = firstInvalid(7);
     if (bad < 7) { go(bad); setTimeout(() => showErrors(bad), 0); return; }
     submitting = true;
     const btn = dom.steps[6].querySelector('[data-testid="request-submit"]'); MDM.ui.setLoading(btn, true);
     const errEl = dom.steps[6].querySelector('[data-testid="request-error"]');
     try {
-      const cust = draft.customer;
-      const c = draft.collection, d = draft.delivery;
+      const cust = draft.customer, t = draft.type;
       const customer = { name: trim(cust.name), phone: phone.normalize(cust.phone), email: trim(cust.email), notify: cust.notify };
-      const saved = await MDM.store.upsertCustomer({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, address: d.zone !== 'airport' && trim(d.address) ? { label: 'Address', address: trim(d.address), zone: d.zone, meetAt: d.meetAt || 'door' } : null });
-      const det = Object.assign({}, draft.details);
-      const t = draft.type;
-      const keep = { postal: ['carrier', 'courierName', 'location', 'postOffice', 'collectionCode', 'collectBefore', 'trackingNo', 'ownerName', 'ownerContact', 'shippingAddress', 'idSent'], shop_buy: ['shopName', 'list', 'budget', 'unavailable'], shop_collect: ['shopName', 'proof', 'orderNo'],
-        office: ['task', 'organisation', 'reference', 'details', 'returnDocs'], airport: ['mode', 'area', 'flight', 'flightTime', 'passengerName', 'passengerPhone', 'bags'], home: [] }[t] || [];
-      const details = {}; keep.forEach(k => { if (det[k] != null && det[k] !== '') details[k] = typeof det[k] === 'string' ? det[k].trim() : det[k]; });
-      if (t === 'postal' && details.collectBefore) details.collectBefore = details.collectBefore.replace('T', ' ');
-      if (t === 'postal' && det.carrier === 'post_office' && !trim(det.collectionCode)) details.idNote = 'No collection code; the owner gives their ID details to the post collections contact';
-      if (t === 'shop_collect') details.paidByCustomer = true;
+      const saved = await MDM.store.upsertCustomer({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, address: null });
+      await saveNewAddresses(me ? me.phone : customer.phone);
+      const pickup = pickupEnd();
+      const c = draft.collection;
+      const collection = isShop() ? { address: pickup.address, zone: pickup.zone, landmark: pickup.landmark, contactName: pickup.contact.name, contactPhone: pickup.contact.phone, instructions: '' }
+        : { address: trim(c.address), zone: c.zone, landmark: trim(c.landmark), contactName: trim(c.contactName) || customer.name, contactPhone: normPhone(c.contactPhone) || customer.phone, instructions: trim(c.instructions) };
+      const delivery = deliveryData();
+      if (draft.method === 'home' && draft.delivery.self) Object.assign(delivery, { recipientName: customer.name, recipientPhone: customer.phone });
       const documents = draft.docs.filter(x => relevantDoc(x.kind));
       const packages = buildPackages(false);
       const order = await MDM.store.createOrder({
-        source: 'web', requestType: t, service: service(), serviceLevel: draft.level, customerId: saved.id, customer,
-        collection: { address: trim(c.address), zone: c.zone, landmark: trim(c.landmark), contactName: trim(c.contactName) || customer.name, contactPhone: phone.normalize(c.contactPhone) || trim(c.contactPhone) || customer.phone, instructions: trim(c.instructions) },
-        delivery: { address: trim(d.address), zone: d.zone, landmark: trim(d.landmark), recipientName: d.self ? customer.name : trim(d.recipientName), recipientPhone: d.self ? customer.phone : (phone.normalize(d.recipientPhone) || trim(d.recipientPhone)), instructions: trim(d.instructions), meetAt: d.zone === 'airport' ? det.area : d.meetAt },
-        details, documents, packages,
+        source: 'web', requestType: isShop() ? 'shop_buy' : t, service: service(), serviceLevel: draft.level, customerId: saved.id, customer,
+        collection, delivery, details: detailsFor(), documents, packages,
+        extraVehicle: !!draft.extraVehicle && MDM.extraVehicleEligible(packages),
         schedule: draft.level === 'advance' ? Object.assign({ type: 'advance' }, draft.schedule) : { type: 'asap' },
-        payment: { method: 'transfer', status: 'pending', upfrontRequired: t === 'shop_buy' || draft.pay === 'upfront' },
+        payment: { method: 'transfer', status: 'pending', upfrontRequired: isShop() || draft.pay === 'upfront' },
         by: 'customer',
       });
       const fileIds = documents.map(x => x.fileId).concat(packages.map(p => p.photoId).filter(Boolean));
       for (const id of Array.from(new Set(fileIds))) { await MDM.store.update('files', id, { orderId: order.id }).catch(() => {}); }
+      // Uploads left behind by a type or size the customer switched away from are not part of the order: drop them.
+      const unused = draft.docs.map(x => x.fileId).concat(SIZES.map(sz => draft.photos[sz].photoId)).filter(id => id && fileIds.indexOf(id) < 0);
+      for (const id of Array.from(new Set(unused))) { await MDM.store.remove('files', id).catch(() => {}); }
       if (draft.remember) { try { localStorage.setItem(ME_KEY, JSON.stringify({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, signedInAt: (me && me.signedInAt) || new Date().toISOString() })); } catch (err) { /* storage blocked */ } }
       clearDraft();
       location.href = MDM.href('track/?order=' + encodeURIComponent(order.id) + '&new=1');
@@ -633,23 +1134,47 @@
     dom.form = document.querySelector('[data-testid="request-form"]');
     dom.form.id = 'request-form';
     dom.stepper = dom.form.querySelector('[data-testid="request-stepper"]');
+    dom.notice = el('div', { class: 'request-notice', 'data-testid': 'request-reorder-notice', hidden: true });
+    dom.form.insertBefore(dom.notice, dom.stepper);
     for (let n = 1; n <= 6; n++) dom.steps[n] = document.getElementById('request-step-' + n);
     dom.panel = document.querySelector('[data-testid="request-panel"]');
     dom.bar = document.querySelector('[data-testid="request-mobile-bar"]');
     draft = loadDraft();
     me = loadMe();
-    const q = new URLSearchParams(location.search);
-    const t = q.get('type');
-    if (t && MDM.REQUEST_TYPES.some(x => x.value === t) && t !== draft.type) { draft.type = t; applyDictated(); }
     if (me) {
       if (!trim(draft.customer.name) && !trim(draft.customer.phone)) Object.assign(draft.customer, { name: me.name || '', phone: me.phone || '', email: me.email || '', notify: me.notify || 'whatsapp' });
       const cust = (await MDM.store.list('customers', { where: { phone: phone.normalize(me.phone) } }))[0];
-      savedAddresses = (cust && cust.addresses) || [];
+      savedAddresses = ((cust && cust.addresses) || []).filter(a => a && a.id && trim(a.address));
+      reorderChoices = await loadReorderChoices();
+    }
+    const q = new URLSearchParams(location.search);
+    const cat = q.get('category'), t = q.get('type'), reorderId = q.get('reorder');
+    if (cat || t) draft.reorderFrom = null;   // a fresh link starts a fresh request, not the one filled from an old order
+    if (cat && MDM.SERVICE_CATEGORIES.some(c => c.value === cat)) chooseCategory(cat);
+    if (t) {
+      const known = MDM.requestTypes().find(x => x.value === t);
+      if (known) { draft.category = known.category; draft.type = known.value; }
+      else if (t === 'bulk' || t === 'business') chooseCategory('business');
+      else {
+        draft.category = 'pick'; draft.type = 'home';
+        // Old "Airport & baggage" links: airport runs are now a delivery method, so preselect Airport delivery.
+        if (t === 'airport') draft.method = 'airport';
+      }
+      applyDictated();
     }
     saveDraft();
     dom.form.addEventListener('submit', submit);
     window.addEventListener('hashchange', () => setStep(stepFromHash() || 1));
     MDM.store.subscribe('settings', async () => { settings = await MDM.store.settings(); updateSummary(); });
+    if (reorderId) {
+      const order = (await MDM.store.get('orders', reorderId)) || (await MDM.store.orderByCode(reorderId));
+      q.delete('reorder');
+      history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q.toString() : '') + location.hash);
+      const why = reorderRefusal(order);
+      if (!why) { startFrom(order, { direct: true, silent: true }); return; }
+      const signIn = !me && order ? { label: 'Sign in', onClick: () => { location.href = MDM.href('login/?next=' + encodeURIComponent('request/?reorder=' + order.id)); } } : null;
+      MDM.ui.toast(why, 'warn', signIn ? { action: signIn, timeout: 8000 } : undefined);
+    }
     setStep(stepFromHash() || 1, { initial: true });
   }
   main();
