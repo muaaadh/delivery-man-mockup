@@ -157,7 +157,10 @@
         spec.packages.forEach(pk => { pk.dropoff = Object.assign({}, pk.dropoff, end, { recipient: pk.dropoff.recipient || end.recipient, instructions: pk.dropoff.instructions || '' }); });
       }
       if (spec.extraVehicle) spec.packages.forEach(pk => { if (pk.size === 'box' || pk.size === 'xl') pk.needsVehicle = true; });
-      const q = MDM.pricing.quote({ service, packages: spec.packages }, settings);
+      // Extra collection points (multi collection, updates 17/10/2026): collect at an address or buy at a shop, packed with the rest.
+      const extraCollections = (spec.extraCollections || []).map((c, i) => Object.assign({ id: 'col_' + spec.code.slice(4) + '_' + (i + 1), kind: 'collect', landmark: '', contactName: '', contactPhone: '', instructions: '', shop: null }, c,
+        c.shop ? { shop: Object.assign({ phone: '', list: '', budget: 0, unavailable: 'call', receiptTotal: null, receiptPhotoId: null }, c.shop) } : {}));
+      const q = MDM.pricing.quote({ service, packages: spec.packages, extraCollections }, settings);
       const first = spec.packages[0];
       const cust = spec.customer;
       const created = spec.steps[0][1];
@@ -172,8 +175,8 @@
         delivery: { method, address: method === 'home' ? drop.address : (md.address || (md.boat && md.boat.address) || (md.cargo && md.cargo.island) || drop.address), zone: drop.zone, landmark: drop.landmark || '', recipientName: (drop.recipient && drop.recipient.name) || cust.name, recipientPhone: (drop.recipient && drop.recipient.phone) || cust.phone, instructions: spec.deliverNote || '', meetAt: drop.meetAt || 'door',
           boat: md.boat ? Object.assign({ history: [] }, md.boat) : null, cargo: method === 'cargo' ? Object.assign({ counter: MDM.geo.cargoCounter().label }, md.cargo || {}) : null, airport: md.airport || null },
         details: spec.details || {}, documents: spec.documents || [], items: spec.items || null,
-        extraVehicle: !!spec.extraVehicle, charges: [], cod: null,
-        packages: q.packages, fees: q.fees, totals: q.totals, estimate: MDM.pricing.estimateRange(spec.packages, settings, service),
+        extraVehicle: !!spec.extraVehicle, charges: [], cod: null, extraCollections, termsAcceptedAt: null,
+        packages: q.packages, fees: q.fees, totals: q.totals, estimate: MDM.pricing.estimateRange(spec.packages, settings, service, extraCollections),
         pricing: { status: 'estimated', history: [], needsReview: !!spec.needsReview, confirmedAt: null, confirmedBy: null, remarks: '' },
         schedule: spec.schedule || { type: 'asap' },
         payment: Object.assign({ method: 'transfer', status: 'pending', upfrontRequired: false, bank: '', payerName: '', paidAmount: null, reference: '', slip: null, invoiceNo: null, rejectReason: null, note: '', refund: null }, spec.payment || {}),
@@ -193,7 +196,7 @@
       if (spec.receipt != null) { o.packages[0].shop.receiptTotal = spec.receipt; MDM.pricing.recalc(o, settings); }
       // Charges recorded on proof of collection / delivery (§6); billable ones are on the customer's price too.
       (spec.charges || []).forEach((c, i) => {
-        const ch = { id: 'chg_' + spec.code.slice(4) + '_' + i, type: c.type, stage: c.stage, amount: c.amount, description: c.description || '', paidBy: c.paidBy || 'driver', billable: !!c.billable, adjustmentId: null, by: c.by || (spec.driverId ? 'driver:' + spec.driverId : staffBy.fayaz), at: rt(c.at) || t(created), void: false };
+        const ch = { id: 'chg_' + spec.code.slice(4) + '_' + i, type: c.type, stage: c.stage, amount: c.amount, description: c.description || '', paidBy: c.paidBy || 'driver', billable: !!c.billable, adjustmentId: null, photoId: c.photoId || null, by: c.by || (spec.driverId ? 'driver:' + spec.driverId : staffBy.fayaz), at: rt(c.at) || t(created), void: false };
         if (ch.billable) { ch.adjustmentId = 'adj_' + ch.id; o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: ch.adjustmentId, preset: c.type === 'other' ? 'other' : c.type, label: c.type === 'other' ? ch.description : ((MDM.CHARGE_TYPES.find(x => x.value === c.type) || {}).label), amount: ch.amount, at: ch.at, by: ch.by, remarks: ch.description, chargeId: ch.id }]); MDM.pricing.recalc(o, settings); }
         o.charges.push(ch);
         const typeLabel = c.type === 'other' ? ch.description : (MDM.CHARGE_TYPES.find(x => x.value === c.type) || {}).label;
@@ -532,6 +535,37 @@
       cod: { amount: 890 },
       packages: [pkg({ size: 'box', tier: 'medium', tierRate: 40, description: 'Sneakers, size 42', pickup: A.fonu, pickupContact: { name: 'Shaheem Ali', phone: '7633221' }, dropoff: A.rehendhi, recipient: { name: 'Ibrahim Rameez', phone: '7731188' } })] });
 
+    // ---- web app updates 17/10/2026: price after collection, multi collection, Maldivian Cargo charges ---------------------------
+    // No package photo: a driver was assigned without confirming the price; the office finalises it from the proof of collection.
+    const o1074 = order({ code: 'MDM-1074', customer: C.waheed, driverId: 'drv_faisal', steps: [['requested', 70], ['assigned', 62, staffBy.fayaz, 'Driver assigned: Mohamed Faisal. We confirm your price from the driver\'s photo at collection'],
+      ['dispatched', 58], ['on_the_way', 40], ['arrived', 24], ['collected', 20], ['out_for_delivery', 12]],
+      packages: [pkg({ size: 'box', description: 'Microwave oven in its box', pickup: A.kaneeru, dropoff: A.vinares, recipient: { name: 'Ali Waheed', phone: '9912345' } })],
+      stops: [pickDone('collected')] });
+    o1074.route.stops[0].proofPhotoId = photo('file_col_1074', 'proof_collection', o1074.id, 'Proof of collection', o1074.route.stops[0].at, 'box');
+    o1074.packages[0].photoId = o1074.route.stops[0].proofPhotoId; o1074.packages[0].photoSource = 'driver';
+    // Multi collection: clothes from home and baby supplies bought at a pharmacy, packed together and sent on a speedboat. The shop
+    // stop makes it a paid-upfront order; the second stop is priced as an extra collection.
+    const o1075 = order({ code: 'MDM-1075', customer: C.shifza, driverId: 'drv_shiyam', steps: [['requested', 140], ['confirmed', 128], ['assigned', 110], ['dispatched', 100], ['on_the_way', 60], ['arrived', 45],
+      ['on_the_way', 33, 'driver:drv_shiyam', 'Ibrahim Shiyam is on the way to the next collection']],
+      method: 'boat', methodDetails: { boat: { vesselType: 'speedboat', name: 'Maafushi Express', departureDate: clockDate(-150), departureTime: clock(-150), jetty: 'male_jetties', island: 'Maafushi, Kaafu Atoll', address: 'Hulhangu Villa, Maafushi', contact: '7912377' } },
+      extraCollections: [{ kind: 'shop', address: 'Majeedhee Magu', zone: 'male', shop: { name: 'Lifeline Pharmacy', phone: '3329933', list: 'Baby formula 400 g ×2, baby wipes ×3', budget: 260, unavailable: 'call' } }],
+      adjustments: [{ preset: 'stop', label: 'Extra collection', amount: 20, min: 128, remarks: 'Second stop at Lifeline Pharmacy' }],
+      packages: [pkg({ size: 'box', description: 'Clothes from home and baby supplies, packed together', pickup: A.kaneeru, pickupContact: { name: 'Aishath Shifza', phone: '7912345' }, dropoff: { address: 'Malé speedboat jetties', zone: 'male' }, recipient: { name: 'Hawwa Shifna', phone: '7912377' } })],
+      payment: paid('confirmed', 'confirmed+5', 'confirmed+10', 'bml', 'Aishath Shifza', { upfront: true, upfrontRequired: true }),
+      extra: [['collected_partial', 'Collected from M. Kaneerumaage, 2nd floor, Majeedhee Magu', 33, 'driver:drv_shiyam']],
+      stops: [pickDone(33)] });
+    o1075.route.stops[0].proofPhotoId = photo('file_col_1075', 'proof_collection', o1075.id, 'Proof of collection', o1075.route.stops[0].at, 'bag');
+    // Maldivian Cargo: the driver paid the Maldivian Cargo bill at the counter; it is on the customer's delivery charges with its photo.
+    const o1076 = order({ code: 'MDM-1076', customer: C.afeef, driverId: 'drv_rasheed', steps: full(days(1, 3), 'drv_rasheed', 15, 10, 3, 10, 12, 4, 2, 30),
+      method: 'cargo', methodDetails: { cargo: { island: 'Thinadhoo, Gaafu Dhaalu', consignee: 'Mohamed Afrah' } },
+      charges: [{ type: 'cargo', stage: 'delivery', amount: 85, description: 'Maldivian Cargo bill MC-204517', billable: true, at: 'delivered' }],
+      packages: [pkg({ size: 'box', description: 'Laptop for a school in Thinadhoo', fragile: true, pickup: A.rehendhi, dropoff: { address: 'Maldivian Cargo', zone: 'male' }, recipient: { name: 'Mohamed Afrah', phone: '7965432' } })],
+      payment: { status: 'requested', requestedAt: 'delivered' },
+      stops: [pickDone('collected'), dropDone('delivered', 'Maldivian Cargo counter')] });
+    const bill1076 = docFile('file_cargo_1076', o1076.id, 'Maldivian Cargo bill MC-204517', ['Consignee: Mohamed Afrah', 'Destination: Thinadhoo, Gaafu Dhaalu', '1 box, 6 kg', 'Freight: MVR 75.00', 'Handling: MVR 10.00', 'Total paid: MVR 85.00'], o1076.charges[0].at, 'maldivian-cargo-bill.jpg');
+    files[files.length - 1].kind = 'cargo_bill';
+    o1076.charges[0].photoId = bill1076.fileId;
+
     // ---- bulk business orders ---------------------------------------------------------------------------------------------
     const fonu = { id: null, name: 'Fonu Online Store', phone: '7633221', email: 'hello@fonu.example', notify: 'whatsapp' };
     const batches = [];
@@ -591,6 +625,9 @@
       if (d.slice(0, 7) !== monthKey) { const shift = new Date(NOW.getTime() - 20 * 60000).toISOString(); o.events.forEach(e => { e.at = shift; }); o.statusHistory.forEach(h => { h.at = shift; }); o.updatedAt = shift; o.createdAt = shift; o.route.stops.forEach(s => { s.at = shift; }); if (o.cod) ['collectedAt', 'handedAt', 'remittedAt'].forEach(k => { if (o.cod[k]) o.cod[k] = shift; }); }
     });
 
+    // Pick & deliver orders without the customer's own package photo are priced from the proof of collection (updates 17/10/2026).
+    orders.forEach(o => { o.pricing.afterCollection = o.service === 'pick' && !(o.extraCollections || []).some(c => c.kind === 'shop') && !(o.packages || []).some(p => p.photoId && p.photoSource !== 'driver'); });
+
     // ---- customers ------------------------------------------------------------------------------------------------------
     const BOOK = {
       cus_shifza: [['Home', A.kaneeru], ['Office', A.amin]],
@@ -604,7 +641,8 @@
       const mine = orders.filter(o => o.customerId === c.id);
       const last = mine.map(o => o.createdAt).sort().pop() || null;
       const addresses = (BOOK[c.id] || []).map(([label, a], i) => ({ id: 'adr_' + c.id.slice(4) + '_' + (i + 1), label, address: a.address, zone: a.zone, landmark: a.landmark || '', meetAt: 'door', contactName: '', contactPhone: '', notes: '' }));
-      return { id: c.id, name: c.name, phone: c.phone, email: c.email, notify: c.notify, addresses, createdAt: t(days(45)), updatedAt: last || t(days(45)), lastOrderAt: last, orderCount: mine.length };
+      // Every demo customer has signed up, so they ticked "I've read what we carry" then (updates 17/10/2026).
+      return { id: c.id, name: c.name, phone: c.phone, email: c.email, notify: c.notify, addresses, createdAt: t(days(45)), updatedAt: last || t(days(45)), lastOrderAt: last, orderCount: mine.length, termsAcceptedAt: t(days(45)) };
     });
 
     // ---- business ------------------------------------------------------------------------------------------------------
@@ -708,6 +746,8 @@
     const b1067 = orders.find(o => o.code === 'MDM-1067').delivery.boat.history[0];
     const r1067 = (MDM.BOAT_CHANGE_REASONS.find(r => r.value === b1067.reason) || {}).label || '';
     staffNote('MDM-1067', 'operations', 'operations', 'Operations', 'Boat details changed', 'now on ' + b1067.to.name + ', departs ' + b1067.to.departureTime + (r1067 ? ' (' + r1067.toLowerCase() + ')' : ''), b1067.at);
+    const at1074 = (orders.find(o => o.code === 'MDM-1074').statusHistory.find(h => h.to === 'collected') || {}).at || t(20);
+    staffNote('MDM-1074', 'operations', 'operations', 'Operations', 'Finalise the price', 'collected with a proof of collection photo: confirm the price while it is being delivered', at1074);
     notifications.sort((a, b) => a.at < b.at ? -1 : 1);
 
     return { settings, customers, drivers, staff, zones, attendance, leaves, products, notifications, batches, business_requests, business_accounts, invoices, orders, positions, events, files };

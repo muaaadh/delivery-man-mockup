@@ -61,6 +61,10 @@
     if (m === 'airport') { const a = d.airport || {}; return [a.counter || pointLabel(a.point), a.resort, a.speedboat ? 'speedboat ' + a.speedboat + (a.departureTime ? ' at ' + a.departureTime : '') : ''].filter(Boolean).join(', '); }
     return '';
   }
+  // Extra collection points of a multi-collection order (updates 17/10/2026), packed with the rest: '+ 1 more stop' in the table and
+  // 'Also Lifeline Pharmacy (shop), Majeedhee Magu' in the drawer.
+  const extraStops = o => (o.extraCollections || []).map(c => c.kind === 'shop' ? ((c.shop && c.shop.name) || 'Shop') + ' (shop), ' + c.address : place(c));
+  const moreStops = o => { const n = (o.extraCollections || []).length; return n ? '+ ' + n + ' more ' + (n === 1 ? 'stop' : 'stops') : ''; };
   function reorderLink(o) {
     const stop = e => e.stopPropagation();   // the row itself opens the drawer on click and Enter
     return el('a', { class: 'btn btn--secondary btn--sm', href: reorderHref(o), 'data-testid': 'account-reorder', 'data-order': o.id, on: { click: stop, keydown: stop } }, 'Order again',
@@ -91,7 +95,8 @@
       el('td', { class: 'table__primary', 'data-label': 'Order' }, el('span', null, el('span', { class: 'mono' }, o.code),
         el('span', { class: 'table__sub' }, MDM.requestTypeLabel(o.requestType)),
         el('span', { class: 'table__sub', 'data-testid': 'account-date' }, MDM.ui.fmtDate(o.createdAt)))),
-      el('td', { 'data-label': 'Collection' }, el('span', { class: 'table__address', title: place(o.collection) }, place(o.collection))),
+      el('td', { 'data-label': 'Collection' }, el('span', null, el('span', { class: 'table__address', title: place(o.collection) }, place(o.collection)),
+        moreStops(o) ? el('span', { class: 'table__sub', 'data-testid': 'account-more-stops' }, moreStops(o)) : null)),
       el('td', { 'data-label': 'Delivery' }, el('span', null, el('span', { class: 'table__address', title: deliveryPlace(o) }, deliveryPlace(o)),
         el('span', { class: 'table__sub', 'data-testid': 'account-method' }, MDM.deliveryMethodLabel(methodOf(o))))),
       el('td', { 'data-label': 'Packages' }, pkgSummary(o)),
@@ -125,7 +130,7 @@
       el('div', { class: 'rate-table' },
         MDM.ui.rateRow('Request', MDM.requestTypeLabel(o.requestType) + (o.serviceLevel !== 'normal' ? ' · ' + ((MDM.SERVICE_LEVELS.find(x => x.value === o.serviceLevel) || {}).label || '') : '')),
         MDM.ui.rateRow('Placed', MDM.ui.fmtDate(o.createdAt)),
-        MDM.ui.rateRow('Collection', place(o.collection)),
+        MDM.ui.rateRow('Collection', place(o.collection), { valueSub: extraStops(o).length ? 'Also ' + extraStops(o).join('; ') : null }),
         MDM.ui.rateRow('Delivery method', el('span', { 'data-testid': 'account-drawer-method' }, MDM.deliveryMethodLabel(methodOf(o))), { valueSub: detail || null }),
         MDM.ui.rateRow('Delivery', deliveryPlace(o), { valueSub: o.delivery && o.delivery.recipientName ? 'To ' + o.delivery.recipientName : null }),
         MDM.ui.rateRow('Packages', pkgSummary(o), { valueSub: o.extraVehicle ? 'Extra vehicle requested' : null }),
@@ -283,7 +288,8 @@
       state.tab === 'orders' ? ordersPanel(orders) : state.tab === 'messages' ? messagesPanel(mineNotes.slice().reverse()) : addressesPanel(customer));
     view.replaceChildren(
       el('div', { class: 'page-head' }, el('div', { class: 'account-id' },
-        el('div', null, el('h1', null, name || 'My orders'), el('p', { class: 'page-head__desc' }, MDM.ui.phone.format(phoneKey) + (customer && customer.notify ? ' · Updates by ' + (CHANNEL[customer.notify] || customer.notify) : ''))),
+        el('div', null, el('h1', null, name || 'My orders'), el('p', { class: 'page-head__desc' }, MDM.ui.phone.format(phoneKey) + (customer && customer.notify ? ' · Updates by ' + (CHANNEL[customer.notify] || customer.notify) : '')),
+          customer && customer.termsAcceptedAt ? el('p', { class: 'small muted', 'data-testid': 'account-terms' }, 'You confirmed what we carry on ' + MDM.ui.fmtDate(customer.termsAcceptedAt, { dateOnly: true }) + '.') : null),
         el('div', { class: 'row row--wrap' }, el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, 'New request'), el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'account-signout', on: { click: signOut } }, 'Sign out')))),
       tabs, panel);
     if (state.openId && MDM.ui.drawer.isOpen()) openOrder(state.openId);

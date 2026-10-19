@@ -6,7 +6,11 @@
 //     with the shopping charges.
 //   3 Packages: Bag / Box / XL quantities with an optional photo per size (no measurements), the live estimate and Extra vehicle.
 //   4 Delivery: home delivery, boat / ferry / speedboat, Maldivian Cargo or airport, each with the fields its handover needs.
-//   5 Your details, 6 Review with the itemised estimate, then one MDM.store.createOrder() call. The team confirms the final price.
+//   5 Your details, 6 Review with the itemised estimate and when to pay, then one MDM.store.createOrder() call. The team confirms
+//     the final price (after collection when there is no package photo).
+// Updates 17/10/2026: a signed-in customer who has signed up skips step 5 (their account fills it); a guest ticks "I've read what we
+// carry" in step 5; "Add another collection or shop" in step 2 collects or buys at more places, all packed together and delivered
+// to the one delivery in step 4 (boats and Maldivian Cargo included).
 // The draft lives in sessionStorage so a reload keeps it; uploaded photos and documents go into the `files` collection at once.
 (function (MDM) { 'use strict';
   const { el, html, setError, phone } = MDM.ui;
@@ -30,12 +34,13 @@
   let settings = {};
   let draft = emptyDraft();
   let step = 1;
-  let me = null, savedAddresses = [], reorderChoices = [], submitting = false;
+  let me = null, profile = null, savedAddresses = [], reorderChoices = [], submitting = false;
   let checks = {};   // step → [{ wrap, check() → message|null, focus() }]
 
   // ---- Draft -----------------------------------------------------------------------------------------------------------------
   function blankItem() { return { name: '', details: '', qty: '1', instructions: '' }; }
   function blankPhoto() { return { photoId: null, photoName: '' }; }
+  function blankExtra() { return { kind: 'collect', address: '', zone: 'male', landmark: '', contactName: '', contactPhone: '', instructions: '', shopName: '', shopPhone: '', list: '', budget: '' }; }
   function emptyDraft() {
     return {
       category: 'pick', type: 'home', level: 'normal',
@@ -54,7 +59,8 @@
       cargo: { island: '' },
       airport: { point: 'resort_counters', counter: '', resort: '', speedboat: '', departureTime: '', instructions: '' },
       customer: { name: '', phone: '', email: '', notify: 'whatsapp' },
-      pay: 'after', remember: true, reorderFrom: null,
+      extra: [],
+      pay: 'after', remember: true, termsAck: false, editDetails: false, reorderFrom: null,
     };
   }
   function normalizeDraft(d) {
@@ -71,7 +77,8 @@
     const base = emptyDraft();
     ['schedule', 'details', 'shop', 'collection', 'counts', 'delivery', 'boat', 'cargo', 'airport', 'customer'].forEach(k => { if (d[k] && typeof d[k] === 'object') Object.assign(base[k], d[k]); });
     SIZES.forEach(s => { base.photos[s] = Object.assign(blankPhoto(), (d.photos || {})[s] || {}); });
-    ['category', 'type', 'level', 'description', 'fragile', 'extraVehicle', 'method', 'pay', 'remember', 'reorderFrom'].forEach(k => { if (d[k] != null) base[k] = d[k]; });
+    ['category', 'type', 'level', 'description', 'fragile', 'extraVehicle', 'method', 'pay', 'remember', 'termsAck', 'editDetails', 'reorderFrom'].forEach(k => { if (d[k] != null) base[k] = d[k]; });
+    base.extra = Array.isArray(d.extra) ? d.extra.slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(x => Object.assign(blankExtra(), x, { kind: x && x.kind === 'shop' ? 'shop' : 'collect' })) : [];
     base.docs = Array.isArray(d.docs) ? d.docs : [];
     base.items = Array.isArray(d.items) && d.items.length ? d.items.map(it => Object.assign(blankItem(), it)) : [blankItem()];
     return normalizeDraft(base);
@@ -113,7 +120,17 @@
       dhl: ['trackingNo'],
     })[d.carrier] || [];
   }
-  const stepLabels = () => ['Service', isShop() ? 'Shop and items' : 'Collection', 'Packages', 'Delivery', 'Your details', 'Review'];
+  const STEP_LABEL = { 1: 'Service', 3: 'Packages', 4: 'Delivery', 5: 'Your details', 6: 'Review' };
+  const stepLabel = n => (n === 2 ? (isShop() ? 'Shop and items' : 'Collection') : STEP_LABEL[n]);
+  // A signed-in customer who has signed up (name, number and "what we carry" on the account) skips step 5: the account fills it in.
+  // "Edit" on the review opens it again for this request.
+  const profileReady = () => !!(me && profile && trim(profile.name) && profile.termsAcceptedAt && phone.valid(profile.phone));
+  const skipDetails = () => profileReady() && !draft.editDetails && (draft.customer.notify !== 'email' || !!trim(draft.customer.email));
+  const visibleSteps = () => (skipDetails() ? [1, 2, 3, 4, 6] : [1, 2, 3, 4, 5, 6]);
+  const nextStep = n => visibleSteps().find(k => k > n) || n;
+  const prevStep = n => visibleSteps().slice().reverse().find(k => k < n) || n;
+  // Guests tick "I've read what we carry" when they place an order; customers ticked it when they signed up.
+  const needsTerms = () => !(me && profile && profile.termsAcceptedAt);
   // The collection end that the type dictates (postal carrier or the shop / godown from step 1): { address, zone, contactName } or null.
   function dictatedCollection() {
     const d = draft.details;
@@ -147,6 +164,20 @@
     else if (v === 'pick' && MDM.categoryOf(draft.type) !== 'pick') draft.type = 'home';
     applyDictated();
   }
+
+  // ---- More collections (multi collection) ------------------------------------------------------------------------------------------
+  const extraShops = () => draft.extra.filter(x => x.kind === 'shop');
+  // Shopping is bought with the customer's money, so a shop anywhere on the order makes it paid upfront.
+  const upfrontForced = () => isShop() || extraShops().length > 0;
+  // extraData() → order.extraCollections for the stops the customer added (store.createOrder cleans and caps them).
+  function extraData() {
+    return draft.extra.map(x => (x.kind === 'shop'
+      ? { kind: 'shop', address: trim(x.address), zone: x.zone || 'male', landmark: trim(x.landmark), instructions: '', shop: { name: trim(x.shopName), phone: normPhone(x.shopPhone), list: trim(x.list), budget: Math.round(Number(x.budget) || 0), unavailable: 'call' } }
+      : { kind: 'collect', address: trim(x.address), zone: x.zone || 'male', landmark: trim(x.landmark), contactName: trim(x.contactName), contactPhone: normPhone(x.contactPhone), instructions: trim(x.instructions) }))
+      .filter(x => x.address);
+  }
+  // No package photo and nothing to buy first: we collect, and the team confirms the price from the driver's photo (store rule).
+  const priceAfterCollection = () => !upfrontForced() && !SIZES.some(sz => draft.counts[sz] && draft.photos[sz].photoId);
 
   // ---- Delivery and packages -----------------------------------------------------------------------------------------------------
   const totalCount = () => SIZES.reduce((n, s) => n + (Number(draft.counts[s]) || 0), 0);
@@ -208,12 +239,12 @@
   // priceModel() → { delivery, fees, budget, total, xl, vehicle } with ranges { min, max }, or null when there is no package yet.
   function priceModel() {
     if (!totalCount()) return null;
-    const pk = buildPackages(true), svc = service();
-    const q = MDM.pricing.quote({ service: svc, packages: pk }, settings);
-    const r = MDM.pricing.estimateRange(pk, settings, svc);
+    const pk = buildPackages(true), svc = service(), stops = extraData();
+    const q = MDM.pricing.quote({ service: svc, packages: pk, extraCollections: stops }, settings);
+    const r = MDM.pricing.estimateRange(pk, settings, svc, stops);
     const extra = q.totals.fees + (q.totals.budget || 0);
     return { delivery: { min: r.min - extra, max: r.max - extra }, fees: q.feeLines, budget: q.totals.budget || 0, total: { min: r.min, max: r.max },
-      xl: (Number(draft.counts.xl) || 0) > 0, vehicle: !!draft.extraVehicle && vehicleEligible() };
+      xl: (Number(draft.counts.xl) || 0) > 0, vehicle: !!draft.extraVehicle && vehicleEligible(), stops: stops.length };
   }
   function rangeText(r, xl) {
     if (!r) return 'Add a package';
@@ -237,8 +268,10 @@
       if (f.key === 'shopping') rows.push(line('shopping', f.label, 'Of the ' + fmt(model.budget) + ' budget, then of the receipt', fmt(f.amount), true));
       else rows.push(line(f.key, t ? t.label + times : f.label, t ? t.sub : f.reason, fmt(f.amount), true));
     });
-    if (isShop()) rows.push(line('budget', 'Shopping budget', 'Paid upfront; we refund what is not spent', fmt(model.budget), true));
+    if (isShop() || model.budget) rows.push(line('budget', 'Shopping budget', 'Paid upfront; we refund what is not spent', fmt(model.budget), true));
+    if (model.stops) rows.push(line('stops', model.stops === 1 ? 'Extra collection' : model.stops + ' extra collections', 'Packed together with the rest', 'Priced by our team', true));
     if (model.vehicle) rows.push(line('vehicle', 'Extra vehicle', null, 'Confirmed by our team', true));
+    if (draft.method === 'cargo') rows.push(line('cargo-bill', 'Maldivian Cargo charges', 'From the Maldivian Cargo bill, added after delivery', 'As billed', true));
     rows.push(el('div', { class: 'summary__rule' }), el('div', { class: 'summary__total' }, el('span', null, 'Estimated total'), el('span', { class: 'mono', 'data-testid': prefix + '-total' }, rangeText(model.total, model.xl))));
     return rows;
   }
@@ -579,6 +612,12 @@
     if (d.method === 'boat' && dl.boat) Object.assign(d.boat, { vesselType: dl.boat.vesselType || 'speedboat', name: dl.boat.name || '', departureDate: '', departureTime: dl.boat.departureTime || '', jetty: dl.boat.jetty || '', island: dl.boat.island || '', address: dl.boat.address || '' });
     if (d.method === 'cargo') d.cargo.island = (dl.cargo && dl.cargo.island) || dl.address || '';
     if (d.method === 'airport' && dl.airport) Object.assign(d.airport, { point: dl.airport.point || 'resort_counters', counter: dl.airport.counter || '', resort: dl.airport.resort || '', speedboat: dl.airport.speedboat || '', departureTime: dl.airport.departureTime || '', instructions: dl.airport.instructions || dl.instructions || '' });
+    d.extra = (o.extraCollections || []).slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(c => {
+      const sh = c.shop || {};
+      return Object.assign(blankExtra(), c.kind === 'shop'
+        ? { kind: 'shop', address: c.address || '', zone: c.zone || 'male', landmark: c.landmark || '', shopName: sh.name || '', shopPhone: sh.phone || '', list: sh.list || '', budget: String(sh.budget || '') }
+        : { kind: 'collect', address: c.address || '', zone: c.zone || 'male', landmark: c.landmark || '', contactName: c.contactName || '', contactPhone: c.contactPhone || '', instructions: c.instructions || '' });
+    });
     d.reorderFrom = { id: o.id, code: o.code };
     applyDictatedTo(d);
     return normalizeDraft(d);
@@ -586,7 +625,7 @@
   const totalCountOf = c => SIZES.reduce((n, s) => n + (Number(c[s]) || 0), 0);
   function applyDictatedTo(d) { const keep = draft; draft = d; applyDictated(); draft = keep; }
   function startFrom(order, o) {
-    const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember };
+    const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember, termsAck: draft.termsAck };
     draft = Object.assign(draftFromOrder(order), keep);
     saveDraft();
     if (!(o && o.silent)) MDM.ui.toast('Filled in from ' + order.code + '. Check each step, then send.', 'ok');
@@ -598,14 +637,14 @@
     dom.notice.hidden = !r;
     if (!r) { dom.notice.replaceChildren(); return; }
     dom.notice.replaceChildren(MDM.ui.notice('info', 'Filled in from your order ' + r.code + '. Check each step before you send it.', {
-      action: el('button', { type: 'button', class: 'btn btn--ghost btn--sm request-notice__reset', 'data-testid': 'request-start-over', on: { click: () => { const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember }; draft = Object.assign(emptyDraft(), keep); saveDraft(); go(1); renderNotice(); } } }, 'Start a new request instead'),
+      action: el('button', { type: 'button', class: 'btn btn--ghost btn--sm request-notice__reset', 'data-testid': 'request-start-over', on: { click: () => { const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember, termsAck: draft.termsAck }; draft = Object.assign(emptyDraft(), keep); saveDraft(); go(1); renderNotice(); } } }, 'Start a new request instead'),
     }));
   }
 
   // ---- Steps -------------------------------------------------------------------------------------------------------------------------
   function head(n, title, desc) { return el('div', { class: 'section-head' }, el('h2', { id: 'request-step-' + n + '-title', tabindex: '-1' }, title), desc ? el('p', { class: 'section-head__desc' }, desc) : null); }
   function actions(o) {
-    const back = step > 1 ? el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'request-back', on: { click: () => go(step - 1) } }, 'Back') : null;
+    const back = step > 1 ? el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'request-back', on: { click: () => go(prevStep(step)) } }, 'Back') : null;
     const next = o && o.submit
       ? el('button', { type: 'submit', class: 'btn btn--brand', 'data-testid': 'request-submit' }, o.label)
       : el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'request-next', on: { click: advance } }, (o && o.label) || 'Continue');
@@ -734,6 +773,7 @@
     out.push(grid(F(n, 'collection.contactName', t === 'shop_collect' ? 'Shop contact' : 'Contact person', { required: contactRequired, placeholder: 'Who hands it over', onChange: () => { draft.collection.autoContact = false; } }),
         F(n, 'collection.contactPhone', 'Contact number', { type: 'tel', intl: true, landline: t !== 'home', required: contactRequired })),
       F(n, 'collection.instructions', 'Instructions for the driver', { type: 'textarea', rows: 2, placeholder: 'Floor, gate, best time to call' }),
+      extraGroup(n),
       actions());
     return out;
   }
@@ -775,7 +815,45 @@
         seg(n, 'shop.unavailable', 'If something is not available', UNAVAILABLE, { testid: 'request-unavailable' }),
         el('div', { class: 'summary request-charges', 'data-live-charges': 'request-shop', 'data-testid': 'request-shop-charges' }, chargeLines(priceModel(), 'request-shop')),
         MDM.ui.notice('info', 'Shopping orders are paid upfront: the budget, the shopping fee and the delivery charge, once our team confirms the price. We refund what is not spent.')),
+      extraGroup(n),
       actions()];
+  }
+  // "Add another collection or shop" (updates 17/10/2026): each extra stop collects at an address or buys at a shop; everything is
+  // packed together and delivered once, by whichever method step 4 sets (home, boat, Maldivian Cargo or airport).
+  function extraCard(n, x, i) {
+    const p = 'extra.' + i + '.', tid = k => 'request-extra-' + k + '-' + i;
+    const zone = () => F(n, p + 'zone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: tid('zone') });
+    const fields = x.kind === 'shop'
+      ? [F(n, p + 'shopName', 'Shop name', { required: true, placeholder: 'For example Lifeline Pharmacy', testid: tid('shop-name') }),
+        grid(F(n, p + 'address', 'Shop address', { required: true, placeholder: 'Building name, street', testid: tid('address') }), zone()),
+        F(n, p + 'list', 'What to buy', { type: 'textarea', required: true, rows: 2, placeholder: 'Items, brands, sizes and how many', testid: tid('list') }),
+        grid(F(n, p + 'budget', 'Budget', { type: 'number', required: true, min: 1, testid: tid('budget'), attrs: { min: '1', step: '1' }, hint: 'The most we spend at this shop' }),
+          F(n, p + 'shopPhone', 'Shop phone', { type: 'tel', intl: true, landline: true, testid: tid('shop-phone') }))]
+      : [grid(F(n, p + 'address', 'Collection address', { required: true, placeholder: 'House or building name, street', testid: tid('address') }), zone()),
+        F(n, p + 'landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school', testid: tid('landmark') }),
+        grid(F(n, p + 'contactName', 'Contact person', { placeholder: 'Who hands it over', testid: tid('contact-name') }),
+          F(n, p + 'contactPhone', 'Contact number', { type: 'tel', intl: true, landline: true, testid: tid('contact-phone') })),
+        F(n, p + 'instructions', 'What to collect and instructions', { type: 'textarea', rows: 2, placeholder: 'What the driver picks up, floor, gate', testid: tid('instructions') })];
+    const remove = () => { draft.extra.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="request-extra-add"]'); if (b) b.focus({ preventScroll: true }); };
+    return el('div', { class: 'request-extra', 'data-testid': 'request-extra' },
+      el('div', { class: 'request-extra__head' }, el('h4', { class: 'request-extra__title' }, 'Stop ' + (i + 2)),
+        el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': tid('remove'), on: { click: remove } }, 'Remove', el('span', { class: 'sr-only' }, ' stop ' + (i + 2)))),
+      seg(n, p + 'kind', 'At this stop', MDM.EXTRA_COLLECTION_KINDS, { testid: tid('kind'), onChange: () => { saveDraft(); rerender(n); updateSummary(); } }),
+      fields);
+  }
+  function extraGroup(n) {
+    const max = MDM.MAX_EXTRA_COLLECTIONS, full = draft.extra.length >= max;
+    const add = () => {
+      draft.extra.push(blankExtra()); saveDraft(); renderStep(n); updateSummary();
+      const cards = dom.steps[n].querySelectorAll('[data-testid="request-extra"]'), last = cards[cards.length - 1];
+      const f = last && last.querySelector('input:checked'); if (f) { f.focus(); MDM.ui.scrollIntoViewIfNeeded(last); }
+    };
+    const out = [el('p', { class: 'request-group__desc' }, 'Collect from more places or buy something on the way. Everything is packed together and delivered to the one address in step 4.')];
+    draft.extra.forEach((x, i) => out.push(extraCard(n, x, i)));
+    if (draft.extra.length) out.push(MDM.ui.notice('info', 'Our team prices each extra stop when confirming your price.' + (extraShops().length && !isShop() ? ' Buying from a shop makes this order paid upfront: the budget, the shopping fee and the delivery charge. We refund what is not spent.' : ''), { testid: 'request-extra-note' }));
+    out.push(el('div', { class: 'request-items__add' }, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'request-extra-add', disabled: full, on: { click: add } },
+      html(MDM.icon('plus', 16)), isShop() ? 'Add another shop or collection' : 'Add another collection or shop'), full ? el('span', { class: 'small muted' }, ' Up to ' + max + ' extra stops') : null));
+    return el('div', { class: 'request-group', 'data-testid': 'request-extras' }, el('h3', { class: 'request-group__title' }, 'More collections or shopping'), out);
   }
   function step3(n) {
     const sg = settings.sizeGuide || {};
@@ -802,8 +880,9 @@
       el('div', { class: 'request-estimate', 'data-testid': 'request-estimate' }, el('span', { class: 'request-estimate__label' }, 'Estimated delivery price'), el('span', { class: 'request-estimate__value mono' }, m ? rangeText(m.delivery, m.xl) : 'Add a package')),
       vehicleEligible() ? el('div', { class: 'request-option', 'data-testid': 'request-extra-vehicle-box' },
         check(n, 'extraVehicle', 'Extra vehicle', { testid: 'request-extra-vehicle', hint: 'More than one box or XL package may need a car or a pickup. Our team confirms the vehicle charge with your final price, before you pay.' })) : null,
-      MDM.ui.notice('info', shop ? 'The size sets the delivery price. If the shopping turns out bigger, our team changes the size and you see the new price before you pay.'
-        : 'Photos are optional. Without one, our driver photographs the package at collection. If a package does not match its size, our team changes the size and you see the new price before you pay.'),
+      MDM.ui.notice('info', (shop ? 'The size sets the delivery price. If the shopping turns out bigger, our team changes the size and you see the new price before you pay.'
+        : 'Photos are optional. Without one, we collect first: our driver photographs the package at collection and our team confirms the price from that photo. If a package does not match its size, our team changes the size and you see the new price before you pay.')
+        + (draft.extra.length ? ' Count the packages as they will be once everything is packed together.' : '')),
       F(n, 'description', shop ? 'What kind of shopping is it?' : 'What is inside?', { required: true, placeholder: shop ? 'For example groceries, medicine, a gift' : 'For example documents, a cake box, a phone charger', testid: 'request-description' }),
       el('div', { class: 'row row--wrap request-flags' }, check(n, 'fragile', 'Fragile, handle with care')),
       actions()];
@@ -836,7 +915,7 @@
         MDM.ui.notice('info', 'These details are printed on the package label: the destination, the island and the receiver\'s contact. Our operator and driver use them to hand the package to the right ' + vessel.toLowerCase() + '.'));
     }
     if (m === 'cargo') {
-      out.push(MDM.ui.notice('info', 'We deliver the package to the Maldivian Cargo counter at the main bus terminal, and Maldivian Cargo takes it to the island. The Maldivian Cargo fee of ' + cargoFeeText() + ' is added to your total.', { testid: 'request-cargo-note' }),
+      out.push(MDM.ui.notice('info', 'We deliver the package to the Maldivian Cargo counter at the main bus terminal, and Maldivian Cargo takes it to the island. The Maldivian Cargo fee of ' + cargoFeeText() + ' is added to your total. Maldivian Cargo\'s own charges are paid at the counter and added to your final delivery charges, with their bill.', { testid: 'request-cargo-note' }),
         F(n, 'cargo.island', 'Destination island', { required: true, placeholder: 'For example Kulhudhuffushi, Haa Dhaalu', testid: 'request-cargo-island' }),
         receiverFields(n),
         F(n, 'delivery.instructions', 'Instructions for the counter', { type: 'textarea', rows: 2, placeholder: 'Anything Maldivian Cargo needs to know', testid: 'request-delivery-instructions' }));
@@ -857,7 +936,7 @@
     return out;
   }
   function step4(n) {
-    const feeNote = { cargo: 'Plus the Maldivian Cargo fee, ' + cargoFeeText(), airport: 'Plus the airport fee, ' + airportFeeText() };
+    const feeNote = { cargo: 'Plus the Maldivian Cargo fee, ' + cargoFeeText() + ', and the Maldivian Cargo bill', airport: 'Plus the airport fee, ' + airportFeeText() };
     return [head(n, 'How do we deliver it?', 'Choose where we hand it over. Each option asks only for what the driver needs.'),
       cards(n, {
         name: 'method', label: 'Delivery method', testid: 'request-method', value: draft.method, cols: 2,
@@ -867,21 +946,23 @@
       group(MDM.deliveryMethodLabel(draft.method), methodFields(n)),
       actions()];
   }
+  // Step 5 is skipped for a signed-in customer (visibleSteps); a guest ticks "I've read what we carry" here.
   function step5(n) {
-    const shop = isShop();   // shopping is always paid upfront; the customer's own choice is kept for their next pick & deliver order
     return [head(n, 'Your details', 'We message you when the price is confirmed and at every step after.'),
+      profileReady() ? MDM.ui.notice('info', 'Signed in as ' + profile.name + '. Changes here apply to this request.', { testid: 'request-signed-in' }) : null,
       grid(F(n, 'customer.name', 'Your name', { required: true, attrs: { autocomplete: 'name' } }), F(n, 'customer.phone', 'Mobile number', { type: 'tel', required: true, hint: 'We send updates to this number' })),
       seg(n, 'customer.notify', 'Send updates by', NOTIFY, { onChange: () => { saveDraft(); rerender(n); } }),
       F(n, 'customer.email', 'Email', { type: 'email', required: draft.customer.notify === 'email', attrs: { autocomplete: 'email' } }),
-      shop ? MDM.ui.notice('info', 'Shopping orders are paid upfront: the budget, the shopping fee and the delivery charge, once we confirm the price. We refund what is not spent.')
-        : seg(n, 'pay', 'When do you want to pay?', [{ value: 'after', label: 'After delivery', hint: 'We send the invoice when it is delivered' }, { value: 'upfront', label: 'Upfront', hint: 'Pay once we confirm the price' }], { stack: true, testid: 'request-pay' }),
-      check(n, 'remember', 'Remember me on this device', { testid: 'request-remember' }),
+      needsTerms() ? el('div', { class: 'request-terms', 'data-testid': 'request-terms-box' }, el('p', { class: 'request-terms__text' }, settings.terms || ''),
+        check(n, 'termsAck', "I've read what we carry", { required: true, testid: 'request-terms', requiredMessage: "Tick the box to confirm you've read what we carry" })) : null,
+      me ? null : check(n, 'remember', 'Remember me on this device', { testid: 'request-remember' }),
       actions({ label: 'Review request' })];
   }
   const reviewRow = (label, value) => MDM.ui.rateRow(label, value);
   function reviewGroup(title, n, rows, testid) {
     return el('div', { class: 'rate-table request-review__group', 'data-testid': testid || null },
-      MDM.ui.rateRow(title, el('button', { type: 'button', class: 'btn btn--ghost btn--sm review__edit', 'data-testid': 'request-edit-' + n, on: { click: () => go(n) } }, 'Edit', el('span', { class: 'sr-only' }, ' ' + title)), { head: true }),
+      MDM.ui.rateRow(title, el('button', { type: 'button', class: 'btn btn--ghost btn--sm review__edit', 'data-testid': 'request-edit-' + n,
+        on: { click: () => { if (n === 5 && !draft.editDetails) { draft.editDetails = true; saveDraft(); } go(n); } } }, 'Edit', el('span', { class: 'sr-only' }, ' ' + title)), { head: true }),
       rows.filter(Boolean));
   }
   function relevantDoc(kind) {
@@ -917,7 +998,16 @@
     add('Timing', draft.level === 'advance' ? 'Collect ' + draft.schedule.collectDate + ' ' + draft.schedule.collectTime + ', deliver ' + draft.schedule.deliverDate + ' ' + draft.schedule.deliverTime : (MDM.SERVICE_LEVELS.find(x => x.value === draft.level) || {}).label);
     return rows;
   }
+  // The extra stops (multi collection) as review rows: 'Stop 2' → what happens there.
+  function extraRows() {
+    return draft.extra.filter(x => trim(x.address)).map((x, i) => reviewRow('Stop ' + (i + 2), x.kind === 'shop'
+      ? 'Buy at ' + [trim(x.shopName), trim(x.address), MDM.geo.zoneLabel(x.zone)].filter(Boolean).join(', ') + ': ' + trim(x.list) + ' (budget ' + fmt(Number(x.budget) || 0) + ')'
+      : 'Collect from ' + [trim(x.address), MDM.geo.zoneLabel(x.zone)].join(', ') + ([trim(x.contactName), x.contactPhone ? phone.format(x.contactPhone) : ''].filter(Boolean).length ? ', ' + [trim(x.contactName), x.contactPhone ? phone.format(x.contactPhone) : ''].filter(Boolean).join(' ') : '') + (trim(x.instructions) ? ' (' + trim(x.instructions) + ')' : '')));
+  }
   function collectionRows() {
+    return collectionRowsMain().concat(extraRows(), draft.extra.length ? [reviewRow('Packing', 'Everything packed together for one delivery')] : []);
+  }
+  function collectionRowsMain() {
     const c = draft.collection;
     if (isShop()) {
       const s = draft.shop;
@@ -960,7 +1050,10 @@
     const model = priceModel();
     const notifyWord = (NOTIFY.find(x => x.value === cust.notify) || NOTIFY[0]).label;
     const photos = SIZES.filter(s => draft.counts[s] && draft.photos[s].photoId);
-    return [head(n, 'Check and send', 'Nothing is charged now. Our team confirms the final price first.'),
+    const upfront = upfrontForced() || draft.pay === 'upfront';
+    const payNote = isShop() ? 'Shopping orders are paid upfront: the budget, the shopping fee and the delivery charge, once we confirm the price. We refund what is not spent.'
+      : 'Buying from a shop makes this order paid upfront: the budget, the shopping fee and the delivery charge, once we confirm the price. We refund what is not spent.';
+    return [head(n, 'Check and send', priceAfterCollection() ? 'Nothing is charged now. Without a package photo we collect first, and our team confirms the final price from the driver\'s photo.' : 'Nothing is charged now. Our team confirms the final price first.'),
       el('div', { class: 'stack-4' },
         reviewGroup(isShop() ? 'Shop & Deliver' : typeOf().label, 1, serviceRows(), 'request-review-service'),
         reviewGroup(isShop() ? 'Shop and items' : 'Collection', 2, collectionRows(), 'request-review-collection'),
@@ -968,10 +1061,13 @@
           isShop() ? null : reviewRow('Photos', photos.length ? photos.map(MDM.pricing.sizeLabel).join(', ') : 'Driver photographs it at collection'),
           vehicleEligible() ? reviewRow('Extra vehicle', draft.extraVehicle ? 'Yes, charge confirmed by our team' : 'No') : null], 'request-review-packages'),
         reviewGroup('Delivery', 4, deliveryRows(), 'request-review-delivery'),
-        reviewGroup('You', 5, [reviewRow('Name', cust.name), reviewRow('Mobile', phone.format(cust.phone)), trim(cust.email) ? reviewRow('Email', cust.email) : null, reviewRow('Updates by', notifyWord), reviewRow('Payment', isShop() || draft.pay === 'upfront' ? 'Bank transfer, upfront once the price is confirmed' : 'Bank transfer after delivery')]),
+        reviewGroup('You', 5, [reviewRow('Name', cust.name), reviewRow('Mobile', phone.format(cust.phone)), trim(cust.email) ? reviewRow('Email', cust.email) : null, reviewRow('Updates by', notifyWord)], 'request-review-you'),
+        el('div', { class: 'request-review__pay', 'data-testid': 'request-review-pay' }, upfrontForced() ? MDM.ui.notice('info', payNote)
+          : seg(n, 'pay', 'When do you want to pay?', [{ value: 'after', label: 'After delivery', hint: 'Bank transfer; we send the invoice when it is delivered' }, { value: 'upfront', label: 'Upfront', hint: 'Bank transfer once we confirm the price' }],
+            { stack: true, testid: 'request-pay', onChange: () => { saveDraft(); rerender(n); } })),
         el('div', null, el('h3', { class: 'request-group__title request-review__price-title' }, 'Estimated price'),
           el('div', { class: 'summary', 'data-testid': 'request-review-price' }, chargeLines(model, 'request-review'))),
-        MDM.ui.notice('info', 'Final price confirmed by our team' + (settings.ops && settings.ops.reviewText ? ', usually within ' + settings.ops.reviewText : '') + '. We message you by ' + notifyWord + (isShop() || draft.pay === 'upfront' ? ' with the amount to transfer.' : ' and you pay after delivery.'))),
+        MDM.ui.notice('info', 'Final price confirmed by our team' + (priceAfterCollection() ? ' after collection, from the driver\'s photo' : settings.ops && settings.ops.reviewText ? ', usually within ' + settings.ops.reviewText : '') + '. We message you by ' + notifyWord + (upfront ? ' with the amount to transfer.' : ' and you pay after delivery.'), { testid: 'request-review-note' })),
       el('div', { class: 'field__error', role: 'alert', 'data-testid': 'request-error', hidden: true }),
       actions({ submit: true, label: 'Send request' })];
   }
@@ -992,8 +1088,9 @@
   }
   function stepFromHash() { const m = /^#step-([1-6])$/.exec(location.hash || ''); return m ? Number(m[1]) : 0; }
   function setStep(n, o) {
-    // Steps before the target must be valid; otherwise land on the first one that is not.
+    // Steps before the target must be valid; otherwise land on the first one that is not. A skipped step 5 moves on to the review.
     for (let k = 1; k <= 6; k++) renderStep(k);
+    if (visibleSteps().indexOf(n) < 0) n = nextStep(n);
     n = Math.min(n, firstInvalid(n));
     step = n;
     if (stepFromHash() !== n) history.replaceState(null, '', location.pathname + location.search + '#step-' + n);
@@ -1006,16 +1103,18 @@
     const h = dom.steps[n].querySelector('h2'); if (h) h.focus({ preventScroll: true });
   }
   function go(n) { if (stepFromHash() === n) setStep(n); else location.hash = '#step-' + n; }
-  function advance() { if (!showErrors(step)) return; go(step + 1); }
+  function advance() { if (!showErrors(step)) return; go(nextStep(step)); }
+  // stepOf() → { at, of }: the position among the steps this customer sees ('Step 5 of 5' on the review when step 5 is skipped).
+  const stepOf = () => { const v = visibleSteps(); return { at: Math.max(1, v.indexOf(step) + 1), of: v.length }; };
   function renderStepper() {
-    const labels = stepLabels();
+    const shown = visibleSteps();
     dom.stepper.hidden = isBusiness();
-    dom.stepper.replaceChildren(...labels.map((label, i) => {
-      const n = i + 1, done = n < step, cur = n === step;
+    dom.stepper.replaceChildren(...shown.map((n, i) => {
+      const done = n < step, cur = n === step, label = stepLabel(n);
       const inner = done ? el('a', { class: 'stepper__link', href: '#step-' + n }, html(MDM.icon('check', 16)), el('span', { class: 'stepper__label' }, label))
-        : el('span', { class: 'stepper__link' }, el('span', { class: 'stepper__num' }, n + '.'), el('span', { class: 'stepper__label' }, label));
+        : el('span', { class: 'stepper__link' }, el('span', { class: 'stepper__num' }, (i + 1) + '.'), el('span', { class: 'stepper__label' }, label));
       return el('li', { class: ['stepper__item', done ? 'is-done' : null], 'aria-current': cur ? 'step' : null }, inner);
-    }), el('li', { class: 'stepper__progress', 'aria-hidden': 'true' }, 'Step ' + step + ' of ' + labels.length));
+    }), el('li', { class: 'stepper__progress', 'aria-hidden': 'true' }, 'Step ' + stepOf().at + ' of ' + stepOf().of));
   }
   function updateSummary() {
     const model = priceModel();
@@ -1030,7 +1129,7 @@
       return;
     }
     const c = draft.collection, d = draft.delivery, m = draft.method;
-    const from = isShop() ? (trim(draft.shop.name) || 'Shop') : (trim(c.address) ? MDM.geo.zoneShort(c.zone) : '…');
+    const from = (isShop() ? (trim(draft.shop.name) || 'Shop') : (trim(c.address) ? MDM.geo.zoneShort(c.zone) : '…')) + (draft.extra.length ? ' + ' + MDM.ui.plural(draft.extra.length, 'stop') : '');
     const to = m === 'home' ? (trim(d.address) ? MDM.geo.zoneShort(d.zone) : '…') : m === 'boat' ? (trim(draft.boat.island) || 'Boat') : m === 'cargo' ? 'Maldivian Cargo' : 'Airport';
     dom.panel.replaceChildren(el('div', { class: 'summary' },
       el('h2', { class: 'summary__head' }, 'Your request'),
@@ -1038,9 +1137,9 @@
       el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, MDM.deliveryMethodLabel(m), el('span', { class: 'summary__sub' }, from + ' to ' + to))),
       el('div', { class: 'summary__rule' }),
       chargeLines(model, 'request-panel'),
-      el('p', { class: 'small muted' }, 'Final price confirmed by our team before collection.')));
+      el('p', { class: 'small muted', 'data-testid': 'request-panel-note' }, priceAfterCollection() ? 'No package photo: we collect first and confirm the final price from the driver\'s photo.' : 'Final price confirmed by our team before collection.')));
     const totalEl = dom.panel.querySelector('[data-testid="request-panel-total"]'); if (totalEl) totalEl.setAttribute('data-testid', 'request-panel-estimate');
-    dom.bar.replaceChildren(el('div', { class: 'mobile-bar__info' }, el('div', { class: 'mobile-bar__total mono', 'data-testid': 'request-bar-estimate' }, model ? rangeText(model.total, model.xl) : 'Add a package'), el('div', { class: 'mobile-bar__meta' }, 'Estimate · Step ' + step + ' of 6')),
+    dom.bar.replaceChildren(el('div', { class: 'mobile-bar__info' }, el('div', { class: 'mobile-bar__total mono', 'data-testid': 'request-bar-estimate' }, model ? rangeText(model.total, model.xl) : 'Add a package'), el('div', { class: 'mobile-bar__meta' }, 'Estimate · Step ' + stepOf().at + ' of ' + stepOf().of)),
       step < 6 ? el('button', { type: 'button', class: 'btn btn--primary', on: { click: advance } }, 'Continue') : el('button', { type: 'submit', form: 'request-form', class: 'btn btn--brand' }, 'Send'));
   }
 
@@ -1094,7 +1193,9 @@
     try {
       const cust = draft.customer, t = draft.type;
       const customer = { name: trim(cust.name), phone: phone.normalize(cust.phone), email: trim(cust.email), notify: cust.notify };
-      const saved = await MDM.store.upsertCustomer({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, address: null });
+      // A guest's tick is recorded on the order and on their customer record, so signing in later does not ask again.
+      const termsAcceptedAt = needsTerms() ? new Date().toISOString() : profile.termsAcceptedAt;
+      const saved = await MDM.store.upsertCustomer({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, address: null, termsAcceptedAt });
       await saveNewAddresses(me ? me.phone : customer.phone);
       const pickup = pickupEnd();
       const c = draft.collection;
@@ -1106,10 +1207,10 @@
       const packages = buildPackages(false);
       const order = await MDM.store.createOrder({
         source: 'web', requestType: isShop() ? 'shop_buy' : t, service: service(), serviceLevel: draft.level, customerId: saved.id, customer,
-        collection, delivery, details: detailsFor(), documents, packages,
+        collection, delivery, details: detailsFor(), documents, packages, extraCollections: extraData(), termsAcceptedAt,
         extraVehicle: !!draft.extraVehicle && MDM.extraVehicleEligible(packages),
         schedule: draft.level === 'advance' ? Object.assign({ type: 'advance' }, draft.schedule) : { type: 'asap' },
-        payment: { method: 'transfer', status: 'pending', upfrontRequired: isShop() || draft.pay === 'upfront' },
+        payment: { method: 'transfer', status: 'pending', upfrontRequired: upfrontForced() || draft.pay === 'upfront' },
         by: 'customer',
       });
       const fileIds = documents.map(x => x.fileId).concat(packages.map(p => p.photoId).filter(Boolean));
@@ -1117,7 +1218,7 @@
       // Uploads left behind by a type or size the customer switched away from are not part of the order: drop them.
       const unused = draft.docs.map(x => x.fileId).concat(SIZES.map(sz => draft.photos[sz].photoId)).filter(id => id && fileIds.indexOf(id) < 0);
       for (const id of Array.from(new Set(unused))) { await MDM.store.remove('files', id).catch(() => {}); }
-      if (draft.remember) { try { localStorage.setItem(ME_KEY, JSON.stringify({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, signedInAt: (me && me.signedInAt) || new Date().toISOString() })); } catch (err) { /* storage blocked */ } }
+      if (draft.remember || me) { try { localStorage.setItem(ME_KEY, JSON.stringify({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, signedInAt: (me && me.signedInAt) || new Date().toISOString() })); } catch (err) { /* storage blocked */ } }
       clearDraft();
       location.href = MDM.href('track/?order=' + encodeURIComponent(order.id) + '&new=1');
     } catch (err) {
@@ -1142,8 +1243,11 @@
     draft = loadDraft();
     me = loadMe();
     if (me) {
-      if (!trim(draft.customer.name) && !trim(draft.customer.phone)) Object.assign(draft.customer, { name: me.name || '', phone: me.phone || '', email: me.email || '', notify: me.notify || 'whatsapp' });
       const cust = (await MDM.store.list('customers', { where: { phone: phone.normalize(me.phone) } }))[0];
+      profile = cust || null;
+      // Signed in: the account fills "Your details" (step 5 is then skipped); a draft typed for another number takes the account's.
+      if (profileReady() && normPhone(draft.customer.phone) !== profile.phone) Object.assign(draft.customer, { name: profile.name, phone: profile.phone, email: profile.email || '', notify: profile.notify || 'whatsapp' });
+      else if (!trim(draft.customer.name) && !trim(draft.customer.phone)) Object.assign(draft.customer, { name: me.name || '', phone: me.phone || '', email: me.email || '', notify: me.notify || 'whatsapp' });
       savedAddresses = ((cust && cust.addresses) || []).filter(a => a && a.id && trim(a.address));
       reorderChoices = await loadReorderChoices();
     }

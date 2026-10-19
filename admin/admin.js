@@ -159,11 +159,14 @@
   // Web app updates §5.5 and §5.6: packages coming back after a business cancelled, cash a driver still holds, cash the office owes a business.
   const returnPending = o => !!(o.cancellation && o.cancellation.returnStatus === 'pending');
   const cashDifference = o => !!(o.cod && typeof o.cod.variance === 'number' && o.cod.variance !== 0 && o.cod.status !== 'remitted');
+  // A driver can be assigned once the price is confirmed, or straight away when there is no package photo: the price is then set from
+  // the proof of collection (updates 17/10/2026). Those requests wait in "Driver to assign", not "Price to confirm".
+  const toAssign = o => !o.driverId && !o.batchId && (o.status === 'confirmed' || (o.status === 'requested' && MDM.priceAfterCollection(o)));
   function queues(orders) {
     return {
-      quotes: orders.filter(o => o.status === 'requested'),
+      quotes: orders.filter(o => (o.status === 'requested' && !MDM.priceAfterCollection(o)) || MDM.priceToFinalise(o)),
       reviews: orders.filter(o => o.payment && o.payment.status === 'received'),
-      unassigned: orders.filter(o => o.status === 'confirmed' && !o.driverId && !o.batchId),
+      unassigned: orders.filter(toAssign),
       failed: orders.filter(o => o.status === 'failed'),
       cancels: orders.filter(o => o.cancellation && o.cancellation.status === 'requested' && ['cancelled', 'delivered', 'returned'].indexOf(o.status) < 0),
       priority: orders.filter(o => o.priority && o.priority.status === 'requested' && ['cancelled', 'delivered', 'returned'].indexOf(o.status) < 0),
@@ -210,10 +213,11 @@
     return nb(MDM.ui.dayKey(iso) === MDM.ui.dayKey(new Date()) ? MDM.ui.fmtTime(iso) : MDM.ui.fmtDate(iso, { dateOnly: true }));
   }
   function pickupZone(pkg, service) { return service === 'shop' && pkg.shop ? pkg.shop.zone : (pkg.pickup ? pkg.pickup.zone : null); }
-  // routeText(order) → 'Malé → HM Ph. 1' (zone shorts, unique, in package order)
+  // routeText(order) → 'Malé → HM Ph. 1' (zone shorts, unique, in package order, then the extra collection points)
   function routeText(o) {
     const pk = (o.packages || []);
-    const from = uniq(pk.map(p => MDM.geo.zoneShort(pickupZone(p, o.service) || (o.collection && o.collection.zone) || 'male')));
+    const from = uniq(pk.map(p => MDM.geo.zoneShort(pickupZone(p, o.service) || (o.collection && o.collection.zone) || 'male'))
+      .concat((o.extraCollections || []).map(c => MDM.geo.zoneShort(c.zone || 'male'))));
     const to = uniq(pk.map(p => MDM.geo.zoneShort(p.dropoff ? p.dropoff.zone || 'male' : 'male')));
     return (from.map(nb).join(', ') || 'Malé') + NBSP + '→' + NBSP + (to.map(nb).join(', ') || 'Malé');
   }
@@ -236,6 +240,7 @@
     if (o.cancellation && o.cancellation.status === 'requested' && DONE.indexOf(o.status) < 0) out.push({ kind: 'danger', label: 'Cancel requested', key: 'cancel-request' });
     if (o.serviceLevel === 'advance' && DONE.indexOf(o.status) < 0) out.push({ kind: 'info', label: 'Advance', key: 'advance' });
     if ((o.extraVehicle || vehicleCharged(o)) && DONE.indexOf(o.status) < 0) out.push({ kind: 'info', label: 'Extra vehicle', key: 'extra-vehicle' });
+    if (MDM.priceToFinalise(o)) out.push({ kind: 'warn', label: 'Price to finalise', key: 'price-to-finalise' });
     if (returnPending(o)) out.push({ kind: 'danger', label: 'Return pending', key: 'return-pending' });
     if (cashDifference(o)) out.push({ kind: 'warn', label: 'Cash difference', key: 'cash-difference' });
     return out;
@@ -270,12 +275,12 @@
       ctx.narrow ? el('span', { class: 'table__sub' }, typeLabel(o)) : null) },
     customer: { label: 'Customer', cell: o => el('td', { 'data-label': 'Customer' }, o.customer ? o.customer.name : '', el('span', { class: 'table__sub mono' }, o.customer ? MDM.ui.phone.format(o.customer.phone) : '')) },
     type: { label: 'Type', cell: o => el('td', { 'data-label': 'Type' }, typeLabel(o), o.serviceLevel && o.serviceLevel !== 'normal' ? el('span', { class: 'table__sub' }, LEVEL[o.serviceLevel]) : null) },
-    route: { label: 'Route', cell: o => el('td', { 'data-label': 'Route' }, routeText(o), el('span', { class: 'table__sub' }, nb(plural((o.packages || []).length, 'package'))),
+    route: { label: 'Route', cell: o => el('td', { 'data-label': 'Route' }, routeText(o), el('span', { class: 'table__sub' }, nb(plural((o.packages || []).length, 'package') + ((o.extraCollections || []).length ? ', ' + plural(o.extraCollections.length + 1, 'collection') : ''))),
       el('span', { class: 'table__sub', 'data-testid': 'orders-row-method', 'data-method': (o.delivery && o.delivery.method) || 'home' }, methodText(o))) },
     total: { label: 'Total', th: 'num', cell: (o, ctx) => el('td', { class: 'num mono', 'data-label': 'Total' }, money(o.totals ? o.totals.total : 0), ctx.narrow ? el('span', { class: 'table__sub' }, paymentBadge(o)) : (o.pricing && o.pricing.status !== 'confirmed' ? el('span', { class: 'table__sub' }, 'estimate') : null)) },
     payment: { label: 'Payment', cell: o => el('td', { 'data-label': 'Payment' }, paymentBadge(o)) },
     status: { label: 'Status', cell: o => el('td', { class: 'table__primary', 'data-label': 'Status' }, html(MDM.badgeFor(o.status)), flagNodes(o)) },
-    driver: { label: 'Driver', cell: (o, ctx) => el('td', { 'data-label': 'Driver' }, driverName(o.driverId, ctx.drivers) || el('span', { class: 'subtle' }, o.status === 'confirmed' ? 'Unassigned' : '')) },
+    driver: { label: 'Driver', cell: (o, ctx) => el('td', { 'data-label': 'Driver' }, driverName(o.driverId, ctx.drivers) || el('span', { class: 'subtle' }, toAssign(o) ? 'Unassigned' : '')) },
     created: { label: 'Created', cell: o => el('td', { 'data-label': 'Created' }, whenCell(o.createdAt)) },
   };
   function columnsFor(ctx) { return ctx && ctx.narrow ? ['code', 'customer', 'route', 'total', 'status', 'driver', 'created'] : ['code', 'customer', 'type', 'route', 'total', 'payment', 'status', 'driver', 'created']; }
@@ -347,7 +352,10 @@
         const more = items.length > shown.length ? el('a', { class: 'queue__more', href: MORE[key] || '#/orders', 'data-testid': 'attention-more' }, 'See ' + (items.length - shown.length) + ' more') : null;
         groups.push(el('div', { class: 'queue', 'data-queue': key }, el('div', { class: 'queue__head' }, el('a', { href: MORE[key] || '#/orders' }, title), el('span', { class: 'queue__count mono' }, String(items.length))), el('div', { class: 'list' }, shown), more));
       };
-      group('price', 'Price to confirm', q.quotes.map(o => link(o, typeLabel(o) + ' · estimated ' + money(o.estimate ? o.estimate.min : o.totals.total) + (o.estimate && o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') + ((o.packages || []).some(p => p.photoId) ? ' · photo attached' : ''), MDM.ui.timeAgo(o.createdAt))));
+      const estText = o => 'estimated ' + money(o.estimate ? o.estimate.min : o.totals.total) + (o.estimate && o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '');
+      group('price', 'Price to confirm', q.quotes.map(o => MDM.priceToFinalise(o)
+        ? link(o, 'Collected, finalise from the proof of collection · ' + estText(o), MDM.ui.timeAgo(o.updatedAt))
+        : link(o, typeLabel(o) + ' · ' + estText(o) + ((o.packages || []).some(p => p.photoId) ? ' · photo attached' : ''), MDM.ui.timeAgo(o.createdAt))));
       group('payments', 'Payments to verify', q.reviews.map(o => link(o, 'Transfer slip · ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total) + ' declared', MDM.ui.timeAgo(o.payment.submittedAt || o.updatedAt))));
       group('failed', 'Failed collection or delivery', q.failed.map(o => {
         const s = (o.route && o.route.stops || []).find(x => x.status === 'failed');
@@ -356,7 +364,7 @@
       }));
       group('cancels', 'Cancellation requests', q.cancels.map(o => link(o, (o.cancellation.reason || 'No reason given') + ' · ' + MDM.STATUS[o.status].label, MDM.ui.timeAgo(o.cancellation.requestedAt))));
       group('priority', 'Priority requests', q.priority.map(o => { const r = (o.priority.requests || []).slice().reverse().find(x => x.decision === 'pending') || {}; return link(o, (r.reason || 'Priority delivery') + (r.deadline ? ' · by ' + r.deadline : ''), MDM.ui.timeAgo(r.at || o.updatedAt)); }));
-      group('unassigned', 'Driver to assign', q.unassigned.map(o => link(o, routeText(o) + ' · ' + typeLabel(o), MDM.ui.timeAgo(o.updatedAt))));
+      group('unassigned', 'Driver to assign', q.unassigned.map(o => link(o, routeText(o) + ' · ' + typeLabel(o) + (o.status === 'requested' ? ' · no photo, price after collection' : ''), MDM.ui.timeAgo(o.updatedAt))));
       const accountName = id => ((accounts || []).find(a => a.id === id) || {}).name || 'the business';
       group('returns', 'Returns to bring back', q.returns.map(o => {
         const c = o.cancellation || {}, prev = MDM.STATUS[c.previousStatus];
@@ -407,7 +415,7 @@
       const delivered = orders.filter(o => o.status === 'delivered'), cancelled = orders.filter(o => o.status === 'cancelled');
       v.slots.kpis.replaceChildren(
         kpi('Total orders', orders.length, onDay(orders, o => o.createdAt) + ' placed today', 'total', 'package', '#/orders'),
-        kpi('Pending', n('requested'), 'waiting for price confirmation', 'pending', 'file', '#/orders?tab=price'),
+        kpi('Pending', n('requested'), 'waiting for a price, or a driver when there is no photo', 'pending', 'file', '#/orders?tab=price'),
         kpi('Awaiting collection', n(AWAITING), 'confirmed, not collected yet', 'awaiting-collection', 'clock', '#/orders?tab=active'),
         kpi('Collected', n('collected'), 'at the hub or with a driver', 'collected', 'package', '#/orders?status=collected'),
         kpi('Out for delivery', n('out_for_delivery'), 'on the way to recipients', 'out-for-delivery', 'bike', '#/orders?status=out_for_delivery'),
@@ -504,7 +512,7 @@
   // ---- Public contract -------------------------------------------------------------------------------------------------------
   MDM.admin = {
     views, navigate, params, openOrder, setQuery, user, by, can, queues,
-    fmt: { SERVICE, LEVEL, SOURCE, NOTIFY, DONE, money, plural, routeText, methodText, returnPending, cashDifference, vehicleCharged, paymentBadge, typeLabel, flags, flagNodes, driverName, byLabel, deliveredAt, scheduleText, fmtDay,
+    fmt: { SERVICE, LEVEL, SOURCE, NOTIFY, DONE, money, plural, routeText, methodText, returnPending, cashDifference, toAssign, vehicleCharged, paymentBadge, typeLabel, flags, flagNodes, driverName, byLabel, deliveredAt, scheduleText, fmtDay,
       orderTableHead, orderRow, columnsFor, section, emptyBlock, mapFallback, whenCell, csv, downloadCsv, columns: Object.keys(COLUMNS) },
   };
   views.overview = overviewView();

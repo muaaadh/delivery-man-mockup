@@ -45,12 +45,12 @@
   MDM.ACTIVE_STATUSES = ['assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery', 'failed'];
   MDM.CANCELLABLE = ['requested', 'confirmed', 'assigned', 'dispatched', 'on_the_way', 'arrived'];   // customers may ask until collection
   MDM.ALLOWED = {
-    requested: ['confirmed', 'cancelled'],
+    requested: ['confirmed', 'assigned', 'cancelled'],   // assigned: no package photo, so the price is set from the proof of collection
     confirmed: ['assigned', 'collected', 'cancelled'],
     assigned: ['dispatched', 'confirmed', 'cancelled'],
     dispatched: ['on_the_way', 'assigned', 'failed', 'cancelled'],
     on_the_way: ['arrived', 'collected', 'failed', 'cancelled'],
-    arrived: ['collected', 'failed', 'cancelled'],
+    arrived: ['collected', 'on_the_way', 'failed', 'cancelled'],   // on_the_way: on to the next collection of a multi-collection order
     collected: ['out_for_delivery', 'failed', 'cancelled'],
     out_for_delivery: ['delivered', 'failed', 'returned', 'cancelled'],   // cancelled: a business cancels after dispatch, the package comes back
     failed: ['dispatched', 'assigned', 'confirmed', 'on_the_way', 'collected', 'out_for_delivery', 'returned', 'cancelled'],
@@ -101,7 +101,18 @@
     { value: 'large',  label: 'Large',  size: 'xl',  hint: 'Bigger or heavy, may need a vehicle', rate: 60 },
   ];
   // Charges recorded on proof of collection / delivery or by the office (§6).
-  MDM.CHARGE_TYPES = [{ value: 'naalu', label: 'Naalu' }, { value: 'packing', label: 'Packing charge' }, { value: 'other', label: 'Other charge' }];
+  // cargo: the Maldivian Cargo bill the driver pays at the counter (updates 17/10/2026), always added to the customer's delivery charges.
+  MDM.CHARGE_TYPES = [{ value: 'naalu', label: 'Naalu' }, { value: 'packing', label: 'Packing charge' }, { value: 'cargo', label: 'Maldivian Cargo charges' }, { value: 'other', label: 'Other charge' }];
+  // Pick & deliver orders without a package photo are collected first; the operator sets the price from the proof of collection
+  // (updates 17/10/2026). pricing.afterCollection is fixed when the order is created.
+  MDM.priceAfterCollection = o => !!(o && o.pricing && o.pricing.afterCollection && o.pricing.status !== 'confirmed');
+  // priceToFinalise(o) → true once the proof of collection is in and the price still waits for the operator.
+  MDM.priceToFinalise = o => MDM.priceAfterCollection(o) && ['cancelled', 'returned'].indexOf(o.status) < 0 && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
+  // Extra collection points on one order (updates 17/10/2026): collect from an address or buy at a shop, all packed together and
+  // delivered to the one delivery address. order.extraCollections = [{ id, kind: 'collect'|'shop', address, zone, landmark,
+  // contactName, contactPhone, instructions, shop: { name, phone, list, budget, unavailable, receiptTotal, receiptPhotoId } }].
+  MDM.EXTRA_COLLECTION_KINDS = [{ value: 'collect', label: 'Collect an item' }, { value: 'shop', label: 'Buy from a shop' }];
+  MDM.MAX_EXTRA_COLLECTIONS = 4;
   // Cash on delivery for business orders (§5.6): collected by the driver, handed to the office, paid to the business.
   MDM.COD_STATUS = {
     pending:       { label: 'To collect',           kind: 'warn' },
@@ -145,7 +156,7 @@
     { value: 'vehicle', label: 'Extra vehicle charge' }, { value: 'size', label: 'Size correction' }, { value: 'waiting', label: 'Waiting time' },
     { value: 'freight', label: 'Boat freight advanced' }, { value: 'express', label: 'Express handling' }, { value: 'redelivery', label: 'Re-delivery' },
     { value: 'discount', label: 'Discount' }, { value: 'quote', label: 'Price confirmation' }, { value: 'packing', label: 'Packing charge' }, { value: 'naalu', label: 'Naalu' },
-    { value: 'other', label: 'Other' },
+    { value: 'cargo', label: 'Maldivian Cargo charges' }, { value: 'stop', label: 'Extra collection' }, { value: 'other', label: 'Other' },
   ];
   MDM.FAIL_REASONS = [
     { value: 'customer_unavailable', label: 'Customer unavailable' }, { value: 'recipient_unavailable', label: 'Recipient unavailable' },
@@ -458,12 +469,15 @@
       o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: MDM.id('adj'), preset: q.preset || 'quote', label: q.label || 'Price confirmation', amount: total - before, at: now(), by: q.by || 'admin', remarks: q.remarks || '' }]);
       recalc(o);
     }
-    priceHistory(o, before, o.totals.total, 'Final price confirmed' + (q.remarks ? ': ' + q.remarks : ''), q.by);
+    const fromProof = MDM.priceToFinalise(o);
+    priceHistory(o, before, o.totals.total, 'Final price confirmed' + (fromProof ? ' from the proof of collection' : '') + (q.remarks ? ': ' + q.remarks : ''), q.by);
     o.pricing = Object.assign({}, o.pricing, { status: 'confirmed', confirmedAt: now(), confirmedBy: q.by || 'admin', remarks: q.remarks || '' });
     o.totals.quoteRequired = false;
     pushEvent(o, makeEvent('price_confirmed', 'Price confirmed: ' + fmt(o.totals.total) + (q.remarks ? ' (' + q.remarks + ')' : ''), q.by, 'public'));
     if (o.status === 'requested') setStatus(o, 'confirmed', 'confirmed', 'Order confirmed', q.by);
-    if (q.requestPayment || o.payment.upfrontRequired) requestPaymentOn(o, q.by, true);
+    // Delivered before the price was set (price after collection): the invoice that waited for it goes out now.
+    if (o.status === 'delivered' && o.payment.status === 'pending') requestPaymentOn(o, q.by, false);
+    else if (q.requestPayment || o.payment.upfrontRequired) requestPaymentOn(o, q.by, o.status !== 'delivered');
     return save(o);
   }
 
@@ -731,8 +745,19 @@
       if (o.service === 'shop' && pkg.shop) add('pickup', 'Shop: ' + pkg.shop.name, { address: pkg.shop.address || pkg.shop.name, lat: pkg.shop.lat, lng: pkg.shop.lng }, pkg.shop.zone || 'male', { name: pkg.shop.name, phone: '' }, pkg, { shop: true });
       else if (pkg.pickup) add('pickup', 'Collection', pkg.pickup, pkg.pickup.zone || 'male', pkg.pickup.contact, pkg);
     });
+    // Extra collection points (multi collection): each is its own stop; what is collected or bought there is packed with the rest, so
+    // the stop carries no package of its own.
+    (o.extraCollections || []).forEach(c => {
+      const shop = c.kind === 'shop';
+      const end = { address: shop ? [c.shop && c.shop.name, c.address].filter(Boolean).join(', ') : c.address, landmark: c.landmark || '', instructions: c.instructions || '', lat: c.lat, lng: c.lng };
+      const p = pointFor(end, c.zone || 'male', end.address);
+      stops.push({ id: MDM.id('stp'), packageId: null, packageIds: [], collectionId: c.id, type: 'pickup', label: shop ? 'Shop: ' + ((c.shop && c.shop.name) || 'shop') : 'Collection', address: end.address || '', landmark: end.landmark, instructions: end.instructions,
+        zone: c.zone || 'male', lat: p.lat, lng: p.lng, contact: shop ? { name: (c.shop && c.shop.name) || '', phone: (c.shop && c.shop.phone) || '' } : { name: c.contactName || o.customer.name, phone: c.contactPhone || o.customer.phone },
+        cargo: null, meetAt: '', status: 'pending', at: null, attempts: 0, shop: shop || undefined });
+    });
     (o.packages || []).forEach(pkg => { const d = pkg.dropoff || {}; add('dropoff', 'Delivery', d, d.zone || 'male', d.recipient, pkg); });
-    const nP = stops.filter(s => s.type === 'pickup').length, nD = stops.filter(s => s.type === 'dropoff').length;
+    // Number the collections only when there is more than one (shop stops keep their 'Shop: …' label and are not counted).
+    const nP = stops.filter(s => s.type === 'pickup' && !s.shop).length, nD = stops.filter(s => s.type === 'dropoff').length;
     let i = 0, j = 0;
     stops.forEach(s => { if (s.type === 'pickup' && nP > 1 && !s.shop) s.label = 'Collection ' + (++i); if (s.type === 'dropoff' && nD > 1) s.label = 'Delivery ' + (++j); });
     return stops;
@@ -747,9 +772,10 @@
     const prev = o.driverId;
     o.driverId = driverId;
     ensureRoute(o);
-    if (o.status === 'requested') throw new StoreError('transition', 'Confirm the price before assigning a driver');
+    if (o.status === 'requested' && !MDM.priceAfterCollection(o)) throw new StoreError('transition', 'Confirm the price before assigning a driver');
     const label = (reassign ? 'Driver changed to ' : 'Driver assigned: ') + d.name;
-    if (o.status === 'confirmed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
+    if (o.status === 'requested') setStatus(o, 'assigned', 'assigned', label + '. We confirm your price from the driver\'s photo at collection', opts.by);
+    else if (o.status === 'confirmed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
     else if (o.status === 'failed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
     else pushEvent(o, makeEvent('assigned', label, opts.by, 'public', { driverId }));
     const saved = save(o);
@@ -784,7 +810,7 @@
     return save(o);
   }
   function settleShop(o) {
-    if (o.service !== 'shop') return;
+    if (o.service !== 'shop' && !(o.extraCollections || []).some(c => c.kind === 'shop')) return;
     const paid = o.payment && o.payment.status === 'paid' && o.payment.paidAmount != null ? o.payment.paidAmount : null;
     if (paid == null) return;
     const due = o.totals.total, balance = paid - due;
@@ -812,8 +838,11 @@
         if (p.photoId) o.packages.filter(k => (s.packageIds || [s.packageId]).indexOf(k.id) >= 0).forEach(k => { if (!k.photoId) { k.photoId = p.photoId; k.photoSource = 'driver'; } });
         if (p.sizes) applySizes(o, p.sizes, by);
         if (s.shop) {
+          // The receipt replaces the budget for the shopping fee: on the package (Shop & Deliver) or on the extra shop stop.
           const pkg = o.packages.find(k => k.id === s.packageId);
-          if (pkg && pkg.shop) { pkg.shop.receiptTotal = Math.round(Number(p.receiptTotal) || 0); pkg.shop.receiptPhotoId = p.receiptPhotoId || null; recalc(o); }
+          const extra = s.collectionId ? (o.extraCollections || []).find(c => c.id === s.collectionId) : null;
+          const sh = pkg && pkg.shop ? pkg.shop : extra && extra.shop ? extra.shop : null;
+          if (sh) { sh.receiptTotal = Math.round(Number(p.receiptTotal) || 0); sh.receiptPhotoId = p.receiptPhotoId || null; recalc(o); }
           s.receiptTotal = p.receiptTotal; s.receiptPhotoId = p.receiptPhotoId || null;
         }
         const pickups = o.route.stops.filter(x => x.type === 'pickup');
@@ -822,13 +851,19 @@
           if (o.status === 'dispatched') setStatus(o, 'on_the_way', 'route_started', who + ' is on the way to collect', by);
           if (o.status === 'on_the_way' || o.status === 'arrived') setStatus(o, 'collected', 'collected', label + (p.photoId ? ', proof photo added' : ''), by, 'public', { stopId });
           else pushEvent(o, makeEvent('collected', label, by, 'public', { stopId }));
-        } else pushEvent(o, makeEvent('collected_partial', label, by, 'public', { stopId }));
+        } else {
+          pushEvent(o, makeEvent('collected_partial', label, by, 'public', { stopId }));
+          if (o.status === 'arrived') setStatus(o, 'on_the_way', 'next_collection', who + ' is on the way to the next collection', by);
+        }
         if (p.remarks) pushEvent(o, makeEvent('note', 'Driver remark: ' + p.remarks, by, 'internal', { stopId }));
         if (Number(p.naalu) > 0) addChargeOn(o, { type: 'naalu', stage: 'collection', amount: p.naalu, description: p.naaluNote || 'Paid at collection', paidBy: 'driver', by });
+        if (MDM.priceToFinalise(o) && pickups.every(x => x.status === 'done')) notifyStaff(o, 'operations', 'Finalise the price', 'collected' + (p.photoId ? ' with a proof of collection photo' : '') + ': confirm the price while it is being delivered');
       } else {
         s.handedTo = p.handedTo || 'recipient'; s.recipientName = p.recipientName || ''; s.photoId = p.photoId || null; s.confirmed = !!p.confirmed;
         if (Number(p.naalu) > 0) addChargeOn(o, { type: 'naalu', stage: 'delivery', amount: p.naalu, description: p.naaluNote || 'Paid at delivery', paidBy: 'driver', by });
         if (Number(p.packing) > 0) addChargeOn(o, { type: 'packing', stage: 'delivery', amount: p.packing, description: p.packingNote || 'Packing at delivery', paidBy: 'driver', billable: true, by });
+        // Maldivian Cargo deliveries: the counter's own bill, paid by the driver, goes on the customer's delivery charges with its photo.
+        if (Number(p.cargoCharge) > 0) addChargeOn(o, { type: 'cargo', stage: 'delivery', amount: p.cargoCharge, description: p.cargoNote || 'Maldivian Cargo bill', paidBy: 'driver', billable: true, photoId: p.cargoBillPhotoId || null, by });
         if (o.cod && o.cod.amount > 0 && p.cashCollected != null && p.cashCollected !== '') {
           const got = Math.round(Number(p.cashCollected) || 0);
           // The cash is with the order's driver even when the office records the proof of delivery for them.
@@ -848,7 +883,9 @@
         } else if (o.status !== 'cancelled' && drops.every(x => x.status === 'done')) {
           setStatus(o, 'delivered', 'delivered', label, by, 'public', { stopId });
           settleShop(o);
-          if (o.payment && o.payment.status === 'pending') requestPaymentOn(o, 'system', false);
+          // A price still to be set from the proof of collection holds the invoice back; confirmPrice sends it.
+          if (MDM.priceAfterCollection(o)) notifyStaff(o, 'operations', 'Finalise the price', 'delivered before the price was confirmed: confirm it to send the invoice');
+          else if (o.payment && o.payment.status === 'pending') requestPaymentOn(o, 'system', false);
         } else pushEvent(o, makeEvent('delivered_partial', label, by, 'public', { stopId }));
         if (p.remarks) pushEvent(o, makeEvent('note', 'Driver remark: ' + p.remarks, by, 'internal', { stopId }));
         if (['delivered', 'returned'].indexOf(o.status) >= 0 && o.driverId) releaseDriverIfIdle(o.driverId, o.id);
@@ -1084,10 +1121,11 @@
     const t = now();
     if (existing) {
       const patch = { name: c.name || existing.name, email: c.email || existing.email || '', notify: c.notify || existing.notify || 'whatsapp', lastOrderAt: c.touch === false ? existing.lastOrderAt : t, orderCount: (existing.orderCount || 0) + (c.touch === false ? 0 : 1) };
+      if (c.termsAcceptedAt && !existing.termsAcceptedAt) patch.termsAcceptedAt = c.termsAcceptedAt;
       if (c.address && !(existing.addresses || []).some(a => a.address === c.address.address)) patch.addresses = (existing.addresses || []).concat([Object.assign({ id: MDM.id('adr'), label: 'Other' }, c.address)]);
       return update('customers', existing.id, patch);
     }
-    return insert('customers', { name: c.name || '', phone, email: c.email || '', notify: c.notify || 'whatsapp', addresses: c.address ? [Object.assign({ id: MDM.id('adr'), label: 'Home' }, c.address)] : [], lastOrderAt: c.touch === false ? null : t, orderCount: c.touch === false ? 0 : 1 });
+    return insert('customers', { name: c.name || '', phone, email: c.email || '', notify: c.notify || 'whatsapp', addresses: c.address ? [Object.assign({ id: MDM.id('adr'), label: 'Home' }, c.address)] : [], lastOrderAt: c.touch === false ? null : t, orderCount: c.touch === false ? 0 : 1, termsAcceptedAt: c.termsAcceptedAt || null });
   }
   // createOrder: the one place customer and admin requests become orders (keeps the shape identical everywhere).
   function createOrder(d) {
@@ -1106,15 +1144,27 @@
       const acc = readCol('business_accounts').find(a => a.id === d.accountId);
       if (acc) d.packages = (d.packages || []).map(p => p.tier && p.tierRate == null ? Object.assign({}, p, { tierRate: MDM.pricing.businessRate(acc, p.tier, s) }) : p);
     }
-    const q = MDM.pricing.quote({ service: d.service || 'pick', packages: d.packages }, s);
-    const est = MDM.pricing.estimateRange(d.packages, s, d.service || 'pick');
+    // Extra collection points (multi collection): cleaned here so every page stores the same shape.
+    const extraCollections = (Array.isArray(d.extraCollections) ? d.extraCollections : []).filter(c => c && String(c.address || '').trim()).slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(c => {
+      const shop = c.kind === 'shop';
+      return { id: c.id || MDM.id('col'), kind: shop ? 'shop' : 'collect', address: String(c.address).trim(), zone: c.zone && c.zone !== 'airport' ? c.zone : 'male', landmark: String(c.landmark || '').trim(),
+        contactName: shop ? '' : String(c.contactName || '').trim(), contactPhone: shop ? '' : normPhone(c.contactPhone) || String(c.contactPhone || '').trim(), instructions: String(c.instructions || '').trim(),
+        shop: shop ? { name: String((c.shop || {}).name || '').trim(), phone: normPhone((c.shop || {}).phone) || '', list: String((c.shop || {}).list || '').trim(), budget: Math.round(Number((c.shop || {}).budget) || 0), unavailable: (c.shop || {}).unavailable || 'call', receiptTotal: null, receiptPhotoId: null } : null };
+    });
+    const shopStop = extraCollections.some(c => c.kind === 'shop');
+    const q = MDM.pricing.quote({ service: d.service || 'pick', packages: d.packages, extraCollections }, s);
+    const est = MDM.pricing.estimateRange(d.packages, s, d.service || 'pick', extraCollections);
     const level = d.serviceLevel || 'normal';
     const needsReview = q.totals.quoteRequired || (d.packages || []).some(p => p.photoId) || level === 'express' || d.requestType === 'office';
+    // No package photo on a pick & deliver request: a driver can be assigned straight away and the price is set from the proof of
+    // collection. Shopping (paid upfront, before we buy) and orders created already confirmed keep the price-first flow.
+    const afterCollection = (d.service || 'pick') === 'pick' && !shopStop && (!d.status || d.status === 'requested') && !(d.packages || []).some(p => p.photoId);
     const order = insert('orders', {
       source: d.source || 'web', requestType: d.requestType || 'home', service: d.service || 'pick', serviceLevel: level, accountId: d.accountId || null,
       customerId: d.customerId || null, customer: d.customer, collection: d.collection, delivery: d.delivery, details: d.details || {}, documents: d.documents || [],
-      packages: q.packages, fees: q.fees, totals: q.totals, estimate: est, pricing: { status: 'estimated', history: [], needsReview },
-      schedule: d.schedule || { type: 'asap' }, payment: d.payment || { method: 'transfer', status: 'pending', upfrontRequired: d.service === 'shop' },
+      packages: q.packages, fees: q.fees, totals: q.totals, estimate: est, pricing: { status: 'estimated', history: [], needsReview, afterCollection },
+      schedule: d.schedule || { type: 'asap' }, payment: Object.assign({ method: 'transfer', status: 'pending', upfrontRequired: d.service === 'shop' }, d.payment || {}, shopStop ? { upfrontRequired: true } : {}),
+      extraCollections, termsAcceptedAt: d.termsAcceptedAt || null,
       priority: { level: level === 'express' ? 'express' : 'normal', status: 'none', requests: [] }, cancellation: { status: 'none' }, changes: [],
       statusHistory: [{ at: now(), from: null, to: d.status || 'requested', by: d.by || 'customer' }],
       status: d.status || 'requested', driverId: null, route: { stops: [], polyline: [] }, events: [], notes: d.notes || [],
@@ -1192,8 +1242,8 @@
     if (type === 'other' && !String(c.description || '').trim()) throw new StoreError('validation', 'Describe the charge');
     const by = c.by || 'admin';
     const rules = settings().rules || {};
-    const billable = c.billable != null ? !!c.billable : type === 'packing' ? true : type === 'naalu' ? !!rules.naaluBillable : false;
-    const ch = { id: MDM.id('chg'), type, stage: c.stage || 'office', amount, description: String(c.description || '').trim(), paidBy: c.paidBy || (by.indexOf('driver:') === 0 ? 'driver' : 'office'), billable: false, adjustmentId: null, by, at: now(), void: false };
+    const billable = c.billable != null ? !!c.billable : type === 'packing' || type === 'cargo' ? true : type === 'naalu' ? !!rules.naaluBillable : false;
+    const ch = { id: MDM.id('chg'), type, stage: c.stage || 'office', amount, description: String(c.description || '').trim(), paidBy: c.paidBy || (by.indexOf('driver:') === 0 ? 'driver' : 'office'), billable: false, adjustmentId: null, photoId: c.photoId || null, by, at: now(), void: false };
     o.charges = (o.charges || []).concat([ch]);
     if (billable) billCharge(o, ch, by);
     const where = { collection: ' at collection', delivery: ' at delivery' }[ch.stage] || '';

@@ -2,7 +2,8 @@
 // prices: store items, packages, the shopping budget with the item list, the cargo / airport / shopping fees, the extra vehicle charge,
 // billable charges (packing, naalu or other when billed; never voided or non-billable ones) and the total, with the delivery method,
 // the payment status and the bank details from settings. The link is what we message the customer after delivery, so it needs no
-// sign-in. Forced light; print rules for body.page-invoice are in css/base.css.
+// sign-in. Forced light; print rules for body.page-invoice are in css/base.css. Updates 17/10/2026: Maldivian Cargo charges from the
+// counter's bill, the shopping budget of a shop stop on a multi-collection order, and the estimate note for a price set after collection.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
   const BRAND = 'Mr. Delivery Man';
@@ -23,6 +24,7 @@
       const a = adjs[f.id] || {};
       const ch = charges.find(c => (a.chargeId && c.id === a.chargeId) || (c.adjustmentId && c.adjustmentId === a.id));
       if (ch && (ch.void || !ch.billable)) return null;
+      if (ch && ch.type === 'cargo') { const ref = String(ch.description || '').replace(/^maldivian cargo bill\s*/i, '').trim(); return Object.assign({}, f, { key: 'charge-cargo', reason: 'From the Maldivian Cargo bill' + (ref ? ', ' + ref : '') }); }
       if (ch) return Object.assign({}, f, { key: 'charge-' + ch.type, reason: [ch.type !== 'other' ? ch.description : '', CHARGE_STAGE[ch.stage]].filter(Boolean).join(', ') });
       if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: a.remarks || '' });
       return f;
@@ -137,9 +139,12 @@
     (o.packages || []).forEach(pk => lines.push(line(MDM.pricing.lineLabel(pk, o.service),
       [pk.description, from[pk.id] && from[pk.id] !== pk.size ? 'changed from ' + MDM.pricing.sizeLabel(from[pk.id]) + ' by our team' : ''].filter(Boolean).join(' · ') || null, pk.price ? pk.price.lineTotal : 0)));
     // Shop & deliver: the budget (or receipt) line carries the shopping list so the shopping fee reads against it.
+    // A shop stop on a multi-collection order carries its list the same way.
     const shopItems = o.service === 'shop' && Array.isArray((o.details || {}).items) ? o.details.items.filter(i => i && i.name) : [];
-    if (o.service === 'shop' && o.totals.budget) lines.push(line(o.packages.some(x => x.shop && x.shop.receiptTotal > 0) ? 'Shopping receipt' : 'Shopping budget',
-      shopItems.length ? shopItems.map(i => (i.qty || 1) + ' × ' + i.name).join(', ') : null, o.totals.budget, false, 'shop-budget'));
+    const extraShops = (o.extraCollections || []).filter(c => c.kind === 'shop' && c.shop);
+    const shopList = shopItems.length ? shopItems.map(i => (i.qty || 1) + ' × ' + i.name).join(', ') : extraShops.map(c => [c.shop.name, c.shop.list].filter(Boolean).join(': ')).join('; ');
+    const receipt = o.packages.some(x => x.shop && x.shop.receiptTotal > 0) || extraShops.some(c => c.shop.receiptTotal > 0);
+    if ((o.service === 'shop' || extraShops.length) && o.totals.budget) lines.push(line(receipt ? 'Shopping receipt' : 'Shopping budget', shopList || null, o.totals.budget, false, 'shop-budget'));
     feeRows(o, settings).forEach(f => lines.push(line(f.label, f.reason || null, f.amount, true, f.key)));
     const summary = el('div', { class: 'summary', 'data-testid': 'invoice-summary' }, lines, el('div', { class: 'summary__rule' }),
       el('div', { class: 'summary__total' }, el('span', null, confirmed ? 'Total' : 'Estimated total'), el('span', { class: 'mono', 'data-testid': 'invoice-total' }, money(o.totals.total))),
@@ -158,7 +163,7 @@
         el('div', { class: 'page-head__actions invoice-actions no-print' }, payBtn, printBtn, trackBtn)),
       brand,
       el('div', { class: 'stack-8' },
-        !confirmed ? MDM.ui.notice('warn', 'This is an estimate. Our team confirms the final price before collection.') : null,
+        !confirmed ? MDM.ui.notice('warn', MDM.priceAfterCollection(o) ? 'This is an estimate. Our team confirms the final price after collection, from the driver\'s photo.' : 'This is an estimate. Our team confirms the final price before collection.') : null,
         el('div', { class: 'invoice-parties' },
           el('section', null, el('h2', null, 'Invoice'), details),
           el('section', null, el('h2', null, 'Billed to'), billTo)),

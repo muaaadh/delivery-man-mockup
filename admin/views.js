@@ -992,7 +992,7 @@
         formSection('rates-banks', 'Bank accounts', 'Printed at checkout and on invoices. Transfer reference is always the order or invoice number.', banks.map((b, i) => el('div', { class: 'grid-3' },
           field('Bank ' + (i + 1), input('banks.' + i + '.name', b.name)), field('Account name', input('banks.' + i + '.accountName', b.accountName)), field('Account number', input('banks.' + i + '.accountNo', b.accountNo, { class: 'input mono', inputmode: 'numeric' }))))),
         formSection('rates-terms', 'Terms and invoicing', null, [
-          field('What we carry', textarea('terms', s.terms), { hint: 'Shown at checkout with the "I\'ve read what we carry" checkbox' }),
+          field('What we carry', textarea('terms', s.terms), { hint: 'Shown when a new customer signs up or a guest places an order, with the "I\'ve read what we carry" box' }),
           el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides the GST line on invoices' }))]),
         el('div', { class: 'form-actions' }, el('span', { class: 'form-caption' }, 'Changes apply to new requests and quotes.'), el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'rates-save' }, 'Save rates')));
       const old = root.querySelector('form, .skeleton'); if (old) old.replaceWith(form); else root.appendChild(form);

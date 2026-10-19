@@ -1,6 +1,7 @@
 // Sign in for every role (client requirements §2, §21): customers and businesses by mobile number and a one-time code, drivers and
 // staff by name and PIN, the office (admin, operators, office staff) by username and password, with a password reset.
-// The mockup has no server, so codes and PINs accept any 4 digits. The sessions it writes are the ones every other page reads:
+// The mockup has no server, so codes and PINs accept any 4 digits. A customer's first sign-in on a number is the sign-up: their name
+// and "I've read what we carry", ticked once (updates 17/10/2026). The sessions it writes are the ones every other page reads:
 // customers → localStorage mdm:me, businesses → localStorage mdm:business, drivers → sessionStorage mdm:driver,
 // staff → localStorage mdm:staff, office → localStorage mdm:session { user, staffId, role, name }.
 (function (MDM) { 'use strict';
@@ -16,7 +17,7 @@
   const asParam = params.get('as') === 'rider' ? 'driver' : params.get('as');
   const state = { role: ROLES.some(r => r.value === asParam) ? asParam : 'customer', phone: params.get('phone') || '', step: 1, next: params.get('next') || '', reset: null };
   if (state.role === 'admin' && params.get('reset') === '1') state.reset = { step: 1, user: '' };
-  let view, drivers = [], staff = [], accounts = [];
+  let view, drivers = [], staff = [], accounts = [], settings = {};
   const DEMO_PASSWORD = 'delivery';
 
   function field(id, label, control, hint) {
@@ -39,7 +40,7 @@
         el('span', { class: 'login-role__icon', 'aria-hidden': 'true' }, MDM.ui.html(MDM.icon(r.icon, 18))),
         el('span', { class: 'login-role__label' }, r.label), el('span', { class: 'login-role__hint' }, r.hint))));
     view.appendChild(roles);
-    const forms = { customer: () => phoneForm('customer'), business: () => phoneForm('business'), driver: driverForm, staff: staffForm, admin: state.reset ? resetForm : officeForm };
+    const forms = { customer: () => (state.step === 3 ? signupForm() : phoneForm('customer')), business: () => phoneForm('business'), driver: driverForm, staff: staffForm, admin: state.reset ? resetForm : officeForm };
     view.appendChild(forms[state.role]());
   }
 
@@ -58,7 +59,9 @@
           return;
         }
         const found = (await MDM.store.list('customers', { where: { phone } }))[0] || null;
-        save(localStorage, 'mdm:me', { name: found ? found.name : '', phone, email: found ? found.email : '', notify: found ? found.notify : 'whatsapp', signedInAt: new Date().toISOString() });
+        // A new number, or a customer who only ordered as a guest: sign up first (name and what we carry).
+        if (!found || !found.termsAcceptedAt) { state.step = 3; state.signup = { found }; render(); return; }
+        save(localStorage, 'mdm:me', { name: found.name, phone, email: found.email || '', notify: found.notify || 'whatsapp', signedInAt: new Date().toISOString() });
         go('account/');
       } } },
         demo('We sent a code to ' + MDM.ui.phone.format(state.phone) + '. In this demo any 4 digits work.'),
@@ -82,6 +85,38 @@
       actions(el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'login-continue' }, 'Send code'),
         kind === 'business' ? el('a', { class: 'btn btn--ghost', href: MDM.href('business/#apply') }, 'Open a business account') : el('a', { class: 'btn btn--ghost', href: MDM.href('request/') }, 'New here? Request a delivery')));
     if (state.phone && kind === 'customer') setTimeout(() => { if (MDM.ui.phone.valid(state.phone)) form.requestSubmit(); }, 0);
+    return form;
+  }
+
+  // Customer sign-up after the code: their name and the "what we carry" tick, once per number (updates 17/10/2026).
+  function signupForm() {
+    const found = state.signup && state.signup.found;
+    const name = el('input', { class: 'input', id: 'signup-name', type: 'text', autocomplete: 'name', maxlength: '80', value: (found && found.name) || '', 'data-testid': 'login-signup-name' });
+    const tick = el('input', { type: 'checkbox', id: 'signup-terms', 'aria-describedby': 'signup-terms-text', 'data-testid': 'login-terms' });
+    tick.addEventListener('change', () => { if (tick.checked) setError(tick, null); });
+    const terms = el('div', { class: 'field' },
+      el('p', { class: 'login-terms', id: 'signup-terms-text' }, settings.terms || ''),
+      // wrapped so base.css's `.field > label` (the field label rule) does not override `.checkbox`
+      el('div', null, el('label', { class: 'checkbox', for: 'signup-terms' }, tick, el('span', null, "I've read what we carry"))),
+      el('div', { class: 'field__error' }));
+    const form = el('form', { class: 'login-form', novalidate: true, on: { submit: async e => {
+      e.preventDefault();
+      const n = name.value.trim();
+      setError(name, n ? null : 'Enter your name');
+      setError(tick, tick.checked ? null : "Tick the box to confirm you've read what we carry");
+      if (!n || !tick.checked) { (n ? tick : name).focus(); return; }
+      const phone = MDM.ui.phone.normalize(state.phone);
+      const c = await MDM.store.upsertCustomer({ name: n, phone, termsAcceptedAt: new Date().toISOString(), touch: false });
+      save(localStorage, 'mdm:me', { name: c.name, phone, email: c.email || '', notify: c.notify || 'whatsapp', signedInAt: new Date().toISOString() });
+      go('account/');
+    } } },
+      el('h2', { class: 'login-sub' }, found ? 'One more step' : 'Create your account'),
+      el('p', { class: 'login-note' }, (found ? 'Welcome back. ' : 'This number is new to us. ') + 'Tell us your name and confirm what we carry. You only do this once.'),
+      field('signup-name', 'Your name', name),
+      terms,
+      actions(el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'login-signup-submit' }, found ? 'Continue' : 'Create account'),
+        el('button', { type: 'button', class: 'btn btn--ghost', on: { click: () => { state.step = 1; state.signup = null; render(); } } }, 'Use another number')));
+    setTimeout(() => (name.value ? tick : name).focus(), 0);
     return form;
   }
 
@@ -168,7 +203,7 @@
   async function main() {
     await MDM.store.ready;
     view = document.getElementById('view');
-    [drivers, staff, accounts] = await Promise.all([MDM.store.list('drivers', { order: 'createdAt' }), MDM.store.list('staff', { order: 'createdAt' }), MDM.store.list('business_accounts')]);
+    [drivers, staff, accounts, settings] = await Promise.all([MDM.store.list('drivers', { order: 'createdAt' }), MDM.store.list('staff', { order: 'createdAt' }), MDM.store.list('business_accounts'), MDM.store.settings()]);
     render();
   }
   main();

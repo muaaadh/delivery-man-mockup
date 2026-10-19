@@ -45,6 +45,10 @@
     });
     return ctx;
   }
+  // Shops on a multi-collection order (extraCollections of kind 'shop'): their budget, then the receipt, is bought for the customer
+  // and carries the shopping fee the same way a Shop & Deliver order does.
+  function extraShops(list) { return (list || []).filter(c => c && c.kind === 'shop' && c.shop).map(c => c.shop); }
+  function shopBase(sh) { return sh.receiptTotal != null && sh.receiptTotal > 0 ? round(sh.receiptTotal) : round(sh.budget); }
   function cargoLabel(count, rules) { return 'Maldivian Cargo fee' + (count > 1 && rules.cargoFeePer !== 'order' ? ' × ' + count : ''); }
   function shoppingLabel(rates) { const pct = Number(rates.shoppingPct) || 0; return 'Shopping fee' + (pct ? ' ' + pct + '%' : ''); }
 
@@ -83,6 +87,9 @@
       return Object.assign({}, pkg, { size, price: { same: round(cell.same), cross: round(cell.cross), crossIsland: cross, businessRate, tier: businessRate ? (pkg.tier || null) : null, lineTotal } });
     });
 
+    extraShops(draft.extraCollections).forEach(sh => { const base = shopBase(sh); budget += base; shopping += round(base * (Number(rates.shoppingPct) || 0) / 100); });
+    // Each extra collection stop is priced by the team when they confirm the price (no rate for it yet).
+    if ((draft.extraCollections || []).length) reasons.add('stops');
     const airportFee = round(rates.airport) * (airportCount ? (rules.airportFeePer === 'package' ? airportCount : 1) : 0);
     const cargoFee = round(rates.cargo) * (cargoCount ? (rules.cargoFeePer === 'order' ? 1 : cargoCount) : 0);
     if (airportFee) feeLines.push({ key: 'airport', label: 'Airport fee', amount: airportFee, reason: airportReasons[0] || '' });
@@ -101,12 +108,9 @@
     const s = settings || {}; const rates = s.rates || {};
     order.fees = order.fees || { cargo: 0, airport: 0, shopping: 0, adjustments: [] };
     let budget = 0, shopping = 0;
-    if (order.service === 'shop') {
-      (order.packages || []).forEach(pkg => {
-        if (!pkg.shop) return;
-        const base = pkg.shop.receiptTotal != null && pkg.shop.receiptTotal > 0 ? round(pkg.shop.receiptTotal) : round(pkg.shop.budget);
-        budget += base; shopping += round(base * (Number(rates.shoppingPct) || 10) / 100);
-      });
+    const shops = (order.service === 'shop' ? (order.packages || []).filter(p => p.shop).map(p => p.shop) : []).concat(extraShops(order.extraCollections));
+    if (order.service === 'shop' || shops.length) {
+      shops.forEach(sh => { const base = shopBase(sh); budget += base; shopping += round(base * (Number(rates.shoppingPct) || 10) / 100); });
       order.fees.shopping = shopping;
     }
     const packagesTotal = (order.packages || []).reduce((n, p) => n + round(p.price && p.price.lineTotal), 0);
@@ -127,7 +131,7 @@
     if (f.airport) out.push({ key: 'airport', label: 'Airport fee', amount: f.airport, reason: ctx.airportPlaces[0] || ctx.airportReasons[0] || '' });
     if (f.cargo) out.push({ key: 'cargo', label: cargoLabel(ctx.cargoCount, rules), amount: f.cargo, reason: ctx.cargoPlaces[0] || ctx.cargoReasons[0] || '' });
     if (f.shopping) {
-      const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0);
+      const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) || extraShops(order.extraCollections).some(sh => sh.receiptTotal > 0);
       out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? 'of the receipt' : 'of the shopping budget' });
     }
     (f.adjustments || []).forEach(a => out.push({ key: 'adjustment', id: a.id, label: a.label, amount: a.amount, reason: '', preset: a.preset }));
@@ -148,7 +152,7 @@
     return sizeLabel(pkg.size) + ' · ' + from + ' to ' + MDM.geo.zoneLabel(dz);
   }
   function reasonText(reason) {
-    return { xl: 'XL packages are quoted before pickup', vehicle: 'A vehicle may be needed, the charge is confirmed before dispatch', villimale: 'Villimalé is quoted before pickup', other_zone: 'We confirm the price for this area before pickup' }[reason] || reason;
+    return { xl: 'XL packages are quoted before pickup', vehicle: 'A vehicle may be needed, the charge is confirmed before dispatch', villimale: 'Villimalé is quoted before pickup', other_zone: 'We confirm the price for this area before pickup', stops: 'Extra collection stops are priced by our team' }[reason] || reason;
   }
   // Price shown on a size option for the given zones, e.g. 'MVR 35' or 'from MVR 60'
   function sizePriceLabel(size, pickupZone, dropZone, settings) {
@@ -158,15 +162,16 @@
     return (size === 'xl' ? 'from ' : '') + format(v);
   }
 
-  // estimateRange(packages, settings, service) → { min, max, exact }: the customer sees a range until the operator confirms the price.
-  // min prices every package at the same-island rate, max at the across-the-bridge rate; exact uses the zones already chosen.
-  function estimateRange(packages, settings, service) {
+  // estimateRange(packages, settings, service, extraCollections?) → { min, max, exact }: the customer sees a range until the operator
+  // confirms the price. min prices every package at the same-island rate, max at the across-the-bridge rate; exact uses the zones
+  // already chosen. Extra shop stops add their budget and shopping fee.
+  function estimateRange(packages, settings, service, extraCollections) {
     const s = settings || {};
     const pk = packages || [];
-    const exact = quote({ service: service || 'pick', packages: pk }, s).totals.total;
+    const exact = quote({ service: service || 'pick', packages: pk, extraCollections }, s).totals.total;
     if (service === 'business') return { min: exact, max: exact, exact };
     const sizes = (s.rates || {}).sizes || {};
-    const fees = quote({ service: service || 'pick', packages: pk }, s).totals;
+    const fees = quote({ service: service || 'pick', packages: pk, extraCollections }, s).totals;
     const extra = fees.fees + (fees.budget || 0);
     const min = pk.reduce((n, p) => n + round((sizes[p.size] || {}).same), 0) + extra;
     const max = pk.reduce((n, p) => n + round((sizes[p.size] || {}).cross), 0) + extra;

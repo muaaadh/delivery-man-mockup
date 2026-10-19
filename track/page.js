@@ -3,6 +3,8 @@
 // actions (pay, request cancellation), the route with the live driver map, price (estimated until our team confirms it), payment,
 // request details, documents and proof photos, and the public activity log. One async render() re-reads the order on every
 // 'orders' change; the driver marker follows MDM.live.onPosition; a 5 s timer only re-evaluates staleness.
+// Updates 17/10/2026: orders without a package photo are collected first and priced from the driver's photo (MDM.priceAfterCollection),
+// extra collection and shop stops on one order, and Maldivian Cargo charges with their bill.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
 
@@ -46,6 +48,7 @@
   const row = (label, value, opts) => MDM.ui.rateRow(label, value, opts);
   function badgeNode(kind, label, status) { return html(MDM.ui.badge(kind, label, { 'data-status': status })).firstElementChild; }
   const priceConfirmed = o => !!(o.pricing && o.pricing.status === 'confirmed');
+  const extraShop = o => (o.extraCollections || []).some(c => c.kind === 'shop' && c.shop);
   const rangeText = (min, max) => (min === max ? fmt(min) : fmt(min) + ' to ' + fmt(max).replace('MVR ', ''));
   // The estimate the customer was given: { min, max } from order.estimate, or the current total for orders without one.
   function estimateOf(o) {
@@ -102,6 +105,7 @@
       const a = adjs[f.id] || {};
       const ch = charges.find(c => (a.chargeId && c.id === a.chargeId) || (c.adjustmentId && c.adjustmentId === a.id));
       if (ch && (ch.void || !ch.billable)) return null;
+      if (ch && ch.type === 'cargo') { const ref = String(ch.description || '').replace(/^maldivian cargo bill\s*/i, '').trim(); return Object.assign({}, f, { key: 'charge-cargo', reason: 'From the Maldivian Cargo bill' + (ref ? ', ' + ref : '') }); }
       if (ch) return Object.assign({}, f, { key: 'charge-' + ch.type, reason: [ch.type !== 'other' ? ch.description : '', CHARGE_STAGE[ch.stage]].filter(Boolean).join(', ') });
       if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: a.remarks || '' });
       return f;
@@ -293,6 +297,7 @@
     stops.forEach(s => { [s.photoId, s.proofPhotoId].forEach(id => { if (id) ids.add(id); }); });
     (o.packages || []).forEach(p => { if (p.photoId) ids.add(p.photoId); });
     (o.documents || []).forEach(d => { if (d.fileId) ids.add(d.fileId); });
+    (o.charges || []).forEach(c => { if (c.photoId && !c.void) ids.add(c.photoId); });
     const files = {};
     for (const id of ids) files[id] = await MDM.store.get('files', id);
     await watchDriver(driver ? o.driverId : null);
@@ -304,6 +309,8 @@
     if (NO_MAP.indexOf(o.status) < 0 || stops.length) parts.push(buildRoute(o, stops));
     else destroyMap();
     if (driver) parts.push(buildDriver(o, driver, refs));
+    const collections = buildCollections(o);
+    if (collections) parts.push(collections);
     parts.push(buildDelivery(o));
     if (state.receiver) parts.push(buildArranged(o));
     else parts.push(buildPrice(o), buildPayment(o));
@@ -397,11 +404,14 @@
     const p = o.payment || {};
     const items = [];
     const actions = [];
-    if (state.isNew && o.status === 'requested') items.push(notice('ok', 'Request sent', 'Your order code is ' + o.code + '. Keep it to track this delivery. We message you ' + channelOn + ' once the price is confirmed.', { testid: 'track-new' }));
+    const priceAfter = MDM.priceAfterCollection(o) && !state.receiver;
+    if (state.isNew && o.status === 'requested') items.push(notice('ok', 'Request sent', 'Your order code is ' + o.code + '. Keep it to track this delivery. We message you ' + channelOn + (priceAfter ? ' when a driver is on the way, and again with the final price after collection.' : ' once the price is confirmed.'), { testid: 'track-new' }));
     switch (o.status) {
       case 'requested': {
         if (state.receiver) { items.push(notice('info', 'Delivery booked by ' + businessName(o), 'We confirm the booking and assign a driver.')); break; }
         const est = estimateOf(o), range = rangeText(est.min, est.max);
+        // No package photo: a driver collects first and our team prices it from the driver's photo (updates 17/10/2026).
+        if (priceAfter) { items.push(notice('info', 'We collect first, then confirm your price', 'Estimated ' + range + '. You did not add a package photo, so our driver photographs the package at collection and our team confirms the final price while it is on the way. Nothing to pay until then.', { testid: 'track-price-after' })); break; }
         const photo = (o.packages || []).some(x => x.photoId);
         items.push(notice('warn', 'We are confirming your price', 'Estimated ' + range + '. ' + (photo ? 'We are checking your package photo' : 'Our team checks the details') + (ops.reviewText ? ', usually within ' + ops.reviewText : '') + ', then message you ' + channelOn + '.'));
         break;
@@ -428,6 +438,9 @@
       case 'returned':
         items.push(notice('info', null, 'We could not deliver this package, so it went back to the sender.'));
         break;
+      case 'delivered':
+        if (priceAfter) items.push(notice('info', 'We are confirming the final price', 'Delivered. Our team is confirming the final price from the driver\'s photo; your invoice follows ' + channelOn + '.', { testid: 'track-price-after' }));
+        break;
       case 'cancelled': {
         // A business cancelled one of its orders (§5.5): after collection the package goes back to the sender.
         if (isBusinessCancel(o)) {
@@ -448,7 +461,7 @@
       default: break;
     }
     // Extra vehicle (§2.3): the customer asked for it; our team confirms the charge with the price.
-    if (o.extraVehicle && !priceConfirmed(o) && o.status !== 'cancelled' && !state.receiver) items.push(notice('info', 'Extra vehicle requested, charge confirmed by our team', 'More than one box or XL package can need a second vehicle. We add the vehicle charge when we confirm your price, before collection.', { testid: 'track-extra-vehicle' }));
+    if (o.extraVehicle && !priceConfirmed(o) && o.status !== 'cancelled' && !state.receiver) items.push(notice('info', 'Extra vehicle requested, charge confirmed by our team', 'More than one box or XL package can need a second vehicle. We add the vehicle charge when we confirm your price, ' + (priceAfter ? 'after collection.' : 'before collection.'), { testid: 'track-extra-vehicle' }));
     // Cash on delivery on a business order (§5.6): the receiver pays the driver.
     const cod = o.cod;
     if (cod && cod.amount > 0 && cod.status === 'pending' && TERMINAL.indexOf(o.status) < 0) items.push(state.receiver
@@ -544,7 +557,7 @@
       if (x.cargo && x.cargo.boat) meta.push('Boat ' + x.cargo.boat + (x.cargo.time ? ', ' + x.cargo.time : ''));
       const aside = x.status === 'done' ? fmtWhen(x.at) : x.status === 'failed' ? "Couldn't complete" : x.status === 'skipped' ? 'Skipped' : o.status === 'cancelled' ? 'Cancelled' : x.status === 'arrived' ? 'Driver arrived' : isCurrent ? 'Next' : 'Pending';
       const shopName = x.shop ? String(x.label || '').replace(/^Shop: /, '') : '';
-      const title = shopName ? shopName + (x.address && x.address !== shopName ? ' · ' + x.address : '') : x.address;
+      const title = shopName ? (x.address && x.address.indexOf(shopName) === 0 ? x.address : shopName + (x.address && x.address !== shopName ? ' · ' + x.address : '')) : x.address;
       const attrs = { class: cls, 'data-testid': 'track-stop', dataset: { stopId: x.id, status: x.status } };
       if (clickable) { attrs.type = 'button'; attrs.on = { click: () => panToStop(x) }; attrs['aria-label'] = 'Show ' + kind.toLowerCase() + ' on the map: ' + x.address; }
       return el(clickable ? 'button' : 'div', attrs,
@@ -583,6 +596,20 @@
       return String(v);
     };
     return Object.keys(h.to || {}).map(k => (BOAT_FIELD[k] || k) + ': ' + val(k, (h.from || {})[k]) + ' to ' + val(k, h.to[k])).join(' · ');
+  }
+  // Extra collection points on one order (updates 17/10/2026): everything is packed together and delivered to the one address.
+  function buildCollections(o) {
+    const extra = o.extraCollections || [];
+    if (!extra.length) return null;
+    const c0 = o.collection || {};
+    const rows = [row('Collection 1', [c0.address, c0.zone ? MDM.geo.zoneLabel(c0.zone) : ''].filter(Boolean).join(', '), { valueSub: c0.contactName || null })];
+    extra.forEach((c, i) => {
+      const where = [c.address, c.zone ? MDM.geo.zoneLabel(c.zone) : ''].filter(Boolean).join(', ');
+      if (c.kind === 'shop' && c.shop) rows.push(row('Shop: ' + (c.shop.name || 'shop'), where, { valueSub: [c.shop.list, c.shop.budget ? 'budget ' + fmt(c.shop.budget) : ''].filter(Boolean).join(' · ') || null }));
+      else rows.push(row('Collection ' + (i + 2), where, { valueSub: [c.contactName, c.instructions].filter(Boolean).join(' · ') || null }));
+    });
+    return section('track-collections-h', 'Collections', el('div', { class: 'rate-table', 'data-testid': 'track-collections' }, rows),
+      el('p', { class: 'track-summary-note small muted' }, 'Everything is packed together and delivered to one address.'));
   }
   function buildDelivery(o) {
     const d = o.delivery || {}, method = d.method || 'home';
@@ -656,10 +683,15 @@
     const firstFrom = {};
     changes.forEach(c => { if (!firstFrom[c.pkgId]) firstFrom[c.pkgId] = c.from; });
     const lines = [];
-    const budget = o.service === 'shop' ? o.totals.budget || 0 : 0;
-    const budgetLine = sub => priceLine((o.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) ? 'Shopping receipt' : 'Shopping budget', sub, budget, { testid: 'track-budget-line' });
-    const fees = feeRows(o).filter(f => confirmed || FIXED_FEES.indexOf(f.key) >= 0);
-    const est = estimateOf(o);
+    // Shop & Deliver, or a shop stop on a multi-collection order: the shopping budget (then the receipt) is part of the price.
+    const budget = o.service === 'shop' || extraShop(o) ? o.totals.budget || 0 : 0;
+    const receipt = (o.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) || (o.extraCollections || []).some(c => c.shop && c.shop.receiptTotal > 0);
+    const budgetLine = sub => priceLine(receipt ? 'Shopping receipt' : 'Shopping budget', sub, budget, { testid: 'track-budget-line' });
+    // Before the price is confirmed: the fixed fees, plus any charge already billed (naalu or Maldivian Cargo charges paid for a
+    // no-photo order before our team priced it), which add to the estimate.
+    const fees = feeRows(o).filter(f => confirmed || FIXED_FEES.indexOf(f.key) >= 0 || /^charge-/.test(f.key));
+    const charged = confirmed ? 0 : fees.filter(f => /^charge-/.test(f.key)).reduce((n, f) => n + (Number(f.amount) || 0), 0);
+    const est0 = estimateOf(o), est = { min: est0.min + charged, max: est0.max + charged };
     if (confirmed) {
       (o.items || []).forEach(it => lines.push(priceLine(it.qty + ' × ' + it.name, null, it.total)));
       o.packages.forEach(p => lines.push(priceLine(MDM.pricing.lineLabel(p, o.service),
@@ -682,7 +714,9 @@
       el('li', null, (o.packages.length > 1 && c.n ? 'Package ' + c.n + ': ' : '') + MDM.pricing.sizeLabel(c.from) + ' to ' + MDM.pricing.sizeLabel(c.to) + ' · ' + fmtDate(c.at)))),
       { title: 'Package category changed by our team', testid: 'track-size-changes' }));
     body.push(card);
-    if (!confirmed) body.push(el('p', { class: 'track-summary-note small muted' }, 'Our team confirms the final price, including any vehicle or size charge, before collection.'));
+    if (!confirmed) body.push(el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-price-note' }, MDM.priceAfterCollection(o)
+      ? 'Final price confirmed after collection, from the driver\'s photo, including any vehicle or size charge.'
+      : 'Our team confirms the final price, including any vehicle or size charge, before collection.'));
     else if (o.pricing.confirmedAt) {
       // A size change or a charge after confirmation updates the price; say when, so the confirmed time does not look stale.
       const last = (o.pricing.history || []).slice(-1)[0];
@@ -813,6 +847,10 @@
       const f = files[p.photoId]; if (f) items.push(thumbItem(f, 'Your package photo', MDM.pricing.sizeLabel(p.size) + (p.description ? ' · ' + p.description : ''), 'track-package-photo'));
     });
     (o.documents || []).forEach(d => { const f = files[d.fileId]; items.push(thumbItem(f, d.name || 'Document', DOC_KIND[d.kind] || 'Document', 'track-document')); });
+    // The Maldivian Cargo bill behind the charges on the price (a business's receiver never sees its prices).
+    if (!state.receiver) (o.charges || []).filter(c => c.type === 'cargo' && c.photoId && c.billable && !c.void).forEach(c => {
+      const f = files[c.photoId]; if (f) items.push(thumbItem(f, 'Maldivian Cargo bill', fmt(c.amount) + (c.description ? ' · ' + c.description : ''), 'track-cargo-bill'));
+    });
     if (!items.length) return null;
     return section('track-files-h', 'Photos and documents', el('div', { class: 'list track-proof-list' }, items));
   }

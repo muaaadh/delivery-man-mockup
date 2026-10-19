@@ -40,6 +40,18 @@ body.page-request .request-group .grid-2 > .field + .field { margin-top: 0; }
 body.page-request .request-business .rate-table__value { white-space: nowrap; }
 body.page-request .request-business__actions { display: flex; flex-wrap: wrap; gap: 12px; }
 
+/* More collections or shopping: one card per extra stop */
+body.page-request .request-extra { padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+body.page-request .request-extra > * + * { margin-top: 12px; }
+body.page-request .request-extra .grid-2 > .field + .field { margin-top: 0; }
+body.page-request .request-extra__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+body.page-request .request-extra__title { font-size: 14px; font-weight: 600; }
+
+/* "I've read what we carry" for guests (step 5) and the payment choice on the review */
+body.page-request .request-terms { padding: 12px 14px 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+body.page-request .request-terms__text { font-size: 14px; line-height: 1.5; color: var(--text-2); max-width: 64ch; }
+body.page-request .request-review__pay .field { margin-top: 0; }
+
 /* Save to my addresses + label chips */
 body.page-request .request-save { padding: 2px 14px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 body.page-request .request-save > * + * { margin-top: 12px; }

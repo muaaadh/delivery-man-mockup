@@ -233,6 +233,7 @@
     pickupWindow: v => v ? null : 'Choose a pickup window',
     volume: v => v ? null : 'Choose how many packages you expect',
     typicalSize: v => v ? null : 'Choose the size that fits most of your packages',
+    terms: v => v ? null : "Tick the box to confirm you've read what we carry",   // asked once, at sign-up (updates 17/10/2026)
   };
   // Typical package photo: a dropzone with preview; the image is re-encoded as a JPEG (max 1200 px) before it is stored.
   function photoPicker(onChange) {
@@ -280,6 +281,12 @@
     const photoField = MDM.ui.field({ name: 'packagePhoto', label: 'Photo of a typical package', control: el('fieldset', { class: 'biz-photo-group' }, photo.el), hint: 'Required. Our team uses it to set your fixed rate for each package size.' });
     photo.input.name = 'packagePhoto';
     photo.input.setAttribute('aria-label', 'Photo of a typical package');
+    const termsBox = el('input', { type: 'checkbox', id: 'biz-terms', name: 'terms', 'aria-describedby': 'biz-terms-text', 'data-testid': 'business-terms' });
+    const termsField = el('div', { class: 'field', 'data-field': 'terms' },
+      el('p', { class: 'small muted', id: 'biz-terms-text' }, s.terms || ''),
+      // wrapped so base.css's `.field > label` (the field label rule) does not override `.checkbox`
+      el('div', null, el('label', { class: 'checkbox', for: 'biz-terms' }, termsBox, el('span', null, "I've read what we carry"))),
+      el('div', { class: 'field__error', hidden: true }));
     f.append(
       field('name', 'Business name', input({ autocomplete: 'organization', 'data-testid': 'business-name' })),
       field('contactName', 'Contact person', input({ autocomplete: 'name', 'data-testid': 'business-contact' })),
@@ -296,12 +303,13 @@
         photoField,
         MDM.ui.field({ name: 'typicalSize', label: 'Which size is it, in your view?', control: sizeSeg })),
       field('notes', 'Notes', el('textarea', { class: 'textarea', rows: 3 }), { optional: true, hint: 'Opening hours, fragile items or anything the driver should know' }),
+      termsField,
       duplicate, failure, el('div', { class: 'form-actions' }, submit));
     f.elements.zone.setAttribute('data-testid', 'business-zone');
     f.elements.pickupWindow.setAttribute('data-testid', 'business-window');
     f.elements.volume.setAttribute('data-testid', 'business-volume');
     const dirty = new Set();
-    const valueOf = c => typeof c.value === 'string' ? c.value.trim() : c.value;
+    const valueOf = c => c.type === 'checkbox' ? c.checked : typeof c.value === 'string' ? c.value.trim() : c.value;
     const check = n => { const c = f.elements[n]; const msg = requestRules[n](valueOf(c)); setError(c instanceof RadioNodeList ? c[0] : c, msg); return !msg; };
     const onEdit = e => { const n = e.target.name; if (!n || n === 'packagePhoto') return; dirty.add(n); if (requestRules[n] && e.target.closest('.field').classList.contains('is-invalid')) check(n); if (n === 'phone') duplicate.hidden = true; failure.hidden = true; };
     f.addEventListener('input', onEdit); f.addEventListener('change', onEdit);
@@ -323,7 +331,7 @@
         state.received = await MDM.store.insert('business_requests', {
           name: r.values.name, contactName: r.values.contactName, phone, landline: MDM.ui.phone.normalize(r.values.landline) || '', email: r.values.email,
           zone: r.values.zone, pickupAddress: r.values.pickupAddress, pickupWindow: r.values.pickupWindow, volume: r.values.volume, notes: valueOf(f.elements.notes),
-          typicalSize: r.values.typicalSize, packagePhotoId: fileRow.id, status: 'pending' });
+          typicalSize: r.values.typicalSize, packagePhotoId: fileRow.id, termsAcceptedAt: new Date().toISOString(), status: 'pending' });
         state.received.photo = pic.img.dataUrl;
         await render();
       } catch (err) {

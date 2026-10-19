@@ -44,7 +44,6 @@
     payerName: d => d.payerName.trim() ? null : "Enter the account holder's name",
     paidAmount: d => parseAmount(d.paidAmount) > 0 ? null : 'Enter the amount you transferred',
     slip: () => state.slip ? null : 'Upload your transfer slip to continue',
-    terms: d => d.terms ? null : "Tick the box to confirm you've read what we carry",
   };
 
   // ---- Data ----
@@ -58,7 +57,7 @@
   function initDraft(order) {
     const p = order.payment || {};
     state.draftFor = order.id;
-    state.draft = { bank: p.bank || '', payerName: p.payerName || '', paidAmount: p.paidAmount != null ? String(p.paidAmount) : String(order.totals.total), reference: p.reference || '', terms: false, touched: {} };
+    state.draft = { bank: p.bank || '', payerName: p.payerName || '', paidAmount: p.paidAmount != null ? String(p.paidAmount) : String(order.totals.total), reference: p.reference || '', touched: {} };
   }
   async function loadSlip(order) {
     const s = order.payment && order.payment.slip;
@@ -298,8 +297,6 @@
       el('option', { value: 'other' }, 'Other bank'));
     bankSelect.value = d.bank;
     const amount = textInput('paidAmount', 'co-amount', { testid: 'paid-amount', attrs: { inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'next' } });
-    const terms = el('input', { type: 'checkbox', id: 'co-terms', name: 'terms', 'data-testid': 'checkout-terms', checked: d.terms, 'aria-describedby': 'co-terms-text',
-      on: { change: e => { d.terms = e.target.checked; d.touched.terms = true; validateField('terms'); } } });
     const submitBtn = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'checkout-submit', disabled: state.busy === 'slip' }, 'Submit for verification');
     const slipField = el('div', { class: 'field', 'data-field': 'slip' },
       el('span', { class: 'field__label', id: 'co-slip-label' }, 'Transfer slip'),
@@ -307,12 +304,6 @@
       el('div', { class: 'field__hint', id: 'co-slip-hint' }, 'Your slip is seen only by our admin and used to match your transfer.'),
       el('div', { class: 'field__error', id: 'co-slip-error', hidden: true }));
     fields.slip = slipField;
-    const termsField = el('div', { class: 'field', 'data-field': 'terms' },
-      el('p', { class: 'checkout-terms', id: 'co-terms-text' }, settings.terms || ''),
-      // wrapped so base.css's `.field > label` (the 13px field label rule) does not override `.checkbox`
-      el('div', null, el('label', { class: 'checkbox', for: 'co-terms' }, terms, el('span', null, "I've read what we carry"))),
-      el('div', { class: 'field__error', id: 'co-terms-error', hidden: true }));
-    fields.terms = termsField;
     const form = el('form', { class: 'form checkout-form', novalidate: true, 'data-testid': 'checkout-form', on: { submit: e => { e.preventDefault(); submit(form, submitBtn); } } },
       field('bank', 'co-bank-select', 'Paid from', bankSelect),
       el('div', { class: 'grid-2' },
@@ -321,7 +312,6 @@
           { hint: 'Amount due ' + MDM.pricing.format(order.totals.total) + '. Enter what your bank shows if it differs.' })),
       field('reference', 'co-ref', 'Transfer reference or transaction ID', textInput('reference', 'co-ref', { testid: 'reference', attrs: { autocomplete: 'off', enterkeyhint: 'done' } }), { optional: true }),
       slipField,
-      termsField,
       el('div', { class: 'field__error', role: 'alert', 'data-testid': 'checkout-form-error', hidden: !state.formError }, state.formError || ''),
       el('div', { class: 'form-actions' }, submitBtn));
     return el('section', { class: 'section', 'aria-labelledby': 'co-details' },

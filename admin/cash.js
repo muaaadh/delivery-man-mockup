@@ -194,7 +194,8 @@
     // ==== Naalu and charges ==========================================================================================================
     // A charge a driver paid out of pocket (naalu at a jetty, packing, a fee) is owed to that driver until the office reimburses it
     // (MDM.store.reimburseCharges stamps reimbursedAt / reimbursedBy / reimbursementRef). Charges the office paid are never owed.
-    const chargeName = c => c.type === 'naalu' ? 'Naalu' : c.type === 'packing' ? 'Packing charge' : 'Other charge';
+    // Maldivian Cargo charges (17/10/2026) are the counter's bill the driver paid at delivery; they are owed back like the rest.
+    const chargeName = c => c.type === 'naalu' ? 'Naalu' : c.type === 'packing' ? 'Packing charge' : c.type === 'cargo' ? 'Maldivian Cargo charges' : 'Other charge';
     const payerOf = x => x.c.paidBy === 'driver' ? (K.driverOfBy(x.c.by, x.o) || 'unknown') : 'office';
     const owedOf = x => x.c.paidBy === 'driver' && !x.c.void && !x.c.reimbursedAt;
     function chargesTab(d) {
@@ -211,7 +212,7 @@
         kpi('Owed to drivers', money(sum(owed)), plural(owed.length, 'charge') + ' · ' + plural(Object.keys(owedDrivers).length, 'driver') + ', any date', 'owed'),
         kpi('Reimbursed', money(sum(reimbursed)), plural(reimbursed.length, 'charge') + ' in this period', 'reimbursed'),
         kpi('Naalu paid', money(sum(naalu)), plural(naalu.length, 'payment') + ' · ' + money(sum(naalu.filter(x => x.c.billable))) + ' billed', 'naalu'),
-        kpi('Packing and other', money(sum(others)), money(sum(others.filter(x => x.c.type === 'packing'))) + ' packing · ' + money(sum(others.filter(x => x.c.type === 'other'))) + ' other', 'other'),
+        kpi('Packing and other', money(sum(others)), money(sum(others.filter(x => x.c.type === 'packing'))) + ' packing · ' + (others.some(x => x.c.type === 'cargo') ? money(sum(others.filter(x => x.c.type === 'cargo'))) + ' Maldivian Cargo · ' : '') + money(sum(others.filter(x => x.c.type === 'other'))) + ' other', 'other'),
         kpi('Not billed', money(sum(all.filter(x => !x.c.billable))), 'paid by us, not charged', 'unbilled'));
 
       // Owed to drivers, any date: one card per driver with "Reimburse" → MDM.store.reimburseCharges.
@@ -271,13 +272,13 @@
       ];
       const chargesCsv = () => [['Date', 'Order', 'Charge', 'Description', 'Recorded', 'Paid by', 'Amount MVR', 'Billed', 'Reimbursement']].concat(others.map(x => [dayKey(x.c.at), x.o.code, chargeName(x.c), x.c.description || '', K.STAGE[x.c.stage] || x.c.stage || '', payerName(x), x.c.amount, x.c.billable ? 'yes' : 'no', statusText(x)]));
       return [kpis,
-        el('section', { 'aria-labelledby': 'owed-sec' }, sectionHead('owed-sec', 'Owed to drivers', 'Naalu, packing and other charges drivers paid out of their own pocket and not reimbursed yet, any date. Pay the driver, then record it with the voucher or transfer reference.'),
+        el('section', { 'aria-labelledby': 'owed-sec' }, sectionHead('owed-sec', 'Owed to drivers', 'Naalu, packing, Maldivian Cargo and other charges drivers paid out of their own pocket and not reimbursed yet, any date. Pay the driver, then record it with the voucher or transfer reference.'),
           owedCards.length ? el('div', { class: 'stack-4', 'data-testid': 'owed-list' }, owedCards) : card(null, empty('Nothing owed to drivers.', 'Charges a driver pays on proof of collection or delivery show here until they are reimbursed.'))),
         el('section', { 'aria-labelledby': 'naalu-sec' }, sectionHead('naalu-sec', 'Naalu reconciliation', 'Naalu paid when collecting from or delivering to a boat in this period, by driver and day, and whether it was reimbursed.', csvBtn('naalu-export', 'Naalu', naaluCsv, 'naalu')),
           naaluCards.length ? el('div', { class: 'stack-4', 'data-testid': 'naalu-list' }, naaluCards) : card(null, empty('No naalu in this period.', 'Drivers record naalu on proof of collection or delivery.'))),
         el('section', { 'aria-labelledby': 'reimb-sec' }, sectionHead('reimb-sec', 'Reimbursed to drivers', 'Charges paid back to drivers in this period, with the reference.', csvBtn('reimbursed-export', 'Reimbursements', reimbCsv, 'reimbursed')),
           card(null, reimbursed.length ? table(reimbCols, reimbursed.map(x => ({ data: x, attrs: { 'data-testid': 'reimbursed-row', 'data-code': x.o.code, 'data-charge-id': x.c.id } })), { testid: 'reimbursed-table' }) : empty('Nothing reimbursed in this period.'))),
-        el('section', { 'aria-labelledby': 'charges-sec' }, sectionHead('charges-sec', 'Packing and other charges', 'Charges recorded on proof of delivery or by the office in this period. Billed charges are on the customer\'s price.', csvBtn('charges-export', 'Charges', chargesCsv, 'charges')),
+        el('section', { 'aria-labelledby': 'charges-sec' }, sectionHead('charges-sec', 'Packing and other charges', 'Packing, Maldivian Cargo and other charges recorded on proof of delivery or by the office in this period. Billed charges are on the customer\'s price.', csvBtn('charges-export', 'Charges', chargesCsv, 'charges')),
           card(null, others.length ? table(chargeCols, others.map(x => ({ data: x, attrs: { 'data-testid': 'charge-row', 'data-code': x.o.code, 'data-type': x.c.type } })), { testid: 'charges-table' }) : empty('No packing or other charges in this period.')))];
     }
     function reimbursedBadge(x) {

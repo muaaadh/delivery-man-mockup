@@ -7,6 +7,8 @@
 // naalu on proof of collection and delivery, packing charge and cash collected on proof of delivery (§5.6, §6), cash on hand,
 // messages from the office and returns of orders the business cancelled (§5.5), accumulated off days and a collapsible leave
 // section (§7). Package category stays editable on collection; no measurements (§2.2, §2.3).
+// Updates 17/10/2026: Maldivian Cargo charges (with a photo of their bill) on proof of delivery to the cargo counter, extra
+// collection and shop stops on one order, and the proof of collection the office prices a no-photo order from.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
   const SESSION_KEY = 'mdm:driver';
@@ -124,7 +126,7 @@
   // Money recorded on the order (§6): naalu says whether it was paid at collection or at delivery; packing is on the customer's bill.
   function chargeRows(o) {
     return (o.charges || []).filter(c => !c.void).map(c => {
-      const what = c.type === 'naalu' ? 'Naalu paid ' + (STAGE_TEXT[c.stage] || '') : c.type === 'packing' ? 'Packing charge' : (c.description || 'Other charge');
+      const what = c.type === 'naalu' ? 'Naalu paid ' + (STAGE_TEXT[c.stage] || '') : c.type === 'packing' ? 'Packing charge' : c.type === 'cargo' ? 'Maldivian Cargo charges' : (c.description || 'Other charge');
       const note = [c.type !== 'other' && c.description ? c.description : '', c.billable ? 'on the customer\'s bill' : '',
         c.paidBy === 'driver' ? (c.by === by() ? (c.reimbursedAt ? 'reimbursed to you' : 'paid by you') : (c.reimbursedAt ? 'reimbursed to the driver' : 'paid by the driver')) : ''].filter(Boolean).join(' · ');
       return [what.trim(), money(c.amount) + (note ? ' · ' + note : ''), null, c];
@@ -196,9 +198,17 @@
     else if (stop.type !== 'pickup' && stop.meetAt && !(cargo && cargo.terminal)) parts.push(MEET[stop.meetAt] || stop.meetAt);
     return parts.join(' · ');
   }
-  function addressText(o, stop) {
+  // The shop for a shopping stop: the Shop & Deliver package's, or an extra shop stop on a multi-collection order (updates 17/10/2026).
+  function shopOf(o, stop) {
+    if (!stop.shop) return null;
     const pkg = (o.packages || []).find(p => p.id === stop.packageId);
-    if (stop.shop && pkg && pkg.shop) return pkg.shop.address ? pkg.shop.name + ', ' + pkg.shop.address : pkg.shop.name;
+    if (pkg && pkg.shop) return pkg.shop;
+    const c = stop.collectionId ? (o.extraCollections || []).find(x => x.id === stop.collectionId) : null;
+    return c && c.shop ? Object.assign({ address: c.address }, c.shop) : null;
+  }
+  function addressText(o, stop) {
+    const sh = shopOf(o, stop);
+    if (sh) return sh.address ? sh.name + ', ' + sh.address : sh.name;
     return stop.address || '';
   }
   function contactRow(name, phone, testid) {
@@ -256,9 +266,8 @@
     return rows;
   }
   function shopRows(o, stop) {
-    const pkg = (o.packages || []).find(p => p.id === stop.packageId);
-    if (!stop.shop || !pkg || !pkg.shop) return [];
-    const s = pkg.shop;
+    const s = shopOf(o, stop);
+    if (!s) return [];
     return [['Shopping list', s.list || ''], ['Budget', MDM.pricing.format(s.budget), 'mono'], ['If unavailable', { call: 'Call the customer', skip: 'Skip it', closest: 'Buy the closest match' }[s.unavailable] || s.unavailable || '']];
   }
   function dl(rows) {
@@ -275,7 +284,8 @@
     const phone = c.name ? (c.phone || '') : (isPickup ? o.collection && o.collection.contactPhone : o.delivery && o.delivery.recipientPhone) || '';
     const cust = o.customer || {};
     const fallback = !phone && cust.phone ? contactRow('Customer: ' + (cust.name || ''), cust.phone, testid + '-customer') : null;
-    const note = stop.instructions || (isPickup ? o.collection && o.collection.instructions : o.delivery && o.delivery.instructions) || '';
+    // An extra collection stop has its own instructions; the order's collection note belongs to the first collection.
+    const note = stop.instructions || (stop.collectionId ? '' : (isPickup ? o.collection && o.collection.instructions : o.delivery && o.delivery.instructions)) || '';
     const place = placeLine(stop);
     return el('div', { class: ['job__stop', stop.status === 'done' && 'is-done', state.nearId === stop.id && 'is-near'], 'data-testid': testid, 'data-stop-id': stop.id, 'data-stop-status': stop.status },
       el('div', { class: 'job__label' }, title, stop.status === 'done' ? el('span', { class: 'job__ok' }, icon('check', 14), ' Done ' + MDM.ui.fmtTime(stop.at)) : stop.status === 'failed' ? el('span', { class: 'job__bad' }, 'Problem reported') : state.nearId === stop.id ? el('span', { class: 'job__near' }, 'You are here') : null),
@@ -646,7 +656,7 @@
     const owedTotal = owed.reduce((n, x) => n + (Number(x.charge.amount) || 0), 0);
     const owedJobs = new Set(owed.map(x => x.order.id)).size;
     ui.cashOwed.hidden = !owed.length;
-    const kinds = ['naalu', 'packing', 'other'].filter(t => owed.some(x => x.charge.type === t)).map(t => ({ naalu: 'naalu', packing: 'packing', other: 'other charges' })[t]);
+    const kinds = ['naalu', 'packing', 'cargo', 'other'].filter(t => owed.some(x => x.charge.type === t)).map(t => ({ naalu: 'naalu', packing: 'packing', cargo: 'Maldivian Cargo charges', other: 'other charges' })[t]);
     const kindText = kinds.length > 1 ? kinds.slice(0, -1).join(', ') + ' and ' + kinds[kinds.length - 1] : kinds[0] || 'charges';
     ui.cashOwed.textContent = owed.length ? 'Paid by you, to be reimbursed: ' + money(owedTotal) + ' (' + kindText + ' on ' + plural(owedJobs, 'job') + ')' : '';
   }
@@ -936,11 +946,15 @@
     const pkgs = (o.packages || []).filter(p => (stop.packageIds || [stop.packageId]).indexOf(p.id) >= 0);
     const fields = [];
     if (stop.shop) {
-      const pkg = pkgs[0];
-      fields.push({ name: 'receiptTotal', label: 'Receipt total (MVR)', type: 'number', required: true, min: 0, step: 'any', inputmode: 'decimal', validate: wholeMvr('receiptTotal', true), hint: pkg && pkg.shop ? 'Budget ' + MDM.pricing.format(pkg.shop.budget) : null, requiredMessage: 'Enter the receipt total' });
+      const sh = shopOf(o, stop);
+      fields.push({ name: 'receiptTotal', label: 'Receipt total (MVR)', type: 'number', required: true, min: 0, step: 'any', inputmode: 'decimal', validate: wholeMvr('receiptTotal', true), hint: sh ? 'Budget ' + MDM.pricing.format(sh.budget) : null, requiredMessage: 'Enter the receipt total' });
       fields.push({ name: 'receiptPhoto', label: 'Receipt photo', type: 'file', required: true, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', requiredMessage: 'Take a photo of the receipt' });
     }
-    fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'A clear photo of the package. The office uses it to confirm the price.', requiredMessage: 'Take a photo of the package' });
+    // No customer photo (updates 17/10/2026): the office sets this order's price from the proof of collection. An extra collection
+    // stop has no package of its own yet (it is packed with the rest), so it only needs a photo of what was collected.
+    const photoHint = stop.collectionId && !stop.shop ? 'A clear photo of what you collected. It is packed with the rest of the order.'
+      : MDM.priceAfterCollection(o) ? 'No customer photo: the office sets the price from this photo.' : 'A clear photo of the package. The office uses it to confirm the price.';
+    fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: photoHint, requiredMessage: 'Take a photo of the package' });
     pkgs.forEach((p, i) => {
       const n = pkgs.length > 1 ? ' ' + (i + 1) : '';
       fields.push({ name: 'size_' + i, label: 'Package' + n + ' category', type: 'segmented', required: true, value: p.size, options: Object.keys(MDM.pricing.SIZES).map(k => ({ value: k, label: MDM.pricing.SIZES[k] })),
@@ -984,6 +998,14 @@
     ];
     if (cod) fields.push({ name: 'cashCollected', label: 'Cash collected (MVR)', type: 'number', required: true, min: 0, step: 1, placeholder: String(cod), validate: wholeMvr('cashCollected'),
       hint: 'Amount to collect: ' + money(cod), requiredMessage: 'Enter the cash you collected (amount to collect: ' + money(cod) + '). Enter 0 if the receiver did not pay.' });
+    // Maldivian Cargo (updates 17/10/2026): the counter's bill, paid by the driver, goes on the customer's delivery charges with its photo.
+    const cargo = !isReturn && (o.delivery || {}).method === 'cargo';
+    if (cargo) {
+      fields.push({ name: 'cargoCharge', label: 'Maldivian Cargo charges (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('cargoCharge'),
+        hint: 'From the Maldivian Cargo bill. It is added to the customer\'s delivery charges.' });
+      fields.push({ name: 'cargoBill', label: 'Maldivian Cargo bill', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed when you enter the charges.' });
+      fields.push({ name: 'cargoNote', label: 'Cargo note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Bill MC-204517' });
+    }
     fields.push({ name: 'naalu', label: 'Naalu paid at delivery (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
       hint: 'Only if you paid the boat crew or porters to hand it over. It is recorded against the delivery.' });
     fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Speedboat crew' });
@@ -995,7 +1017,9 @@
     const p = MDM.ui.dialog({ title: isReturn ? 'Returned to sender' : 'Delivered', message: o.code + ' · ' + addressText(o, stop), fields,
       validate: vals => {
         if (!vals.photo && !vals.confirmed) return { photo: 'Take a photo, or tick that the recipient confirmed' };
-        return amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note')(vals) || (isReturn ? null : amountOrNote('packing', 'packingNote', 'Enter the packing charge, or clear the note')(vals));
+        if (cargo && Number(vals.cargoCharge) > 0 && !vals.cargoBill) return { cargoBill: 'Take a photo of the Maldivian Cargo bill' };
+        return (cargo ? amountOrNote('cargoCharge', 'cargoNote', 'Enter the Maldivian Cargo charges, or clear the note')(vals) : null)
+          || amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note')(vals) || (isReturn ? null : amountOrNote('packing', 'packingNote', 'Enter the packing charge, or clear the note')(vals));
       },
       okLabel: isReturn ? 'Confirm return' : 'Confirm delivery' });
     const seg = document.querySelector('dialog[open] [data-testid="dialog-handedTo"]');
@@ -1003,7 +1027,7 @@
       seg.classList.add('segmented--stack');
       seg.addEventListener('change', () => { const c = seg.querySelector('input:checked'); nameField.required = !(c && c.value === 'left'); });
     }
-    dialogHeading(cod ? 'cashCollected' : 'naalu', cod ? 'Cash and charges' : 'Charges');
+    dialogHeading(cod ? 'cashCollected' : cargo ? 'cargoCharge' : 'naalu', cod ? 'Cash and charges' : 'Charges');
     if (cod) {
       // A different amount is allowed (the receiver paid part, or nothing) but called out, and the office is told about the difference.
       const wrap = document.querySelector('dialog[open] [data-field="cashCollected"]');
@@ -1026,8 +1050,13 @@
     if (cod) patch.cashCollected = Math.round(Number(v.cashCollected) || 0);
     if (Number(v.naalu) > 0) { patch.naalu = Math.round(v.naalu); patch.naaluNote = v.naaluNote || ''; }
     if (!isReturn && Number(v.packing) > 0) { patch.packing = Math.round(v.packing); patch.packingNote = v.packingNote || ''; }
-    if (v.photo) { try { patch.photoId = await storePhoto(v.photo, 'proof', o.id); } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; } }
-    const cashText = cod ? (patch.cashCollected > 0 ? ', cash ' + money(patch.cashCollected) + ' with you' : ', no cash collected') : '';
+    if (cargo && Number(v.cargoCharge) > 0) { patch.cargoCharge = Math.round(v.cargoCharge); patch.cargoNote = v.cargoNote || ''; }
+    try {
+      if (v.photo) patch.photoId = await storePhoto(v.photo, 'proof', o.id);
+      if (patch.cargoCharge) patch.cargoBillPhotoId = await storePhoto(v.cargoBill, 'cargo_bill', o.id);
+    } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; }
+    const cashText = (cod ? (patch.cashCollected > 0 ? ', cash ' + money(patch.cashCollected) + ' with you' : ', no cash collected') : '')
+      + (patch.cargoCharge ? ', Maldivian Cargo charges ' + money(patch.cargoCharge) + ' added to the bill' : '');
     const r = await run(btn, o, () => MDM.store.setStop(o.id, stop.id, patch), x => (x.status === 'delivered' ? o.code + ' delivered' : x.status === 'returned' ? o.code + ' returned to sender' : 'Delivery saved') + cashText, 'Could not save the delivery');
     if (r) resumeSimAt(stop.id);
   }

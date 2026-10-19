@@ -13,9 +13,10 @@
   const open = o => DONE.indexOf(o.status) < 0;
   const TABS = [
     { value: 'all', label: 'All', test: () => true },
-    { value: 'price', label: 'Needs price', test: o => o.status === 'requested' },
+    // Needs price: requests to price, and orders collected without a photo whose price is set from the proof of collection (17/10/2026).
+    { value: 'price', label: 'Needs price', test: o => o.status === 'requested' || MDM.priceToFinalise(o) },
     { value: 'payments', label: 'Payments to verify', test: o => o.payment && o.payment.status === 'received' },
-    { value: 'unassigned', label: 'Unassigned', test: o => o.status === 'confirmed' && !o.driverId && !o.batchId },
+    { value: 'unassigned', label: 'Unassigned', test: o => F.toAssign(o) },
     { value: 'active', label: 'Active', test: o => IN_PROGRESS.indexOf(o.status) >= 0 },
     { value: 'failed', label: 'Failed', test: o => o.status === 'failed' },
     { value: 'cancels', label: 'Cancel requests', test: o => o.cancellation && o.cancellation.status === 'requested' && open(o) },
@@ -37,7 +38,7 @@
   const STAGE_OPTIONS = [{ value: 'collection', label: 'At collection' }, { value: 'delivery', label: 'At delivery' }, { value: 'office', label: 'Office' }];
   const PAID_BY = [{ value: 'driver', label: 'Driver' }, { value: 'office', label: 'Office' }];
   const AUDIENCE = { driver: 'To the driver', operations: 'To operations', business: 'To the business' };
-  const FILE_KIND = { package: 'Package photo', proof_collection: 'Proof of collection', proof: 'Proof of delivery', failed: 'Failed attempt', slip: 'Transfer slip', receipt: 'Shop receipt', document: 'Document' };
+  const FILE_KIND = { package: 'Package photo', proof_collection: 'Proof of collection', proof: 'Proof of delivery', failed: 'Failed attempt', slip: 'Transfer slip', receipt: 'Shop receipt', document: 'Document', cargo_bill: 'Maldivian Cargo bill' };
   // What a customer upload is for (request form documents): shown before the file name.
   const DOC_KIND = { invoice: 'Invoice', quotation: 'Quotation', payment_slip: 'Payment slip', collection_doc: 'Collection document', document: 'Document' };
   const state = {
@@ -211,9 +212,9 @@
     if (state.drawer.kind === 'order' && state.drawer.id) await renderOrderDrawer();
   }
   function exportRows(rows, ctx) {
-    const head = ['Order', 'Created', 'Type', 'Service level', 'Customer', 'Phone', 'Business', 'Collection', 'Delivery method', 'Delivery', 'Packages', 'Total MVR', 'Price', 'Payment', 'Cash to collect MVR', 'Cash status', 'Status', 'Driver'];
+    const head = ['Order', 'Created', 'Type', 'Service level', 'Customer', 'Phone', 'Business', 'Collection', 'Extra collections', 'Delivery method', 'Delivery', 'Packages', 'Total MVR', 'Price', 'Payment', 'Cash to collect MVR', 'Cash status', 'Status', 'Driver'];
     F.downloadCsv([head].concat(rows.map(o => [o.code, o.createdAt.slice(0, 16).replace('T', ' '), F.typeLabel(o), F.LEVEL[o.serviceLevel] || 'Normal', o.customer.name, o.customer.phone, ctx.accountName[o.accountId] || '',
-      (o.collection || {}).address || '', F.methodText(o), (o.delivery || {}).address || '', (o.packages || []).length, o.totals.total, (o.pricing || {}).status === 'confirmed' ? 'Confirmed' : 'Estimated',
+      (o.collection || {}).address || '', (o.extraCollections || []).length, F.methodText(o), (o.delivery || {}).address || '', (o.packages || []).length, o.totals.total, (o.pricing || {}).status === 'confirmed' ? 'Confirmed' : 'Estimated',
       (MDM.PAYMENT[(o.payment || {}).status] || {}).label || '', o.cod ? o.cod.amount : '', o.cod ? ((MDM.COD_STATUS[o.cod.status] || {}).label || o.cod.status) : '',
       MDM.STATUS[o.status].label, F.driverName(o.driverId, ctx.drivers)])), 'mdm-orders-' + dayKey(new Date()) + '.csv');
     toast('Exported ' + plural(rows.length, 'order'), 'ok');
@@ -277,20 +278,36 @@
     const out = [];
     const banner = (kind, title, body, actions, testid) => out.push(el('div', { class: 'alert alert--' + kind + ' drawer-alert', 'data-testid': testid }, html(MDM.icon(kind === 'danger' ? 'alert-circle' : 'alert-triangle', 16)),
       el('div', { class: 'alert__body' }, el('div', { class: 'alert__title' }, title), body ? el('div', null, body) : null, actions && actions.length ? el('div', { class: 'drawer-alert__actions' }, actions) : null)));
-    if (o.status === 'requested') {
+    const est = o.estimate ? money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') : money(o.totals.total);
+    // §2.3: the customer's Extra vehicle request is the first thing the operator sees on a request, whichever way it is priced.
+    const charged = F.vehicleCharged(o);
+    const big = bigPackagesText(o);
+    const vehicle = o.status === 'requested' && (o.extraVehicle || charged) ? el('div', { class: 'vehicle-request', 'data-testid': 'drawer-extra-vehicle', 'data-requested': o.extraVehicle ? 'true' : 'false', 'data-charged': charged ? 'true' : 'false' },
+      badgeNode(charged ? 'info' : 'warn', o.extraVehicle ? 'Extra vehicle requested' : 'Extra vehicle'),
+      el('span', null, charged ? ' Vehicle charge added: ' + money(sum(vehicleCharges(o), a => a.amount)) + (big ? ' for ' + big : '') + '.'
+        : ' The customer asked for an extra vehicle for ' + (big || 'this order') + '. Add the vehicle charge before you confirm the price.')) : null;
+    const vehicleBtn = !charged && (o.extraVehicle || (o.packages || []).some(p => p.needsVehicle)) ? smallBtn('Add extra vehicle charge', 'alert-vehicle-charge', () => addVehicleCharge(o)) : null;
+    // Updates 17/10/2026: no package photo, so a driver is assigned straight away and the price is set from the proof of collection.
+    if (o.status === 'requested' && MDM.priceAfterCollection(o)) {
+      const sel = assignSelect(o, ctx, 'alert-assign-driver');
+      banner('info', 'No package photo: assign a driver', [vehicle, el('span', null, 'Customer saw an estimate of ' + est + '. The driver collects first and photographs the package; you set the price from that proof of collection while it is being delivered.')],
+        [sel, smallBtn('Assign driver', 'alert-assign', () => assign(o, sel.value), 'btn--primary'), vehicleBtn, smallBtn('Confirm price now', 'alert-confirm-price', () => confirmPrice(o))].filter(Boolean), 'drawer-alert-price');
+      out[out.length - 1].setAttribute('data-mode', 'assign');
+    } else if (o.status === 'requested') {
       const photos = (o.packages || []).map(p => thumbButton(ctx.fileById[p.photoId], 'package photo')).filter(Boolean);
-      const est = o.estimate ? money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') : money(o.totals.total);
-      // §2.3: the customer's Extra vehicle request is the first thing the operator sees when pricing the order.
-      const charged = F.vehicleCharged(o);
-      const big = bigPackagesText(o);
-      const vehicle = o.extraVehicle || charged ? el('div', { class: 'vehicle-request', 'data-testid': 'drawer-extra-vehicle', 'data-requested': o.extraVehicle ? 'true' : 'false', 'data-charged': charged ? 'true' : 'false' },
-        badgeNode(charged ? 'info' : 'warn', o.extraVehicle ? 'Extra vehicle requested' : 'Extra vehicle'),
-        el('span', null, charged ? ' Vehicle charge added: ' + money(sum(vehicleCharges(o), a => a.amount)) + (big ? ' for ' + big : '') + '.'
-          : ' The customer asked for an extra vehicle for ' + (big || 'this order') + '. Add the vehicle charge before you confirm the price.')) : null;
       banner('warn', 'Confirm the price', [vehicle, el('span', null, 'Customer saw an estimate of ' + est + '. ' + (photos.length ? 'Check the package photo, then set the exact price.' : 'No package photo: confirm now, or after the driver adds a proof of collection.')),
         photos.length ? el('div', { class: 'thumbs' }, photos) : null],
-      [!charged && (o.extraVehicle || (o.packages || []).some(p => p.needsVehicle)) ? smallBtn('Add extra vehicle charge', 'alert-vehicle-charge', () => addVehicleCharge(o)) : null,
-        smallBtn('Confirm price', 'alert-confirm-price', () => confirmPrice(o), 'btn--primary')].filter(Boolean), 'drawer-alert-price');
+      [vehicleBtn, smallBtn('Confirm price', 'alert-confirm-price', () => confirmPrice(o), 'btn--primary')].filter(Boolean), 'drawer-alert-price');
+    }
+    if (MDM.priceToFinalise(o)) {
+      const proofIds = ((o.route && o.route.stops) || []).filter(s => s.type === 'pickup' && s.proofPhotoId).map(s => s.proofPhotoId);
+      const ids = proofIds.concat((o.packages || []).map(p => p.photoId).filter(id => id && proofIds.indexOf(id) < 0));
+      const photos = ids.filter((id, i) => ids.indexOf(id) === i).map(id => thumbButton(ctx.fileById[id], 'proof of collection')).filter(Boolean);
+      const changed = (o.packages || []).some(p => p.sizeSource === 'driver');
+      banner('warn', 'Finalise the price', [el('span', null, 'Collected without a package photo. The customer saw an estimate of ' + est + '; the current total is ' + money(o.totals.total) + (changed ? ' with the category the driver set' : '') + '. ' +
+          (o.status === 'delivered' ? 'It is delivered: the invoice goes out once you confirm the price.' : 'Confirm it from the proof of collection while it is being delivered.')),
+        photos.length ? el('div', { class: 'thumbs' }, photos) : el('div', { class: 'muted small' }, 'No proof of collection photo was added.')],
+        [smallBtn('Finalise price', 'alert-finalise-price', () => confirmPrice(o), 'btn--primary')], 'drawer-alert-finalise');
     }
     if (F.returnPending(o)) {
       const c = o.cancellation || {}, prev = MDM.STATUS[c.previousStatus];
@@ -403,12 +420,28 @@
     return el('div', { class: 'addr' }, el('div', { class: 'addr__label' }, 'Hand over at · ' + MDM.deliveryMethodLabel(m)), el('div', { class: 'addr__line' }, end.address || d.address || ''),
       dest ? el('div', { class: 'addr__meta' }, dest) : null, recipient, note);
   }
+  // Multi collection (updates 17/10/2026): each extra point is collected from or bought at, then everything goes to the one delivery.
+  function extraCollectionBlock(c, n) {
+    const sh = c.shop || {}, shop = c.kind === 'shop';
+    return el('div', { class: 'addr', 'data-testid': 'drawer-extra-collection', 'data-kind': c.kind },
+      el('div', { class: 'addr__label' }, 'Collection ' + n + (shop ? ' · buy at a shop' : '')),
+      el('div', { class: 'addr__line' }, shop ? [sh.name, c.address].filter(Boolean).join(', ') : c.address || ''),
+      el('div', { class: 'addr__meta' }, [MDM.geo.zoneLabel(c.zone), c.landmark].filter(Boolean).join(' · ')),
+      shop ? (sh.phone ? el('div', { class: 'addr__meta' }, 'Shop phone ' + phone.format(sh.phone)) : null) : el('div', { class: 'addr__meta' }, person(c.contactName, c.contactPhone)),
+      shop && sh.list ? el('div', { class: 'addr__note wrap-anywhere' }, 'To buy: ' + sh.list) : null,
+      shop ? el('div', { class: 'addr__meta mono' }, 'Budget ' + money(sh.budget) + (sh.receiptTotal > 0 ? ' · receipt ' + money(sh.receiptTotal) : '')) : null,
+      shop && sh.unavailable ? el('div', { class: 'addr__meta' }, 'If not available: ' + ({ call: 'call the customer', skip: 'skip it', closest: 'buy the closest match' }[sh.unavailable] || sh.unavailable)) : null,
+      c.instructions ? el('div', { class: 'addr__note' }, c.instructions) : null);
+  }
   function addressesSection(o) {
     const c = o.collection || {};
+    const extra = o.extraCollections || [];
     return sec('Collection and delivery', 'drawer-addresses', el('div', { class: 'grid-2 addr-grid' },
-      el('div', { class: 'addr' }, el('div', { class: 'addr__label' }, 'Collect from'), el('div', { class: 'addr__line' }, c.address || ''), el('div', { class: 'addr__meta' }, [MDM.geo.zoneLabel(c.zone), c.landmark].filter(Boolean).join(' · ')),
+      el('div', { class: 'addr' }, el('div', { class: 'addr__label' }, extra.length ? 'Collection 1' : 'Collect from'), el('div', { class: 'addr__line' }, c.address || ''), el('div', { class: 'addr__meta' }, [MDM.geo.zoneLabel(c.zone), c.landmark].filter(Boolean).join(' · ')),
         el('div', { class: 'addr__meta' }, person(c.contactName, c.contactPhone)), c.instructions ? el('div', { class: 'addr__note' }, c.instructions) : null),
+      extra.map((x, i) => extraCollectionBlock(x, i + 2)),
       deliverToBlock(o)),
+      extra.length ? el('p', { class: 'muted small', style: { marginTop: '8px' }, 'data-testid': 'drawer-multi-note' }, plural(extra.length + 1, 'collection') + ', packed together and delivered to one address.') : null,
       open(o) ? el('div', { class: 'row', style: { marginTop: '12px' } }, smallBtn('Modify order', 'drawer-modify', () => modifyOrder(o))) : null);
   }
   // ---- Delivery method details (§3.2 boat, §3.3 Maldivian Cargo, §3.4 airport), with the boat change log (§5.3) ----------------
@@ -586,8 +619,9 @@
       el('div', { class: 'summary__desc' }, MDM.pricing.lineLabel(pkg, o.service === 'store' ? 'pick' : o.service), pkg.description ? el('span', { class: 'summary__sub' }, pkg.description) : null),
       el('div', { class: 'summary__amount mono' }, money(pkg.price ? pkg.price.lineTotal : 0))));
     if (t.items) lines.push(el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, 'Store items'), el('div', { class: 'summary__amount mono' }, money(t.items))));
-    if (o.service === 'shop' && t.budget) {
-      const receipt = (o.packages || []).some(x => x.shop && x.shop.receiptTotal);
+    const extraShops = (o.extraCollections || []).filter(c => c.kind === 'shop' && c.shop);
+    if ((o.service === 'shop' || extraShops.length) && t.budget) {
+      const receipt = (o.packages || []).some(x => x.shop && x.shop.receiptTotal) || extraShops.some(c => c.shop.receiptTotal);
       lines.push(el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, receipt ? 'Receipt total' : 'Shopping budget'), el('div', { class: 'summary__amount mono' }, money(t.budget))));
     }
     const adjById = {}; ((o.fees || {}).adjustments || []).forEach(a => { adjById[a.id] = a; });
@@ -601,7 +635,7 @@
       el('div', { class: 'summary__total' }, el('span', null, confirmed ? 'Confirmed total' : 'Estimated total'), el('span', { class: 'mono', 'data-testid': 'drawer-total' }, money(t.total))));
     const est = o.estimate && !confirmed ? el('p', { class: 'muted small' }, 'Customer estimate: ' + money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') + '. The final price includes any vehicle fee.') : null;
     const reasons = !confirmed && t.quoteRequired && (t.quoteReasons || []).length ? el('div', { class: 'alert alert--warn' }, html(MDM.icon('alert-triangle', 16)),
-      el('div', { class: 'alert__body' }, el('div', { class: 'alert__title' }, 'Price to confirm before collection'), (t.quoteReasons || []).map(r => el('div', null, MDM.pricing.reasonText(r))))) : null;
+      el('div', { class: 'alert__body' }, el('div', { class: 'alert__title' }, MDM.priceAfterCollection(o) ? 'Price to set from the proof of collection' : 'Price to confirm before collection'), (t.quoteReasons || []).map(r => el('div', null, MDM.pricing.reasonText(r))))) : null;
     const status = el('div', { class: 'rate-table' }, rowNode('Price', el('span', null, badgeNode(confirmed ? 'ok' : 'warn', confirmed ? 'Confirmed' : 'Estimated', { 'data-testid': 'drawer-price-status', 'data-status': confirmed ? 'confirmed' : 'estimated' }),
       confirmed && p.confirmedAt ? el('small', null, F.byLabel(p.confirmedBy) + ', ' + fmtDate(p.confirmedAt) + (p.remarks ? ' · ' + p.remarks : '')) : null)));
     const hist = (p.history || []).length ? el('details', { class: 'history', 'data-testid': 'drawer-price-history' }, el('summary', null, 'Price changes (' + p.history.length + ')'),
@@ -611,17 +645,19 @@
     const charged = F.vehicleCharged(o);
     const vehicleNote = o.extraVehicle || charged ? el('p', { class: 'small', 'data-testid': 'drawer-vehicle-note' }, badgeNode(charged ? 'info' : 'warn', o.extraVehicle ? 'Extra vehicle requested' : 'Extra vehicle'), ' ',
       el('span', { class: 'muted' }, charged ? 'Vehicle charge included below.' : 'No vehicle charge added yet.')) : null;
-    const actions = open(o) ? el('div', { class: 'row row--wrap' },
-      smallBtn(confirmed ? 'Change confirmed price' : 'Confirm price', 'drawer-confirm-price', () => confirmPrice(o), confirmed ? 'btn--secondary' : 'btn--primary'),
+    // A price set after delivery (price after collection) is still finalised here; it releases the invoice.
+    const actions = open(o) || MDM.priceToFinalise(o) ? el('div', { class: 'row row--wrap' },
+      smallBtn(confirmed ? 'Change confirmed price' : MDM.priceToFinalise(o) ? 'Finalise price' : 'Confirm price', 'drawer-confirm-price', () => confirmPrice(o), confirmed ? 'btn--secondary' : 'btn--primary'),
       vehicleBtn, smallBtn('Add adjustment', 'drawer-add-adjustment', () => addAdjustment(o))) : (vehicleBtn ? el('div', { class: 'row row--wrap' }, vehicleBtn) : null);
     return sec('Pricing', 'drawer-pricing', el('div', { class: 'stack-3' }, status, vehicleNote, summary, est, reasons, hist, actions));
   }
   // ---- Charges on proof of collection / delivery (§6): naalu, packing and other charges, billed to the customer or not ----------
-  function chargesSection(o) {
+  function chargesSection(o, ctx) {
     const list = o.charges || [];
     const live = list.filter(c => !c.void);
     const billed = sum(live.filter(c => c.billable), c => c.amount);
     const naalu = stage => sum(live.filter(c => c.type === 'naalu' && c.stage === stage), c => c.amount);
+    const cargo = sum(live.filter(c => c.type === 'cargo'), c => c.amount);
     // §6.1 reconciliation: what the driver paid out of pocket and the office has not paid back yet (store.reimburseCharges).
     const owed = sum(live.filter(c => c.paidBy === 'driver' && !c.reimbursedAt), c => c.amount);
     const repaid = sum(live.filter(c => c.paidBy === 'driver' && c.reimbursedAt), c => c.amount);
@@ -629,6 +665,7 @@
       row('Paid out for this order', money(sum(live, c => c.amount)), { mono: true }),
       naalu('collection') ? row('Naalu at collection', money(naalu('collection')), { mono: true }) : null,
       naalu('delivery') ? row('Naalu at delivery', money(naalu('delivery')), { mono: true }) : null,
+      cargo ? row('Maldivian Cargo charges', money(cargo), { mono: true }) : null,
       row('Billed to the customer', money(billed), { mono: true }),
       owed ? rowNode('To pay back to the driver', el('span', { class: 'mono', 'data-testid': 'drawer-charges-owed' }, money(owed))) : null,
       repaid ? row('Paid back to the driver', money(repaid), { mono: true }) : null) : null;
@@ -641,14 +678,15 @@
           c.description && c.type !== 'other' ? el('div', { class: 'list__meta wrap-anywhere' }, c.description) : null,
           el('div', { class: 'list__meta' }, 'Paid by ' + (c.paidBy === 'driver' ? 'the driver' : 'the office') + ' · ' + F.byLabel(c.by) + ', ' + fmtDate(c.at)),
           c.paidBy === 'driver' && c.reimbursedAt ? el('div', { class: 'list__meta', 'data-testid': 'drawer-charge-reimbursed' }, 'Paid back to the driver ' + fmtDate(c.reimbursedAt) + ' · ' + F.byLabel(c.reimbursedBy) + (c.reimbursementRef ? ' · ref ' + c.reimbursementRef : '')) : null,
-          c.void ? el('div', { class: 'list__meta' }, 'Voided by ' + F.byLabel(c.voidedBy) + ', ' + fmtDate(c.voidedAt) + (c.voidReason ? ': ' + c.voidReason : '')) : null),
+          c.void ? el('div', { class: 'list__meta' }, 'Voided by ' + F.byLabel(c.voidedBy) + ', ' + fmtDate(c.voidedAt) + (c.voidReason ? ': ' + c.voidReason : '')) : null,
+          c.photoId && ctx.fileById[c.photoId] ? el('div', { class: 'thumbs' }, thumbButton(ctx.fileById[c.photoId], c.type === 'cargo' ? 'Maldivian Cargo bill' : 'bill or receipt')) : null),
         el('div', { class: 'list__aside' }, el('span', { class: 'mono charge__amount' }, money(c.amount)), el('div', null, kind)),
         c.void ? null : el('div', { class: 'row row--wrap charge__actions' },
           rowBtn(c.billable ? 'Stop billing the customer' : 'Bill to the customer', 'drawer-charge-bill', () => toggleChargeBilling(o, c), 'btn--secondary', { 'data-charge-id': c.id }),
           rowBtn('Void', 'drawer-charge-void', () => voidCharge(o, c), 'btn--ghost', { 'data-charge-id': c.id })));
     });
     return sec('Charges', 'drawer-charges',
-      items.length ? el('div', { class: 'stack-3' }, totals, el('div', { class: 'list' }, items)) : el('p', { class: 'muted small' }, 'No naalu, packing or other charges recorded.'),
+      items.length ? el('div', { class: 'stack-3' }, totals, el('div', { class: 'list' }, items)) : el('p', { class: 'muted small' }, 'No naalu, packing, Maldivian Cargo or other charges recorded.'),
       el('div', { class: 'row', style: { marginTop: '12px' } }, smallBtn('Add charge', 'drawer-add-charge', () => addCharge(o))));
   }
   // ---- Cash on delivery (§5.6): the amount the business asked for, what the driver collected, and where the cash is now -----------
@@ -815,10 +853,12 @@
     const labels = el('a', { class: 'btn btn--ghost', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), target: '_blank', rel: 'noopener', 'data-testid': 'drawer-labels' }, html(MDM.icon('printer', 16)), 'Labels');
     items.push(labels);
     if (open(o)) items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
-    if (st === 'requested') items.push(cancelBtn(), btn('Confirm price', 'drawer-confirm', 'btn--primary', () => confirmPrice(o)));
+    if (st === 'requested' && MDM.priceAfterCollection(o)) {
+      const sel = assignSelect(o, ctx, 'drawer-assign-driver');
+      items.push(cancelBtn(), btn('Confirm price', 'drawer-confirm', 'btn--secondary', () => confirmPrice(o)), sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
+    } else if (st === 'requested') items.push(cancelBtn(), btn('Confirm price', 'drawer-confirm', 'btn--primary', () => confirmPrice(o)));
     else if (st === 'confirmed' || (st === 'collected' && o.batchId && !o.driverId)) {
-      const sel = driverSelect(o, ctx, 'drawer-assign-driver', null, state.drawer.assignChoice[o.id]);
-      sel.addEventListener('change', () => { state.drawer.assignChoice[o.id] = sel.value; });
+      const sel = assignSelect(o, ctx, 'drawer-assign-driver');
       if (st === 'confirmed') items.push(cancelBtn());
       items.push(sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
     } else if (st === 'assigned') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('Dispatch', 'drawer-dispatch', 'btn--primary', () => dispatchOrder(o)));
@@ -839,6 +879,14 @@
     const sorted = ctx.drivers.slice().sort((a, b) => (inZone(b) - inZone(a)) || ((a.status === 'offline') - (b.status === 'offline')) || a.name.localeCompare(b.name));
     return sorted.map(d => ({ value: d.id, disabled: d.id === current,
       label: d.name + (inZone(d) ? ' · ' + MDM.geo.zoneShort(zoneKey) : '') + (d.status === 'offline' ? ' (offline)' : d.status === 'on_route' ? ' (on route)' : '') + (ctx.onDuty[d.staffId] ? '' : ' · not punched in') }));
+  }
+  // assignSelect: the driver picker for a first assignment. The banner and the footer can both show one; they keep the same choice.
+  function assignSelect(o, ctx, testid) {
+    const sel = driverSelect(o, ctx, testid, null, state.drawer.assignChoice[o.id]);
+    const peers = ctx.assignSelects = ctx.assignSelects || [];
+    peers.push(sel);
+    sel.addEventListener('change', () => { state.drawer.assignChoice[o.id] = sel.value; peers.forEach(x => { if (x !== sel) x.value = sel.value; }); });
+    return sel;
   }
   function driverSelect(o, ctx, testid, current, chosen) {
     const opts = driverChoices(o, ctx, current);
@@ -876,8 +924,12 @@
     o = await fresh(o);
     const presets = MDM.ADJUSTMENT_PRESETS.filter(p => p.value !== 'discount');
     const est = o.estimate ? money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') : money(o.totals.total);
-    const canAsk = o.payment && o.payment.method !== 'invoice' && o.payment.status === 'pending';
-    const v = await dialog({ title: 'Confirm the price for ' + o.code, message: 'Current total ' + money(o.totals.total) + ', the customer was shown ' + est + '. Include any vehicle fee. The difference is recorded with your name.', okLabel: 'Confirm price',
+    // Price after collection (17/10/2026): finalised from the proof of collection; once delivered, confirming it sends the invoice.
+    const finalise = MDM.priceToFinalise(o), delivered = o.status === 'delivered';
+    const canAsk = o.payment && o.payment.method !== 'invoice' && o.payment.status === 'pending' && !delivered;
+    const v = await dialog({ title: (finalise ? 'Finalise the price for ' : 'Confirm the price for ') + o.code, okLabel: finalise ? 'Finalise price' : 'Confirm price',
+      message: 'Current total ' + money(o.totals.total) + ', the customer was shown ' + est + '. ' + (finalise ? 'Set it from the proof of collection. ' : '') + 'Include any vehicle fee. The difference is recorded with your name.' +
+        (finalise && delivered && o.payment && o.payment.status === 'pending' ? ' The invoice goes out once you confirm the price.' : ''),
       fields: [
         { name: 'total', label: 'Final price (MVR)', type: 'number', required: true, value: o.totals.total, min: 0, step: 1 },
         { name: 'preset', label: 'Reason for any difference', type: 'select', required: true, options: presets,
@@ -886,7 +938,7 @@
         canAsk ? { name: 'requestPayment', label: 'Ask the customer to pay now', type: 'checkbox', value: upfrontDefault(o), hint: 'Otherwise the invoice goes out after delivery' } : null].filter(Boolean) });
     if (!v) return;
     const upd = await MDM.store.confirmPrice(o.id, { total: v.total, preset: v.preset, label: v.preset === 'quote' ? 'Price confirmation' : label(presets, v.preset), remarks: v.remarks, requestPayment: !!v.requestPayment, by: by() });
-    toast('Price confirmed: ' + money(upd.totals.total) + (upd.payment.status === 'requested' ? ', payment requested' : ''), 'ok');
+    toast('Price confirmed: ' + money(upd.totals.total) + (upd.payment.status === 'requested' ? (delivered ? ', invoice sent' : ', payment requested') : ''), 'ok');
   }
   async function addAdjustment(o) {
     const presets = MDM.ADJUSTMENT_PRESETS.filter(p => p.value !== 'quote');
@@ -985,15 +1037,16 @@
   async function addCharge(o) {
     const naaluBilled = !!(((state.settings || {}).rules) || {}).naaluBillable;
     const p = dialog({ title: 'Add a charge · ' + o.code, okLabel: 'Add charge',
-      message: 'Money paid out for this order: naalu to boat porters, packing, or anything else. Billed charges are added to the customer\'s price.',
+      message: 'Money paid out for this order: naalu to boat porters, packing, the Maldivian Cargo bill, or anything else. Billed charges are added to the customer\'s price.',
       fields: [
         { name: 'type', label: 'Charge', type: 'segmented', required: true, options: MDM.CHARGE_TYPES, value: 'naalu' },
-        { name: 'stage', label: 'When it was paid', type: 'segmented', required: true, options: STAGE_OPTIONS, value: 'delivery', hint: 'Naalu is paid when collecting from a boat or handing a package to a boat',
+        { name: 'stage', label: 'When it was paid', type: 'segmented', required: true, options: STAGE_OPTIONS, value: 'delivery', hint: 'Naalu is paid when collecting from a boat or handing a package to a boat; Maldivian Cargo charges at the counter, on delivery',
           validate: (val, all) => all.type === 'naalu' && val === 'office' ? 'Naalu is paid at collection or at delivery' : null },
         { name: 'amount', label: 'Amount (MVR)', type: 'number', required: true, min: 1, step: 1 },
         { name: 'description', label: 'Description', type: 'text', placeholder: 'Porter at North Harbour', hint: 'Required for an other charge', validate: (val, all) => all.type === 'other' && !val ? 'Describe the charge' : null },
         { name: 'paidBy', label: 'Paid by', type: 'segmented', required: true, options: PAID_BY, value: 'driver' },
-        { name: 'billable', label: 'Bill to the customer', type: 'checkbox', value: naaluBilled, hint: 'Adds the amount to the order price' }] });
+        { name: 'billable', label: 'Bill to the customer', type: 'checkbox', value: naaluBilled, hint: 'Adds the amount to the order price' },
+        { name: 'photo', label: 'Bill or receipt photo', type: 'file', accept: 'image/*' }] });
     const v = await withDialog(p, dlg => {
       const box = dlg.querySelector('[data-testid="dialog-billable"]');
       let touched = false;
@@ -1002,11 +1055,12 @@
       dlg.querySelector('[data-testid="dialog-type"]').addEventListener('change', e => {
         if (optional) optional.hidden = e.target.value === 'other';
         if (touched) return;
-        box.checked = e.target.value === 'packing' ? true : e.target.value === 'naalu' ? naaluBilled : false;
+        box.checked = e.target.value === 'packing' || e.target.value === 'cargo' ? true : e.target.value === 'naalu' ? naaluBilled : false;
       });
     });
     if (!v) return;
-    const upd = await MDM.store.addCharge(o.id, { type: v.type, stage: v.stage, amount: v.amount, description: v.description, paidBy: v.paidBy, billable: !!v.billable, by: by() });
+    const photoId = await storePhoto(v.photo, o.id, v.type === 'cargo' ? 'cargo_bill' : 'receipt');
+    const upd = await MDM.store.addCharge(o.id, { type: v.type, stage: v.stage, amount: v.amount, description: v.description, paidBy: v.paidBy, billable: !!v.billable, photoId, by: by() });
     toast(label(MDM.CHARGE_TYPES, v.type) + ' ' + money(v.amount) + ' recorded' + (v.billable ? ' · total ' + money(upd.totals.total) : ''), 'ok');
   }
   // Both re-read the charge first: a double click or a drawer that is behind another tab acts on what is stored now.
@@ -1167,7 +1221,7 @@
     const pkgs = (o.packages || []).filter(p => (s.packageIds || [s.packageId]).indexOf(p.id) >= 0);
     const fields = [];
     if (s.shop) fields.push({ name: 'receiptTotal', label: 'Receipt total (MVR)', type: 'number', required: true, min: 0, step: 1 }, { name: 'receipt', label: 'Receipt photo', type: 'file', accept: 'image/*' });
-    fields.push({ name: 'photo', label: 'Proof of collection photo', type: 'file', accept: 'image/*', hint: o.pricing && o.pricing.status !== 'confirmed' ? 'No customer photo yet: this is what the price is confirmed from' : null });
+    fields.push({ name: 'photo', label: 'Proof of collection photo', type: 'file', accept: 'image/*', hint: MDM.priceAfterCollection(o) ? 'No package photo from the customer: the price is set from this photo' : o.pricing && o.pricing.status !== 'confirmed' ? 'No customer photo yet: this is what the price is confirmed from' : null });
     pkgs.forEach((p, i) => fields.push(
       { name: 'size_' + i, label: 'Package ' + (i + 1) + (p.description ? ', ' + p.description : '') + ': category', type: 'segmented', options: SIZE_OPTIONS, value: p.size }));
     fields.push(...naaluFields('collection', o), { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2 });
@@ -1197,6 +1251,11 @@
       hint: 'The business asked for ' + money(cod.amount) + '. Enter what the driver actually collected.' });
     fields.push(...naaluFields('delivery', o));
     if (!isReturn) fields.push({ name: 'packing', label: 'Packing charge (MVR)', type: 'number', min: 0, step: 1, hint: 'Billed to the customer' }, { name: 'packingNote', label: 'Packing note', type: 'text', placeholder: 'Boxed the loose items' });
+    // Maldivian Cargo deliveries (17/10/2026): the counter's own bill, paid by the driver, goes on the customer's delivery charges.
+    const cargo = !isReturn && s.type === 'dropoff' && methodOf(o) === 'cargo';
+    if (cargo) fields.push({ name: 'cargoCharge', label: 'Maldivian Cargo charges (MVR)', type: 'number', min: 0, step: 1, hint: 'From the Maldivian Cargo bill. Added to the customer\'s delivery charges.' },
+      { name: 'cargoBill', label: 'Maldivian Cargo bill', type: 'file', accept: 'image/*' },
+      { name: 'cargoNote', label: 'Bill note', type: 'text', placeholder: 'Bill MC-204517' });
     fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2 });
     const p = dialog({ title: (isReturn ? 'Returned to ' : 'Delivered at ') + s.address, message: s.label + (s.contact && s.contact.name ? ' · ' + s.contact.name : '') + '. Recorded on behalf of ' + (F.driverName(o.driverId, state.drivers) || 'the driver') + '.', okLabel: isReturn ? 'Mark returned' : 'Mark delivered', fields });
     // The name is required unless the package was left as instructed: only then does the label say optional.
@@ -1207,10 +1266,13 @@
     });
     if (!v) return;
     const photoId = await storePhoto(v.photo, o.id, 'proof');
+    const cargoCharge = cargo && Number(v.cargoCharge) > 0 ? Math.round(v.cargoCharge) : null;
+    const cargoBillPhotoId = cargoCharge ? await storePhoto(v.cargoBill, o.id, 'cargo_bill') : null;
     const upd = await MDM.store.setStop(o.id, s.id, { status: 'done', handedTo: v.handedTo, recipientName: trim(v.recipientName), confirmed: !!v.confirmed, photoId, remarks: v.remarks,
-      cashCollected: cod ? v.cashCollected : undefined, naalu: v.naalu || null, naaluNote: v.naaluNote, packing: isReturn ? null : (v.packing || null), packingNote: v.packingNote, by: by() });
+      cashCollected: cod ? v.cashCollected : undefined, naalu: v.naalu || null, naaluNote: v.naaluNote, packing: isReturn ? null : (v.packing || null), packingNote: v.packingNote,
+      cargoCharge, cargoNote: cargoCharge ? trim(v.cargoNote) : '', cargoBillPhotoId, by: by() });
     const diff = cod && upd.cod && typeof upd.cod.variance === 'number' && upd.cod.variance !== 0;
-    toast((isReturn ? 'Returned to sender' : 'Delivered') + (cod ? ', cash ' + money(v.cashCollected) + (diff ? ' (expected ' + money(cod.amount) + ')' : '') + ' with the driver' : ''), diff ? 'warn' : 'ok');
+    toast((isReturn ? 'Returned to sender' : 'Delivered') + (cod ? ', cash ' + money(v.cashCollected) + (diff ? ' (expected ' + money(cod.amount) + ')' : '') + ' with the driver' : '') + (cargoCharge ? ', Maldivian Cargo charges ' + money(cargoCharge) + ' added' : ''), diff ? 'warn' : 'ok');
   }
   async function reportFailed(o) {
     const stops = openStops(o);
@@ -1303,7 +1365,7 @@
     files.forEach(f => { ctx.fileById[f.id] = f; });
     const footer = footerFor(o, ctx);
     const body = [alertsSection(o, ctx), summarySection(o, ctx), detailsSection(o), addressesSection(o), methodSection(o), packagesSection(o, ctx), filesSection(o, ctx), routeSection(o, ctx),
-      pricingSection(o), chargesSection(o), codSection(o, ctx), paymentSection(o, ctx), prioritySection(o), cancellationSection(o, ctx), historySection(o), changesSection(o), notificationsSection(ctx), notesSection(o), activitySection(o)].filter(Boolean);
+      pricingSection(o), chargesSection(o, ctx), codSection(o, ctx), paymentSection(o, ctx), prioritySection(o), cancellationSection(o, ctx), historySection(o), changesSection(o), notificationsSection(ctx), notesSection(o), activitySection(o)].filter(Boolean);
     const panel = drawer.el(), bodyEl = drawer.bodyEl();
     const active = document.activeElement;
     const keepId = active && panel.contains(active) ? active.getAttribute('data-testid') : null;
