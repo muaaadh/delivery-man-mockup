@@ -10,7 +10,7 @@
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" integrity="sha384-K282sW/zFjTkrjR/+yr1H+gCukuy4OEYrkXRybV88g7pk+kZZYpNV6SAV59NcgFg" crossorigin="anonymous">
 <link rel="stylesheet" href="../css/base.css">
 <link rel="stylesheet" href="../css/pages.css">
@@ -26,6 +26,7 @@
 <script defer src="../js/live.js"></script>
 <script defer src="../js/ui.js"></script>
 <script defer src="../js/shell.js"></script>
+<script defer src="../js/motion.js"></script>
 <script defer src="../js/seed.js"></script>
 <script defer src="./page.js"></script>
 </head>
@@ -34,9 +35,9 @@
 <header data-shell="public"></header>
 <main id="main">
   <div class="container container--narrow">
-    <div class="page-head">
+    <div class="page-head" id="track-intro">
       <h1>Track an order</h1>
-      <p class="page-head__desc">Enter the order code from your confirmation message to see its status, price and payment.</p>
+      <p class="page-head__desc">Enter the code from your confirmation message.</p>
     </div>
     <form class="form track-form" data-testid="track-form" novalidate>
       <div class="field">
@@ -45,7 +46,7 @@
           <input id="track-code" class="input mono" data-testid="track-input" type="text" inputmode="numeric" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="search" placeholder="MDM-1038">
           <button type="submit" class="btn btn--primary" data-testid="track-submit">Track</button>
         </div>
-        <div class="field__hint">The MDM prefix is optional, the digits alone work too.</div>
+        <div class="field__hint">The digits alone work too</div>
       </div>
     </form>
     <div id="track-empty" hidden></div>

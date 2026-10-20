@@ -14,7 +14,7 @@
   const root = document.querySelector('[data-checkout="body"]');
   const descEl = document.querySelector('[data-checkout="desc"]');
   // draft holds what the customer typed so a re-render (store event from another tab, slip saved) never loses it.
-  const state = { orderId: null, draftFor: null, draft: null, slip: null, busy: false, slipError: null, formError: null, objectUrl: null, focusPanel: false, seq: 0 };
+  const state = { orderId: null, draftFor: null, draft: null, slip: null, busy: false, slipError: null, formError: null, objectUrl: null, focusPanel: false, seq: 0, entered: false };
   const fields = {};
 
   class SlipError extends Error {}
@@ -172,7 +172,7 @@
   function notice(kind, iconName, body, action) {
     return el('div', { class: 'alert alert--' + kind, role: kind === 'danger' ? 'alert' : 'status' }, icon(iconName), el('div', { class: 'alert__body' }, el('div', null, body), action || null));
   }
-  function trackAction(order) { return el('a', { class: 'alert__action', href: trackHref(order.id) }, 'Track this order'); }
+  function trackAction(order) { return el('a', { class: 'alert__action', href: trackHref(order.id) }, 'Track order'); }
   function row(label, value, opts) {
     opts = opts || {};
     return el('div', { class: 'rate-table__row' },
@@ -247,7 +247,7 @@
   function bankSection(order, settings) {
     const banks = settings.banks || [];
     return el('section', { class: 'section', 'aria-labelledby': 'co-bank' },
-      el('div', { class: 'section-head' }, el('h2', { id: 'co-bank' }, 'Transfer to one of our accounts')),
+      el('div', { class: 'section-head' }, el('h2', { id: 'co-bank' }, 'Our bank accounts')),
       el('div', { class: 'stack-4' },
         notice('info', 'info', 'Demo bank details, replace before launch.'),
         el('div', { class: 'rate-table checkout-banks' }, banks.map(b => row(b.name, el('span', { class: 'checkout-copy checkout-copy--end' },
@@ -297,11 +297,11 @@
       el('option', { value: 'other' }, 'Other bank'));
     bankSelect.value = d.bank;
     const amount = textInput('paidAmount', 'co-amount', { testid: 'paid-amount', attrs: { inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'next' } });
-    const submitBtn = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'checkout-submit', disabled: state.busy === 'slip' }, 'Submit for verification');
+    const submitBtn = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'checkout-submit', disabled: state.busy === 'slip' }, 'Submit payment');
     const slipField = el('div', { class: 'field', 'data-field': 'slip' },
       el('span', { class: 'field__label', id: 'co-slip-label' }, 'Transfer slip'),
       dropzone(slip),
-      el('div', { class: 'field__hint', id: 'co-slip-hint' }, 'Your slip is seen only by our admin and used to match your transfer.'),
+      el('div', { class: 'field__hint', id: 'co-slip-hint' }, 'Seen only by our team.'),
       el('div', { class: 'field__error', id: 'co-slip-error', hidden: true }));
     fields.slip = slipField;
     const form = el('form', { class: 'form checkout-form', novalidate: true, 'data-testid': 'checkout-form', on: { submit: e => { e.preventDefault(); submit(form, submitBtn); } } },
@@ -309,13 +309,13 @@
       el('div', { class: 'grid-2' },
         field('payerName', 'co-payer', 'Account holder name', textInput('payerName', 'co-payer', { testid: 'payer-name', attrs: { autocomplete: 'name', enterkeyhint: 'next' } })),
         field('paidAmount', 'co-amount', 'Amount transferred', el('div', { class: 'input-affix' }, el('span', { class: 'input-affix__prefix', 'aria-hidden': 'true' }, 'MVR'), amount),
-          { hint: 'Amount due ' + MDM.pricing.format(order.totals.total) + '. Enter what your bank shows if it differs.' })),
+          { hint: 'Due ' + MDM.pricing.format(order.totals.total) + '. Enter what your bank shows.' })),
       field('reference', 'co-ref', 'Transfer reference or transaction ID', textInput('reference', 'co-ref', { testid: 'reference', attrs: { autocomplete: 'off', enterkeyhint: 'done' } }), { optional: true }),
       slipField,
       el('div', { class: 'field__error', role: 'alert', 'data-testid': 'checkout-form-error', hidden: !state.formError }, state.formError || ''),
       el('div', { class: 'form-actions' }, submitBtn));
     return el('section', { class: 'section', 'aria-labelledby': 'co-details' },
-      el('div', { class: 'section-head' }, el('h2', { id: 'co-details' }, 'Your transfer details')),
+      el('div', { class: 'section-head' }, el('h2', { id: 'co-details' }, 'Your transfer')),
       form);
   }
   function invoiceLink(order) { return el('a', { class: 'alert__action', href: '../invoice/?order=' + encodeURIComponent(order.code), 'data-testid': 'checkout-invoice-link' }, 'View invoice'); }
@@ -330,7 +330,7 @@
     const frag = document.createDocumentFragment();
     const p = order.payment || {};
     if (p.status === 'requested' && p.rejectReason) frag.append(rejectedNotice(order));
-    if (p.status === 'pending') frag.append(el('div', { class: 'checkout-notice' }, notice('info', 'info', 'Paying now is optional. Your price is confirmed, so you can pay upfront today or wait for the invoice after delivery.')));
+    if (p.status === 'pending') frag.append(el('div', { class: 'checkout-notice' }, notice('info', 'info', 'Paying now is optional. You can also pay after delivery.')));
     frag.append(orderSection(order, settings), bankSection(order, settings), formSection(order, settings, slip));
     return frag;
   }
@@ -342,18 +342,16 @@
       el('div', { class: 'card__body' },
         el('h2', { id: 'co-done', tabindex: '-1' }, 'Payment received, checking it'),
         el('div', { class: 'checkout-copy' }, el('span', { class: 'checkout-code mono', 'data-testid': 'checkout-code' }, order.code), copyButton(order.code, 'checkout-copy-code', 'order code')),
-        el('p', null, 'We will message you ' + channel + ' at ' + MDM.ui.phone.format(c.phone) + '.'),
         el('h3', null, 'What happens next'),
         el('ol', { class: 'checkout-next' },
-          el('li', null, 'We match your transfer to order ' + order.code + ', usually within ' + review + '.'),
-          el('li', null, 'We message you ' + channel + ' once the payment is verified.'),
-          el('li', null, 'Track the collection and delivery with your order code.')),
-        el('a', { class: 'btn btn--primary', href: trackHref(order.id), 'data-testid': 'checkout-track-link' }, 'Track this order')));
+          el('li', null, 'We match your transfer, usually within ' + review + '.'),
+          el('li', null, 'We message you ' + channel + ' at ' + MDM.ui.phone.format(c.phone) + ' once it is verified.')),
+        el('a', { class: 'btn btn--primary', href: trackHref(order.id), 'data-testid': 'checkout-track-link' }, 'Track order')));
   }
   function renderInvalid() {
     return el('div', { class: 'empty', 'data-testid': 'checkout-invalid' },
       el('p', { class: 'empty__title' }, 'This payment link is not valid'),
-      el('p', { class: 'empty__hint' }, 'Check the link in your message, or start a new request.'),
+      el('p', { class: 'empty__hint' }, 'Check the link in your message.'),
       el('a', { class: 'btn btn--secondary btn--sm', href: '../request/' }, 'Request a delivery'));
   }
 
@@ -365,6 +363,8 @@
     root.replaceChildren(node);
     descEl.textContent = desc || '';
     descEl.hidden = !desc;
+    // The page's content eases in once, when it first appears; later re-renders (slip saved, another tab) do not replay it.
+    if (!state.entered) { state.entered = true; if (MDM.motion) MDM.motion.enter(root); }
     if (keepId) { const again = root.querySelector('#' + keepId); if (again) again.focus({ preventScroll: true }); }
   }
   async function render() {
@@ -395,16 +395,16 @@
     }
     if (pay.status === 'paid') { show(el('div', { class: 'stack-4', 'data-testid': 'checkout-paid' }, notice('ok', 'check-circle', 'Paid, thank you. Verified ' + MDM.ui.fmtDate(pay.verifiedAt) + '.', invoiceLink(order)), orderSection(order, settings)), ''); return; }
     if (pay.status === 'pending' && !(order.pricing && order.pricing.status === 'confirmed')) {
-      show(notice('info', 'info', "We're confirming your price. Pay once it is confirmed, or after delivery. We'll message you " + channelOf(order.customer) + '.', trackAction(order)), '');
+      show(notice('info', 'info', "We're confirming your price. We'll message you " + channelOf(order.customer) + ' when you can pay.', trackAction(order)), '');
       return;
     }
     if (pay.status === 'received') {
-      show(renderConfirmation(order, settings), 'Your slip is with us. We check it, usually within ' + review + '.');
+      show(renderConfirmation(order, settings), 'We check your slip within ' + review + '.');
       if (state.focusPanel) { state.focusPanel = false; window.scrollTo(0, 0); const h = root.querySelector('#co-done'); if (h) h.focus({ preventScroll: true }); }
       return;
     }
     if (!state.draft || state.draftFor !== order.id) initDraft(order);
-    show(renderForm(order, settings, slip), (pay.status === 'requested' ? 'Payment is due for ' + order.code + '. ' : '') + 'Transfer the amount to one of our accounts, then upload your slip. We confirm it, usually within ' + review + '.');
+    show(renderForm(order, settings, slip), (pay.status === 'requested' ? 'Payment due. ' : '') + 'Transfer, then upload the slip.');
     validateAll();
   }
 

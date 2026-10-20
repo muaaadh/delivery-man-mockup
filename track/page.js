@@ -1,8 +1,9 @@
-// Track an order (client requirements §7, §9, §11, §17, §18). Status is the primary content: the progress list follows MDM.FLOW
-// (MDM.BULK_FLOW for bulk business packages) and ends with Payment; each reached step shows when and by whom. Below it: notices and
-// actions (pay, request cancellation), the route with the live driver map, price (estimated until our team confirms it), payment,
-// request details, documents and proof photos, and the public activity log. One async render() re-reads the order on every
-// 'orders' change; the driver marker follows MDM.live.onPosition; a 5 s timer only re-evaluates staleness.
+// Track an order (client requirements §7, §9, §11, §17, §18). Status is the hero: a large status line with the ETA, then notices and
+// actions (pay, request cancellation), the route with the live driver map, and the progress list, which follows MDM.FLOW
+// (MDM.BULK_FLOW for bulk business packages) and ends with Payment; each reached step shows when and by whom. Below: the driver,
+// delivery, price (estimated until our team confirms it), payment, request details, documents and proof photos, and the public
+// activity log (collapsed). One async render() re-reads the order on every 'orders' change, with the entrance motion only on an
+// order's first render; the driver marker follows MDM.live.onPosition; a 5 s timer only re-evaluates staleness.
 // Updates 17/10/2026: orders without a package photo are collected first and priced from the driver's photo (MDM.priceAfterCollection),
 // extra collection and shop stops on one order, and Maldivian Cargo charges with their bill.
 (function (MDM) { 'use strict';
@@ -24,9 +25,10 @@
   const FIXED_FEES = ['airport', 'cargo', 'shopping'];
   const SIZE_ORDER = ['bag', 'box', 'xl'];
 
-  const state = { settings: null, account: null, order: null, stops: [], driver: null, pos: null, posDriverId: null, unsubPos: null, timer: null, map: null, refs: null, share: false, code: '', isNew: false, receiver: false };
+  // enteredId: the order whose view has had its entrance (hero rise, progress steps revealing); live re-renders of it skip the motion.
+  const state = { settings: null, account: null, order: null, stops: [], driver: null, pos: null, posDriverId: null, unsubPos: null, timer: null, map: null, refs: null, share: false, code: '', isNew: false, receiver: false, enteredId: null, activityOpen: false };
   let renderSeq = 0;
-  let form, input, fieldEl, emptyEl, resultEl;
+  let form, input, fieldEl, emptyEl, resultEl, introEl;
 
   const fmt = n => MDM.pricing.format(n);
   const fmtDate = (iso, o) => MDM.ui.fmtDate(iso, o);
@@ -138,7 +140,7 @@
       el('div', { class: 'empty__title' }, code ? 'No order with the code ' + code + '.' : 'No order matches this link.'),
       el('div', { class: 'empty__hint' }, 'Check the code in your confirmation message.')));
     emptyEl.hidden = false;
-    form.hidden = false;
+    form.hidden = false; introEl.hidden = false;
     document.title = 'Track an order · Mr. Delivery Man';
   }
   async function setOrder(o, focus) {
@@ -150,7 +152,7 @@
     if (focus) { try { resultEl.focus({ preventScroll: true }); } catch (e) { /* focus is a courtesy */ } }
   }
   function clearOrder() {
-    state.order = null; state.refs = null; state.stops = []; state.driver = null; state.share = false;
+    state.order = null; state.refs = null; state.stops = []; state.driver = null; state.share = false; state.enteredId = null; state.activityOpen = false;
     watchDriver(null);
     if (state.timer) { clearInterval(state.timer); state.timer = null; }
     destroyMap();
@@ -161,7 +163,7 @@
     emptyEl.hidden = true; emptyEl.replaceChildren();
     history.replaceState(null, '', location.pathname);
     document.title = 'Track an order · Mr. Delivery Man';
-    form.hidden = false; input.value = ''; MDM.ui.setError(fieldEl, null);
+    form.hidden = false; introEl.hidden = false; input.value = ''; MDM.ui.setError(fieldEl, null);
     input.focus();
   }
 
@@ -305,9 +307,13 @@
     state.stops = stops; state.driver = driver; state.account = account;
     state.receiver = receiverView(o);
     const refs = {};
-    const parts = [buildHead(o, refs), buildNotices(o, stops), buildProgress(o)];
+    const first = state.enteredId !== o.id;
+    state.enteredId = o.id;
+    // Status first (the hero), then the map, then the progress steps; the details follow.
+    const parts = [buildHead(o, refs), buildNotices(o, stops)];
     if (NO_MAP.indexOf(o.status) < 0 || stops.length) parts.push(buildRoute(o, stops));
     else destroyMap();
+    parts.push(buildProgress(o, first));
     if (driver) parts.push(buildDriver(o, driver, refs));
     const collections = buildCollections(o);
     if (collections) parts.push(collections);
@@ -321,7 +327,8 @@
     parts.push(buildTimeline(o));
     resultEl.replaceChildren(...parts);
     state.refs = refs;
-    resultEl.hidden = false; form.hidden = true;
+    resultEl.hidden = false; form.hidden = true; introEl.hidden = true;
+    if (first && MDM.motion) MDM.motion.enter(resultEl, { max: 3 });
     syncMap();
     updateLive();
   }
@@ -346,43 +353,60 @@
     if (s.type === 'advance' && s.collectDate) parts.push('collect ' + fmtDate(s.collectDate, { dateOnly: true }) + ' ' + (s.collectTime || ''));
     return parts.join(' · ');
   }
+  // A short line under the status for the steps that have no ETA (the notices below cover requests, problems and cancellations).
+  function heroNote(o) {
+    if (state.isNew && o.status === 'requested') return '';
+    switch (o.status) {
+      case 'confirmed': return state.receiver || !priceConfirmed(o) ? 'We are assigning a driver.' : 'Final price ' + fmt(o.totals.total) + '. We are assigning a driver' + (o.schedule && o.schedule.type === 'advance' ? ' for your booked time.' : '.');
+      case 'assigned': return 'You see the driver on the map once they set off.';
+      case 'dispatched': return 'Your driver sets off shortly.';
+      case 'returned': return 'We could not deliver it, so it went back to the sender.';
+      case 'delivered': { const h = (o.statusHistory || []).filter(x => x.to === 'delivered').pop(); return h ? 'Delivered ' + (MDM.ui.dayKey(h.at) === MDM.ui.dayKey(new Date()) ? 'today at ' + MDM.ui.fmtTime(h.at) : fmtDate(h.at)) + '.' : ''; }
+      default: return '';
+    }
+  }
+  // The hero: order code, the status as a large line with a coloured dot (a pulsing one while the driver is moving), the ETA, one
+  // summary line and three quiet pills (copy link, call us, share). Status and ETA share the polite live region.
   function buildHead(o, refs) {
     const url = codeUrl(o.code);
     const s = state.settings || {}, contact = s.contact || {};
-    const badge = html(MDM.badgeFor(o.status, { customer: true })).firstElementChild;
-    badge.setAttribute('data-testid', 'track-status');
-    refs.eta = el('span', { class: 'track-eta', 'data-testid': 'track-eta' });
-    refs.updated = el('span', { class: 'track-head__updated' });
+    const st = MDM.STATUS[o.status] || { customer: o.status, kind: 'neutral' };
+    const status = el('h1', { class: 'track-hero__status', 'data-testid': 'track-status', 'data-status': o.status },
+      el('span', { class: ['track-dot', 'track-dot--' + st.kind, LIVE.indexOf(o.status) >= 0 ? 'is-live' : null], 'aria-hidden': 'true' }), st.customer);
+    refs.eta = el('p', { class: 'track-eta', 'data-testid': 'track-eta' });
+    refs.updated = el('span', { class: 'track-hero__updated' });
     const recipient = { name: (o.delivery || {}).recipientName, phone: (o.delivery || {}).recipientPhone };
 
-    const copyLabel = el('span', null, 'Copy tracking link');
-    const copyBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'track-copy', on: { click: async () => {
+    const copyLabel = el('span', null, 'Copy link');
+    const copyBtn = el('button', { type: 'button', class: 'btn btn--sm track-pill', 'data-testid': 'track-copy', on: { click: async () => {
       const ok = await MDM.ui.copy(url);
-      if (ok) { setText(copyLabel, 'Copied'); setTimeout(() => setText(copyLabel, 'Copy tracking link'), 1500); }
+      if (ok) { setText(copyLabel, 'Copied'); setTimeout(() => setText(copyLabel, 'Copy link'), 1500); }
       else MDM.ui.toast('Could not copy. The link is ' + url, 'warn');
     } } }, html(MDM.icon('link', 16)), copyLabel);
     const shareText = 'Track my Mr. Delivery Man delivery ' + o.code + ': ' + url;
     const recLinks = recipient.phone ? MDM.ui.phone.links(recipient.phone, shareText) : null;
     const waHref = recLinks ? recLinks.wa : 'https://wa.me/?text=' + encodeURIComponent(shareText);
     const shareRow = el('div', { class: 'track-share', id: 'track-share', hidden: !state.share },
-      el('span', null, recipient.name ? 'Send the tracking link to ' + recipient.name + ':' : 'Send the tracking link:'),
+      el('span', null, recipient.name ? 'Send to ' + recipient.name + ':' : 'Send the link:'),
       el('a', { class: 'btn btn--secondary btn--sm', href: waHref, target: '_blank', rel: 'noopener', 'data-testid': 'track-share-whatsapp' }, 'WhatsApp'),
       el('a', { class: 'btn btn--secondary btn--sm', href: 'viber://forward?text=' + encodeURIComponent(shareText), 'data-testid': 'track-share-viber' }, 'Viber'));
-    const shareBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'track-share', 'aria-expanded': state.share ? 'true' : 'false', 'aria-controls': 'track-share',
+    const shareBtn = el('button', { type: 'button', class: 'btn btn--sm track-pill', 'data-testid': 'track-share', 'aria-expanded': state.share ? 'true' : 'false', 'aria-controls': 'track-share',
       on: { click: () => { state.share = !state.share; shareRow.hidden = !state.share; shareBtn.setAttribute('aria-expanded', state.share ? 'true' : 'false'); } } },
       html(MDM.icon('share', 16)), 'Share');
     const callLinks = contact.phone ? MDM.ui.phone.links(contact.phone) : null;
-    const callBtn = callLinks ? el('a', { class: 'btn btn--secondary', href: callLinks.tel, 'data-testid': 'track-call-us' }, html(MDM.icon('phone', 16)), 'Call us') : null;
-    const another = el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'track-another', on: { click: trackAnother } }, 'Track another order');
+    const callBtn = callLinks ? el('a', { class: 'btn btn--sm track-pill', href: callLinks.tel, 'data-testid': 'track-call-us' }, html(MDM.icon('phone', 16)), 'Call us') : null;
+    const another = el('button', { type: 'button', class: 'btn btn--ghost btn--sm track-hero__back', 'data-testid': 'track-another', on: { click: trackAnother } }, html(MDM.icon('chevron-left', 16)), 'Track another');
     const priority = o.priority && o.priority.status === 'approved' && o.priority.level !== 'normal'
       ? html(MDM.ui.badge('danger', (MDM.PRIORITY_LEVELS.find(x => x.value === o.priority.level) || {}).label || 'Priority', { 'data-testid': 'track-priority-badge' })).firstElementChild : null;
+    const note = heroNote(o);
 
-    return el('div', { class: 'track-head' },
-      el('div', { class: 'track-head__back' }, another),
-      el('div', { class: 'track-head__row' }, el('div', { class: 'track-head__live', 'aria-live': 'polite' }, badge, priority, refs.eta), refs.updated),
-      el('div', { class: 'track-head__code mono', 'data-testid': 'track-code' }, o.code),
-      el('p', { class: 'track-head__summary' }, summaryLine(o)),
-      el('div', { class: 'track-head__actions' }, copyBtn, callBtn, shareBtn),
+    return el('div', { class: 'track-head track-hero' },
+      el('div', { class: 'track-hero__bar' }, another, refs.updated),
+      el('div', { class: 'track-hero__id' }, el('span', { class: 'track-head__code mono mono--code', 'data-testid': 'track-code' }, o.code), priority),
+      el('div', { class: 'track-hero__live', 'aria-live': 'polite' }, status, refs.eta),
+      note ? el('p', { class: 'track-hero__note' }, note) : null,
+      el('p', { class: 'track-hero__summary' }, summaryLine(o)),
+      el('div', { class: 'track-hero__actions' }, copyBtn, callBtn, shareBtn),
       shareRow);
   }
 
@@ -405,41 +429,25 @@
     const items = [];
     const actions = [];
     const priceAfter = MDM.priceAfterCollection(o) && !state.receiver;
-    if (state.isNew && o.status === 'requested') items.push(notice('ok', 'Request sent', 'Your order code is ' + o.code + '. Keep it to track this delivery. We message you ' + channelOn + (priceAfter ? ' when a driver is on the way, and again with the final price after collection.' : ' once the price is confirmed.'), { testid: 'track-new' }));
+    if (state.isNew && o.status === 'requested') items.push(notice('ok', 'Request sent', 'We message you ' + channelOn + (priceAfter ? ' when a driver is on the way, then with the final price.' : ' once the price is confirmed.'), { testid: 'track-new' }));
     switch (o.status) {
       case 'requested': {
-        if (state.receiver) { items.push(notice('info', 'Delivery booked by ' + businessName(o), 'We confirm the booking and assign a driver.')); break; }
+        if (state.receiver) { items.push(notice('info', 'Delivery booked by ' + businessName(o), 'We confirm it and assign a driver.')); break; }
         const est = estimateOf(o), range = rangeText(est.min, est.max);
         // No package photo: a driver collects first and our team prices it from the driver's photo (updates 17/10/2026).
-        if (priceAfter) { items.push(notice('info', 'We collect first, then confirm your price', 'Estimated ' + range + '. You did not add a package photo, so our driver photographs the package at collection and our team confirms the final price while it is on the way. Nothing to pay until then.', { testid: 'track-price-after' })); break; }
-        const photo = (o.packages || []).some(x => x.photoId);
-        items.push(notice('warn', 'We are confirming your price', 'Estimated ' + range + '. ' + (photo ? 'We are checking your package photo' : 'Our team checks the details') + (ops.reviewText ? ', usually within ' + ops.reviewText : '') + ', then message you ' + channelOn + '.'));
+        if (priceAfter) { items.push(notice('info', 'We collect first, then confirm your price', 'Estimated ' + range + '. The driver photographs the package at collection and we price it from that. Nothing to pay until then.', { testid: 'track-price-after' })); break; }
+        items.push(notice('warn', 'We are confirming your price', 'Estimated ' + range + '.' + (ops.reviewText ? ' Usually within ' + ops.reviewText + '.' : '') + ' We message you ' + channelOn + '.'));
         break;
       }
-      case 'confirmed':
-        if (state.receiver) { items.push(notice('info', 'Order confirmed', 'We are assigning a driver.')); break; }
-        items.push(notice('info', 'Order confirmed', 'Final price ' + fmt(o.totals.total) + '. We are assigning a driver' + (o.schedule && o.schedule.type === 'advance' ? ' for your booked time' : '') + '.'));
-        break;
-      case 'assigned': case 'dispatched':
-        items.push(notice('info', null, o.status === 'assigned' ? 'A driver is assigned. You will see them on the map once they set off.' : 'Your driver has the job and sets off shortly.'));
-        break;
-      case 'on_the_way': case 'arrived':
-        items.push(notice('info', null, o.status === 'arrived' ? 'The driver is at the collection point.' : 'The driver is on the way to collect.'));
-        break;
-      case 'collected': case 'out_for_delivery':
-        items.push(notice('info', null, o.status === 'collected' ? 'Collected. The driver photographed the package as proof of collection.' : 'Your package is out for delivery.'));
-        break;
+      // Confirmed and the driver steps: the hero's status, ETA and short line say it all.
       case 'failed': {
         const failed = stops.find(x => x.status === 'failed');
         const r = failed ? MDM.FAIL_REASONS.find(x => x.value === failed.failReason) : null;
-        items.push(notice('danger', 'There was a problem', (failed ? (failed.type === 'pickup' ? 'Collection' : 'Delivery') + ' could not be completed' : 'A stop could not be completed') + (r ? ' (' + r.label.toLowerCase() + ')' : '') + '. We will contact you ' + channelOn + ' to reschedule.'));
+        items.push(notice('danger', null, (failed ? (failed.type === 'pickup' ? 'Collection' : 'Delivery') + ' could not be completed' : 'A stop could not be completed') + (r ? ' (' + r.label.toLowerCase() + ')' : '') + '. We contact you ' + channelOn + ' to reschedule.'));
         break;
       }
-      case 'returned':
-        items.push(notice('info', null, 'We could not deliver this package, so it went back to the sender.'));
-        break;
       case 'delivered':
-        if (priceAfter) items.push(notice('info', 'We are confirming the final price', 'Delivered. Our team is confirming the final price from the driver\'s photo; your invoice follows ' + channelOn + '.', { testid: 'track-price-after' }));
+        if (priceAfter) items.push(notice('info', 'We are confirming the final price', 'Your invoice follows ' + channelOn + '.', { testid: 'track-price-after' }));
         break;
       case 'cancelled': {
         // A business cancelled one of its orders (§5.5): after collection the package goes back to the sender.
@@ -461,19 +469,19 @@
       default: break;
     }
     // Extra vehicle (§2.3): the customer asked for it; our team confirms the charge with the price.
-    if (o.extraVehicle && !priceConfirmed(o) && o.status !== 'cancelled' && !state.receiver) items.push(notice('info', 'Extra vehicle requested, charge confirmed by our team', 'More than one box or XL package can need a second vehicle. We add the vehicle charge when we confirm your price, ' + (priceAfter ? 'after collection.' : 'before collection.'), { testid: 'track-extra-vehicle' }));
+    if (o.extraVehicle && !priceConfirmed(o) && o.status !== 'cancelled' && !state.receiver) items.push(notice('info', 'Extra vehicle requested', 'We add its charge when we confirm your price, ' + (priceAfter ? 'after collection.' : 'before collection.'), { testid: 'track-extra-vehicle' }));
     // Cash on delivery on a business order (§5.6): the receiver pays the driver.
     const cod = o.cod;
     if (cod && cod.amount > 0 && cod.status === 'pending' && TERMINAL.indexOf(o.status) < 0) items.push(state.receiver
-      ? notice('warn', 'Pay ' + fmt(cod.amount) + ' in cash to the driver', 'Cash on delivery for ' + businessName(o) + '. Have ' + fmt(cod.amount) + ' ready in cash when the package arrives.', { testid: 'track-cod' })
-      : notice('warn', 'Cash on delivery ' + fmt(cod.amount), 'The receiver pays the driver ' + fmt(cod.amount) + ' in cash when the package is delivered.', { testid: 'track-cod' }));
+      ? notice('warn', 'Pay ' + fmt(cod.amount) + ' in cash to the driver', 'Cash on delivery for ' + businessName(o) + '. Have it ready when the package arrives.', { testid: 'track-cod' })
+      : notice('warn', 'Cash on delivery ' + fmt(cod.amount), 'The receiver pays the driver in cash on delivery.', { testid: 'track-cod' }));
     // Cancellation request (requirements §9)
     const c = o.cancellation || {};
-    if (c.status === 'requested') items.push(notice('warn', 'Cancellation requested', 'We received your request' + (c.reason ? ' (' + c.reason + ')' : '') + ' and will confirm shortly.', { testid: 'track-cancel-pending' }));
+    if (c.status === 'requested') items.push(notice('warn', 'Cancellation requested', 'We confirm shortly' + (c.reason ? '. Your reason: ' + c.reason : '') + '.', { testid: 'track-cancel-pending' }));
     else if (c.status === 'rejected') items.push(notice('warn', 'Cancellation declined', (c.remarks || 'The order is already on its way') + '. Call us if you need help.', { testid: 'track-cancel-declined' }));
     // Priority (requirements §11)
     const pr = o.priority || {};
-    if (pr.status === 'requested') items.push(notice('info', o.serviceLevel === 'express' ? 'Express requested' : 'Priority requested', 'Our team confirms whether we can take it' + (o.serviceLevel === 'express' ? ' as express' : ' with priority') + '.', { testid: 'track-priority' }));
+    if (pr.status === 'requested') items.push(notice('info', o.serviceLevel === 'express' ? 'Express requested' : 'Priority requested', 'We confirm whether we can take it.', { testid: 'track-priority' }));
     else if (pr.status === 'rejected') items.push(notice('warn', 'Priority not available', ((pr.requests || []).slice(-1)[0] || {}).remarks || 'We will deliver on the normal schedule.', { testid: 'track-priority' }));
     // Payment prompt
     if (p.status === 'requested' && p.rejectReason) items.push(notice('danger', 'We could not match your transfer', p.rejectReason + '. Upload the slip again.'));
@@ -481,11 +489,17 @@
     if (MDM.CANCELLABLE.indexOf(o.status) >= 0 && c.status !== 'requested' && o.payment.method !== 'invoice')
       actions.push(el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'track-cancel', on: { click: () => askCancel(o) } }, 'Request cancellation'));
     if (actions.length) items.push(el('div', { class: 'track-actions' }, actions));
-    return el('div', { class: 'track-notices' }, items);
+    return el('div', { class: 'track-notices', hidden: !items.length }, items);
   }
 
   // ---- Progress: the status flow plus payment (requirements §7) --------------------------------------------------------------
-  function buildProgress(o) {
+  // first: the order's first render, so the steps reveal one after another as the list scrolls in (data-reveal, js/motion.js);
+  // re-renders of a live order draw them at rest.
+  function progressSection(items, first) {
+    if (first) items.forEach((li, i) => { li.setAttribute('data-reveal', ''); li.style.setProperty('--d', (i * 60) + 'ms'); });
+    return section('track-progress-h', 'Progress', el('ol', { class: 'timeline track-progress', 'data-testid': 'track-progress' }, items));
+  }
+  function buildProgress(o, first) {
     const flow = o.batchId || o.requestType === 'bulk' ? MDM.BULK_FLOW : MDM.FLOW;
     const hist = o.statusHistory || [];
     const reached = {};
@@ -503,7 +517,7 @@
       const cls = ['timeline__item', current ? 'is-current' : done ? 'is-done' : 'is-upcoming'];
       return el('li', { class: cls, 'data-status': st, 'data-testid': 'track-step' },
         el('div', { class: 'timeline__label' }, MDM.STATUS[st].customer),
-        h ? el('div', { class: 'timeline__time' }, fmtDate(h.at) + ' · ' + who(h.by)) : null);
+        h ? el('div', { class: 'timeline__time' }, fmtWhen(h.at) + ' · ' + who(h.by)) : null);
     });
     if (stopped) {
       const h = reached[o.status];
@@ -511,7 +525,7 @@
       // A cancelled or returned order ends here; a failed one can still resume, so its remaining steps stay listed.
       if (o.status !== 'failed') items.splice(cut);
       items.splice(cut, 0, el('li', { class: 'timeline__item is-current track-step--stop', 'data-status': o.status, 'data-testid': 'track-step' },
-        el('div', { class: 'timeline__label' }, MDM.STATUS[o.status].customer), h ? el('div', { class: 'timeline__time' }, fmtDate(h.at) + ' · ' + who(h.by)) : null));
+        el('div', { class: 'timeline__label' }, MDM.STATUS[o.status].customer), h ? el('div', { class: 'timeline__time' }, fmtWhen(h.at) + ' · ' + who(h.by)) : null));
       const ret = (o.cancellation || {}).returnStatus;
       if (o.status === 'cancelled' && (ret === 'pending' || ret === 'done')) {
         const cx = o.cancellation;
@@ -530,7 +544,7 @@
           el('div', { class: 'timeline__label' }, paid ? 'Cash paid to the driver' : cod.status === 'not_collected' ? 'Cash on delivery not collected' : 'Cash on delivery ' + fmt(cod.amount)),
           paid && cod.collectedAt ? el('div', { class: 'timeline__time' }, fmtDate(cod.collectedAt)) : null));
       }
-      return section('track-progress-h', 'Progress', el('ol', { class: 'timeline track-progress', 'data-testid': 'track-progress' }, items));
+      return progressSection(items, first);
     }
     const payDone = p.status === 'paid' || p.status === 'refunded';
     const payCurrent = p.status === 'requested' || p.status === 'received';
@@ -538,7 +552,7 @@
     items.push(el('li', { class: ['timeline__item', payDone ? 'is-done' : payCurrent ? 'is-current' : 'is-upcoming'], 'data-status': 'payment', 'data-testid': 'track-step' },
       el('div', { class: 'timeline__label' }, payLabel, ' ', html(MDM.payBadge(p.status))),
       p.verifiedAt && payDone ? el('div', { class: 'timeline__time' }, fmtDate(p.verifiedAt)) : null));
-    return section('track-progress-h', 'Progress', el('ol', { class: 'timeline track-progress', 'data-testid': 'track-progress' }, items));
+    return progressSection(items, first);
   }
 
   function buildRoute(o, stops) {
@@ -569,20 +583,26 @@
     if (withMap) { const holder = el('div', { class: 'track-map-holder' }); mountMap(holder); body.push(holder); }
     else destroyMap();
     body.push(el('div', { class: 'stops', 'data-testid': 'track-stops' }, rows));
-    return section('track-route-h', 'Route', body);
+    return el('section', { class: 'section track-route', 'aria-labelledby': 'track-route-h' }, el('h2', { id: 'track-route-h', class: 'sr-only' }, 'Route'), body);
   }
 
   function buildDriver(o, d, refs) {
     const active = ACTIVE.indexOf(o.status) >= 0;
     const links = d.phone ? MDM.ui.phone.links(d.phone) : null;
-    const rows = [row('Driver', d.name), row('Vehicle', (VEHICLES[d.vehicle] || d.vehicle || '') + (d.vehicleNote ? ' · ' + d.vehicleNote : ''))];
+    const initials = String(d.name || '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w.charAt(0).toUpperCase()).join('');
+    let live = null;
     if (active) {
       refs.source = badgeNode('neutral', 'Not sharing yet', 'none');
       refs.posAge = el('span', { class: 'small muted', 'data-testid': 'track-pos-age' });
-      rows.push(row('Live location', el('span', { class: 'row row--wrap' }, refs.source, refs.posAge)));
+      live = el('div', { class: 'track-driver__live' }, el('span', { class: 'sr-only' }, 'Live location: '), refs.source, refs.posAge);
     }
-    if (links && active) rows.push(row('Phone', el('a', { class: 'btn btn--secondary btn--sm', href: links.tel, 'data-testid': 'track-call-driver' }, html(MDM.icon('phone', 16)), 'Call driver')));
-    return section('track-driver-h', 'Your driver', el('div', { class: 'card', 'data-testid': 'track-driver' }, el('div', { class: 'rate-table' }, rows)));
+    return section('track-driver-h', 'Your driver', el('div', { class: 'track-driver', 'data-testid': 'track-driver' },
+      el('span', { class: 'track-driver__avatar', 'aria-hidden': 'true' }, initials || html(MDM.icon('user', 18))),
+      el('div', { class: 'track-driver__main' },
+        el('div', { class: 'track-driver__name' }, d.name),
+        el('div', { class: 'track-driver__meta' }, (VEHICLES[d.vehicle] || d.vehicle || '') + (d.vehicleNote ? ' · ' + d.vehicleNote : '')),
+        live),
+      links && active ? el('a', { class: 'btn btn--secondary track-driver__call', href: links.tel, 'data-testid': 'track-call-driver' }, html(MDM.icon('phone', 16)), 'Call') : null));
   }
 
   // ---- Delivery method and its details (web app updates §3) ---------------------------------------------------------------------
@@ -609,7 +629,7 @@
       else rows.push(row('Collection ' + (i + 2), where, { valueSub: [c.contactName, c.instructions].filter(Boolean).join(' · ') || null }));
     });
     return section('track-collections-h', 'Collections', el('div', { class: 'rate-table', 'data-testid': 'track-collections' }, rows),
-      el('p', { class: 'track-summary-note small muted' }, 'Everything is packed together and delivered to one address.'));
+      el('p', { class: 'track-summary-note small muted' }, 'Packed together, delivered to one address.'));
   }
   function buildDelivery(o) {
     const d = o.delivery || {}, method = d.method || 'home';
@@ -715,15 +735,15 @@
       { title: 'Package category changed by our team', testid: 'track-size-changes' }));
     body.push(card);
     if (!confirmed) body.push(el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-price-note' }, MDM.priceAfterCollection(o)
-      ? 'Final price confirmed after collection, from the driver\'s photo, including any vehicle or size charge.'
-      : 'Our team confirms the final price, including any vehicle or size charge, before collection.'));
+      ? 'We confirm the final price after collection, with any vehicle or size charge.'
+      : 'We confirm the final price before collection, with any vehicle or size charge.'));
     else if (o.pricing.confirmedAt) {
       // A size change or a charge after confirmation updates the price; say when, so the confirmed time does not look stale.
       const last = (o.pricing.history || []).slice(-1)[0];
       const later = last && last.at && Date.parse(last.at) > Date.parse(o.pricing.confirmedAt) + 1000 ? ' Updated ' + fmtDate(last.at) + '.' : '';
       body.push(el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-confirmed-note' }, 'Confirmed ' + fmtDate(o.pricing.confirmedAt) + ' by ' + who(o.pricing.confirmedBy) + (o.pricing.remarks ? ': ' + o.pricing.remarks : '') + '.' + later));
     }
-    if (isBusinessOrder(o)) body.push(el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-business-only' }, 'You see this price because you are signed in as ' + businessName(o) + '. Your receiver sees who arranged the delivery and the cash to pay, not your rate.'));
+    if (isBusinessOrder(o)) body.push(el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-business-only' }, 'Only ' + businessName(o) + ' sees this price. Your receiver sees the cash to pay, not your rate.'));
     if (confirmed && o.payment.method !== 'invoice') body.push(el('a', { class: 'btn btn--secondary btn--sm track-invoice', href: MDM.href('invoice/?order=' + encodeURIComponent(o.code)), 'data-testid': 'track-invoice' }, html(MDM.icon('receipt', 16)), 'View invoice'));
     return section('track-totals-h', 'Price', body);
   }
@@ -743,8 +763,8 @@
       row('Delivery charge', 'Billed to ' + name),
       codRow(o)];
     return section('track-payment-h', 'Payment', el('div', { class: 'rate-table', 'data-testid': 'track-arranged' }, rows),
-      el('p', { class: 'track-summary-note small muted' }, 'Questions about the price of your order go to ' + name + '. ',
-        el('a', { href: MDM.href('login/?as=business&next=' + encodeURIComponent('track/?code=' + o.code)), 'data-testid': 'track-business-signin' }, 'Are you ' + name + '? Sign in to see your price')));
+      el('p', { class: 'track-summary-note small muted' }, 'Price questions go to ' + name + '. ',
+        el('a', { href: MDM.href('login/?as=business&next=' + encodeURIComponent('track/?code=' + o.code)), 'data-testid': 'track-business-signin' }, 'Are you ' + name + '? Sign in')));
   }
   function buildPayment(o) {
     const p = o.payment || {};
@@ -862,7 +882,18 @@
     const terminal = TERMINAL.indexOf(o.status) >= 0;
     const items = evs.slice().reverse().map((e, i) => el('li', { class: ['timeline__item', i === 0 && !terminal ? 'is-current' : 'is-done'], dataset: { eventId: e.id, type: e.type } },
       el('div', { class: 'timeline__label' }, e.label), el('div', { class: 'timeline__time' }, fmtDate(e.at) + (e.by ? ' · ' + who(e.by) : ''))));
-    return section('track-activity-h', 'Activity', el('ol', { class: 'timeline', 'data-testid': 'track-timeline' }, items));
+    // Collapsed by default (Progress above covers the main steps): a heading button opens the log with a height animation; the closed
+    // panel is inert, so it is out of the tab order and the accessibility tree. The open state survives live re-renders.
+    const panel = el('div', { class: 'track-more__panel', id: 'track-activity', inert: !state.activityOpen },
+      el('div', { class: 'track-more__inner' }, el('ol', { class: 'timeline', 'data-testid': 'track-timeline' }, items)));
+    const toggle = el('button', { type: 'button', class: 'track-more__toggle', 'aria-expanded': state.activityOpen ? 'true' : 'false', 'aria-controls': 'track-activity', on: { click: () => {
+      state.activityOpen = !state.activityOpen;
+      box.classList.toggle('is-open', state.activityOpen);
+      toggle.setAttribute('aria-expanded', state.activityOpen ? 'true' : 'false');
+      panel.inert = !state.activityOpen;
+    } } }, el('span', null, 'Activity'), el('span', { class: 'track-more__count' }, String(items.length)), html(MDM.icon('chevron-down', 18)));
+    const box = el('div', { class: ['track-more', state.activityOpen ? 'is-open' : null] }, el('h2', { id: 'track-activity-h', class: 'track-more__head' }, toggle), panel);
+    return el('section', { class: 'section track-activity', 'aria-labelledby': 'track-activity-h' }, box);
   }
 
   // ---- Boot ---------------------------------------------------------------------------------------------------------------
@@ -873,6 +904,7 @@
     fieldEl = input.closest('.field');
     emptyEl = document.getElementById('track-empty');
     resultEl = document.getElementById('track-result');
+    introEl = document.getElementById('track-intro');
     state.settings = await MDM.store.settings();
 
     form.addEventListener('submit', async e => {

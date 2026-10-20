@@ -13,7 +13,7 @@
   const ROLE_LABEL = { admin: 'Admin', operator: 'Operator', office: 'Office staff' };
   const views = {};
   const mainEl = document.getElementById('main');
-  const state = { session: null, current: null, name: null, routing: null, queued: false, loginUser: '', countsUnsub: null, countsTimer: null };
+  const state = { session: null, current: null, name: null, host: null, id: null, routing: null, queued: false, loginUser: '', countsUnsub: null, countsTimer: null };
 
   // ---- Session and permissions ---------------------------------------------------------------------------------------------
   function readSession() {
@@ -63,9 +63,18 @@
   }
 
   // ---- Router ---------------------------------------------------------------------------------------------------------------
+  // A view mounts hidden (.is-preparing) and eases its blocks in once its first render is done (MDM.motion.enter): the page head,
+  // the blocks under it and the tiles of a KPI row, staggered. Only navigation does this; live re-renders never call it.
+  const ENTER_BLOCKS = ':scope > :not(.stack-6, .stack-4, .kpi-row), :scope > :is(.stack-6, .stack-4) > *, :scope > .kpi-row > *';
+  function enterView(host) {
+    host.classList.remove('is-preparing');
+    // A view that already eased itself in during mount (orders.js does) is left alone.
+    if (!MDM.motion || !host.isConnected || host.querySelector('.motion-enter')) return;
+    MDM.motion.enter(host, { selector: ENTER_BLOCKS, max: 14 });
+  }
   async function teardown() {
     const cur = state.current;
-    state.current = null; state.name = null;
+    state.current = null; state.name = null; state.host = null; state.id = null;
     if (cur) { try { await cur.unmount(); } catch (e) { /* a view that fails to unmount must not block the next one */ } }
     if (MDM.ui.drawer.isOpen()) MDM.ui.drawer.close();
     mainEl.replaceChildren();
@@ -77,8 +86,8 @@
   function forbidden(view) {
     const host = el('div', { class: 'view view--forbidden', 'data-view': 'forbidden', 'data-testid': 'admin-forbidden' },
       el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, 'Your role cannot open this page'),
-        el('p', { class: 'page-head__desc' }, 'You are signed in as ' + (ROLE_LABEL[(state.session || {}).role] || 'staff').toLowerCase() + '. Ask an admin if you need ' + view + '.')),
-      el('div', { class: 'card' }, el('div', { class: 'card__body' }, el('a', { class: 'btn btn--secondary', href: '#/overview' }, 'Back to the overview'))));
+        el('p', { class: 'page-head__desc' }, 'Signed in as ' + (ROLE_LABEL[(state.session || {}).role] || 'staff').toLowerCase() + '. Ask an admin for ' + view + '.')),
+      el('div', { class: 'card' }, el('div', { class: 'card__body' }, el('a', { class: 'btn btn--secondary', href: '#/' + (can('overview') ? 'overview' : allowed()[0]) }, html(MDM.icon('chevron-left', 16)), can('overview') ? 'Back to overview' : 'Go back'))));
     return host;
   }
   async function route() {
@@ -94,19 +103,28 @@
         mainEl.appendChild(host);
         document.title = 'No access · Admin · ' + TITLE;
         MDM.shell.setActive(p.view);
+        enterView(host);
         focusHeading(host);
         return;
       }
       const view = views[p.view];
-      if (state.current === view && typeof view.update === 'function') { await view.update(p); return; }
+      if (state.current === view && typeof view.update === 'function') {
+        const prevId = state.id;
+        await view.update(p);
+        state.id = p.id;
+        // Views that swap between a list and a detail page on the same route (#/bulk ↔ #/bulk/:id) ease the new page in too.
+        if (view.enterOnId && prevId !== p.id && state.host && state.current === view) enterView(state.host);
+        return;
+      }
       await teardown();
       mainEl.classList.add('admin__content');
-      const host = el('div', { class: 'view view--' + p.view, 'data-view': p.view });
+      const host = el('div', { class: 'view view--' + p.view + ' is-preparing', 'data-view': p.view });
       mainEl.appendChild(host);
-      state.current = view; state.name = p.view;
+      state.current = view; state.name = p.view; state.host = host; state.id = p.id;
       document.title = view.title + ' · Admin · ' + TITLE;
       MDM.shell.setActive(p.view);
-      await view.mount(host, p);
+      try { await view.mount(host, p); }
+      finally { if (state.current === view) enterView(host); else host.classList.remove('is-preparing'); }
       if (state.current === view) focusHeading(host);
     })();
     try { await state.routing; }
@@ -134,15 +152,18 @@
       if (s && pw === PASSWORD) { signIn({ user: s.username, staffId: s.id, role: s.role, name: s.name, at: new Date().toISOString() }); return; }
       errBox.hidden = false; passIn.value = ''; passIn.focus();
     } } },
-      el('div', { class: 'brand' }, html(MDM.logo())),
+      el('div', { class: 'auth__brand' }, el('div', { class: 'brand' }, html(MDM.logo()))),
       el('h1', null, 'Office sign-in'),
-      el('div', { class: 'alert alert--info' }, html(MDM.icon('info', 16)), el('div', { class: 'alert__body' }, 'Demo: admin, operator or lamya (office staff), password delivery')),
+      el('p', { class: 'auth__sub' }, 'Admins, operators and office staff'),
       errBox,
       el('div', { class: 'field' }, el('label', { for: 'admin-user' }, 'Username'), userIn),
       el('div', { class: 'field' }, el('label', { for: 'admin-pass' }, 'Password'), passIn),
       el('button', { type: 'submit', class: 'btn btn--primary btn--block', 'data-testid': 'admin-login' }, 'Sign in'),
-      el('p', { class: 'auth__note' }, el('a', { href: MDM.href('login/?as=admin&reset=1') }, 'Forgot your password?')));
-    mainEl.replaceChildren(el('div', { class: 'auth' }, form));
+      el('p', { class: 'auth__demo' }, 'Demo: admin, operator or lamya · password ', el('span', { class: 'mono' }, 'delivery')),
+      el('p', { class: 'auth__note' }, el('a', { href: MDM.href('login/?as=admin&reset=1') }, 'Forgot password?')));
+    const host = el('div', { class: 'auth' }, form);
+    mainEl.replaceChildren(host);
+    if (MDM.motion) MDM.motion.enter(host);
     (showError || userIn.value ? passIn : userIn).focus();
   }
   // The sidebar is built from the role when the page loads, so a fresh sign-in reloads once to show the right menu.
@@ -269,10 +290,11 @@
   function fmtDay(d) { return d ? MDM.ui.fmtDate(d + 'T00:00:00', { dateOnly: true }) : ''; }
 
   // Below 1400px the orders list folds Type into the Code sub-line and the Payment badge into the Total sub-line (ctx.narrow) so the
-  // table fits the 1280 desktop width; at 1400px and up, and in the stacked phone layout, every column is its own.
+  // table fits the 1280 desktop width; at 1400px and up, and in the stacked phone layout, every column is its own. ctx.who puts the
+  // customer's name under the code instead of the type (the overview's short list).
   const COLUMNS = {
     code: { label: 'Order', cell: (o, ctx) => el('td', { class: 'table__primary', 'data-label': 'Order' }, el('a', { href: '#/orders/' + encodeURIComponent(o.id), class: 'mono', 'data-testid': 'orders-row-link' }, o.code),
-      ctx.narrow ? el('span', { class: 'table__sub' }, typeLabel(o)) : null) },
+      ctx.who ? el('span', { class: 'table__sub' }, o.customer ? o.customer.name : '') : ctx.narrow ? el('span', { class: 'table__sub' }, typeLabel(o)) : null) },
     customer: { label: 'Customer', cell: o => el('td', { 'data-label': 'Customer' }, o.customer ? o.customer.name : '', el('span', { class: 'table__sub mono' }, o.customer ? MDM.ui.phone.format(o.customer.phone) : '')) },
     type: { label: 'Type', cell: o => el('td', { 'data-label': 'Type' }, typeLabel(o), o.serviceLevel && o.serviceLevel !== 'normal' ? el('span', { class: 'table__sub' }, LEVEL[o.serviceLevel]) : null) },
     route: { label: 'Route', cell: o => el('td', { 'data-label': 'Route' }, routeText(o), el('span', { class: 'table__sub' }, nb(plural((o.packages || []).length, 'package') + ((o.extraCollections || []).length ? ', ' + plural(o.extraCollections.length + 1, 'collection') : ''))),
@@ -327,13 +349,41 @@
   function todayLine() { return new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }); }
   const AWAITING = ['confirmed', 'assigned', 'dispatched', 'on_the_way', 'arrived'];
   function overviewView() {
-    const v = { host: null, alive: false, unsubs: [], timer: null, map: null, mapEl: null, markers: Object.create(null), stopPos: null, staleTimer: null, fitted: false, slots: {} };
-    function kpi(label, value, note, testid, icon, href) {
-      return el(href ? 'a' : 'div', { class: 'kpi' + (href ? ' kpi--link' : ''), href: href || null, 'data-testid': 'kpi-' + testid },
-        icon ? el('span', { class: 'kpi__icon', 'aria-hidden': 'true' }, html(MDM.icon(icon, 18))) : null,
-        el('div', { class: 'kpi__label' }, label),
-        el('div', { class: 'kpi__value mono', 'data-testid': 'kpi-' + testid + '-value' }, String(value)),
-        note ? el('div', { class: 'kpi__note' }, note) : null);
+    const v = { host: null, alive: false, unsubs: [], timer: null, map: null, mapEl: null, markers: Object.create(null), stopPos: null, staleTimer: null, fitted: false, slots: {}, tiles: {} };
+    // The ten figures are built once per mount and updated in place, so a live update never restarts their entrance or count-up.
+    // A tile in 'alert' tone (failed orders) turns its number red while it is above 0.
+    const TILES = [
+      { id: 'pending', label: 'Pending', icon: 'file', href: '#/orders?tab=price' },
+      { id: 'awaiting-collection', label: 'Awaiting collection', icon: 'clock', href: '#/orders?tab=active' },
+      { id: 'collected', label: 'Collected', icon: 'package', href: '#/orders?status=collected' },
+      { id: 'out-for-delivery', label: 'Out for delivery', icon: 'bike', href: '#/orders?status=out_for_delivery' },
+      { id: 'completed', label: 'Completed', icon: 'check-circle', href: '#/orders?tab=done' },
+      { id: 'total', label: 'Total orders', icon: 'list', href: '#/orders' },
+      { id: 'failed', label: 'Failed', icon: 'alert-triangle', href: '#/orders?tab=failed', alert: true },
+      { id: 'cancelled', label: 'Cancelled', icon: 'x-circle', href: '#/orders?status=cancelled' },
+      { id: 'pending-payments', label: 'Pending payments', icon: 'receipt', href: '#/orders?payment=requested' },
+      { id: 'active-drivers', label: 'Active drivers', icon: 'users', href: '#/drivers', perm: 'drivers' },
+    ];
+    function buildTiles() {
+      v.tiles = {};
+      v.slots.kpis.replaceChildren(...TILES.map(t => {
+        const href = t.perm && !can(t.perm) ? null : t.href;
+        const value = el('div', { class: 'kpi__value mono', 'data-testid': 'kpi-' + t.id + '-value', 'data-countup': true }, '0');
+        const note = el('div', { class: 'kpi__note' });
+        v.tiles[t.id] = { value, note, alert: t.alert };
+        return el(href ? 'a' : 'div', { class: 'kpi' + (href ? ' kpi--link' : ''), href, 'data-testid': 'kpi-' + t.id },
+          el('div', { class: 'kpi__head' }, el('span', { class: 'kpi__icon', 'aria-hidden': 'true' }, html(MDM.icon(t.icon, 16))), el('span', { class: 'kpi__label' }, t.label)),
+          value, note);
+      }));
+    }
+    // Writes a figure; dataset.countFinal keeps a count-up that is still running from ending on the old number.
+    function setTile(id, value, note) {
+      const t = v.tiles[id]; if (!t) return;
+      const text = String(value);
+      t.value.dataset.countFinal = text;
+      if (t.value.textContent !== text) t.value.textContent = text;
+      if (t.note.textContent !== (note || '')) t.note.textContent = note || '';
+      if (t.alert) t.value.closest('.kpi').classList.toggle('kpi--alert', Number(value) > 0);
     }
     function attention(orders, requests, leaves, batches, drivers, accounts) {
       const q = queues(orders);
@@ -349,26 +399,29 @@
       const group = (key, title, items) => {
         if (!items.length) return;
         const shown = items.slice(0, 3);
-        const more = items.length > shown.length ? el('a', { class: 'queue__more', href: MORE[key] || '#/orders', 'data-testid': 'attention-more' }, 'See ' + (items.length - shown.length) + ' more') : null;
-        groups.push(el('div', { class: 'queue', 'data-queue': key }, el('div', { class: 'queue__head' }, el('a', { href: MORE[key] || '#/orders' }, title), el('span', { class: 'queue__count mono' }, String(items.length))), el('div', { class: 'list' }, shown), more));
+        const href = MORE[key] || '#/orders';
+        const more = items.length > shown.length ? el('a', { class: 'queue__more', href, 'data-testid': 'attention-more' }, 'See ' + (items.length - shown.length) + ' more', html(MDM.icon('chevron-right', 14))) : null;
+        groups.push(el('div', { class: 'queue', 'data-queue': key },
+          el('a', { class: 'queue__head', href }, el('span', { class: 'queue__title' }, title), el('span', { class: 'queue__count mono' }, String(items.length)), html(MDM.icon('chevron-right', 16))),
+          el('div', { class: 'list' }, shown), more));
       };
-      const estText = o => 'estimated ' + money(o.estimate ? o.estimate.min : o.totals.total) + (o.estimate && o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '');
+      const estText = o => money(o.estimate ? o.estimate.min : o.totals.total) + (o.estimate && o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '');
       group('price', 'Price to confirm', q.quotes.map(o => MDM.priceToFinalise(o)
-        ? link(o, 'Collected, finalise from the proof of collection · ' + estText(o), MDM.ui.timeAgo(o.updatedAt))
-        : link(o, typeLabel(o) + ' · ' + estText(o) + ((o.packages || []).some(p => p.photoId) ? ' · photo attached' : ''), MDM.ui.timeAgo(o.createdAt))));
-      group('payments', 'Payments to verify', q.reviews.map(o => link(o, 'Transfer slip · ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total) + ' declared', MDM.ui.timeAgo(o.payment.submittedAt || o.updatedAt))));
-      group('failed', 'Failed collection or delivery', q.failed.map(o => {
+        ? link(o, 'Collected · finalise from proof · ' + estText(o), MDM.ui.timeAgo(o.updatedAt))
+        : link(o, typeLabel(o) + ' · ' + estText(o) + ((o.packages || []).some(p => p.photoId) ? ' · photo' : ''), MDM.ui.timeAgo(o.createdAt))));
+      group('payments', 'Payments to verify', q.reviews.map(o => link(o, 'Slip · ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total), MDM.ui.timeAgo(o.payment.submittedAt || o.updatedAt))));
+      group('failed', 'Failed attempts', q.failed.map(o => {
         const s = (o.route && o.route.stops || []).find(x => x.status === 'failed');
         const r = s && MDM.FAIL_REASONS.find(x => x.value === s.failReason);
-        return link(o, (r ? r.label : 'Could not complete') + ' · ' + (driverName(o.driverId, drivers) || 'driver') + ' is waiting for a decision', MDM.ui.timeAgo(o.updatedAt));
+        return link(o, (r ? r.label : 'Could not complete') + ' · ' + (driverName(o.driverId, drivers) || 'driver') + ' waiting', MDM.ui.timeAgo(o.updatedAt));
       }));
       group('cancels', 'Cancellation requests', q.cancels.map(o => link(o, (o.cancellation.reason || 'No reason given') + ' · ' + MDM.STATUS[o.status].label, MDM.ui.timeAgo(o.cancellation.requestedAt))));
       group('priority', 'Priority requests', q.priority.map(o => { const r = (o.priority.requests || []).slice().reverse().find(x => x.decision === 'pending') || {}; return link(o, (r.reason || 'Priority delivery') + (r.deadline ? ' · by ' + r.deadline : ''), MDM.ui.timeAgo(r.at || o.updatedAt)); }));
-      group('unassigned', 'Driver to assign', q.unassigned.map(o => link(o, routeText(o) + ' · ' + typeLabel(o) + (o.status === 'requested' ? ' · no photo, price after collection' : ''), MDM.ui.timeAgo(o.updatedAt))));
+      group('unassigned', 'Driver to assign', q.unassigned.map(o => link(o, routeText(o) + ' · ' + typeLabel(o) + (o.status === 'requested' ? ' · price after collection' : ''), MDM.ui.timeAgo(o.updatedAt))));
       const accountName = id => ((accounts || []).find(a => a.id === id) || {}).name || 'the business';
       group('returns', 'Returns to bring back', q.returns.map(o => {
         const c = o.cancellation || {}, prev = MDM.STATUS[c.previousStatus];
-        return link(o, 'Cancelled by ' + accountName(o.accountId) + (prev ? ' while ' + prev.label.toLowerCase() : '') + ' · ' + (driverName(o.driverId, drivers) || 'the driver') + ' brings it back', MDM.ui.timeAgo(o.cancelledAt || c.decidedAt || o.updatedAt));
+        return link(o, 'Cancelled by ' + accountName(o.accountId) + (prev ? ', ' + prev.label.toLowerCase() : '') + ' · with ' + (driverName(o.driverId, drivers) || 'the driver'), MDM.ui.timeAgo(o.cancelledAt || c.decidedAt || o.updatedAt));
       }));
       // Cash is owed per person, so these two queues list one row per driver and per business with the total.
       const cashRows = (list, keyOf, nameOf, kind, hrefOf) => {
@@ -383,7 +436,7 @@
             el('div', { class: 'list__aside mono' }, money(total)));
         });
       };
-      group('cashDrivers', 'Cash to receive from drivers', cashRows(q.cashFromDrivers, o => o.driverId, k => driverName(k, drivers) || 'Unassigned driver', 'cod-driver',
+      group('cashDrivers', 'Cash with drivers', cashRows(q.cashFromDrivers, o => o.driverId, k => driverName(k, drivers) || 'Unassigned driver', 'cod-driver',
         k => cashPage ? '#/cash' : '#/orders?driver=' + encodeURIComponent(k)));
       group('cashBusiness', 'Cash to pay businesses', cashRows(q.cashToBusinesses, o => o.accountId, k => accountName(k), 'cod-business',
         k => cashPage ? '#/cash' : '#/orders?account=' + encodeURIComponent(k)));
@@ -393,10 +446,10 @@
       if (can('team')) group('leave', 'Leave requests', leaves.map(l => el('a', { class: 'list__item list__item--link', href: '#/team?tab=leave', 'data-testid': 'attention-item', 'data-status': 'leave' },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, l.staffName || 'Employee'), el('div', { class: 'list__meta' }, ((MDM.LEAVE_TYPES.find(t => t.value === l.type) || {}).label || 'Leave') + ' · ' + plural(l.days, 'day') + ' from ' + fmtDay(l.from))),
         el('div', { class: 'list__aside' }, MDM.ui.timeAgo(l.createdAt)))));
-      if (can('business')) group('business', 'Business account requests', requests.map(r => el('a', { class: 'list__item list__item--link', href: '#/business', 'data-testid': 'attention-item', 'data-status': 'request' },
+      if (can('business')) group('business', 'Business requests', requests.map(r => el('a', { class: 'list__item list__item--link', href: '#/business', 'data-testid': 'attention-item', 'data-status': 'request' },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, r.name), el('div', { class: 'list__meta' }, r.contactName + ' · ' + MDM.geo.zoneLabel(r.zone))),
         el('div', { class: 'list__aside' }, MDM.ui.timeAgo(r.createdAt)))));
-      if (!groups.length) return emptyBlock('Nothing needs attention right now.', 'Prices to confirm, payment slips, failed stops, cancellations, priority requests, returns, cash on delivery and leave appear here.');
+      if (!groups.length) return el('div', { class: 'card' }, emptyBlock('All clear.', 'Nothing needs attention right now.'));
       return el('div', { class: 'queues', 'data-testid': 'attention-list' }, groups);
     }
     async function render() {
@@ -413,24 +466,25 @@
       const now = Date.now();
       const active = drivers.filter(d => d.status !== 'offline' && (d.status === 'on_route' || positions.some(p => p.driverId === d.id && now - new Date(p.at).getTime() < ONLINE_MS)));
       const delivered = orders.filter(o => o.status === 'delivered'), cancelled = orders.filter(o => o.status === 'cancelled');
-      v.slots.kpis.replaceChildren(
-        kpi('Total orders', orders.length, onDay(orders, o => o.createdAt) + ' placed today', 'total', 'package', '#/orders'),
-        kpi('Pending', n('requested'), 'waiting for a price, or a driver when there is no photo', 'pending', 'file', '#/orders?tab=price'),
-        kpi('Awaiting collection', n(AWAITING), 'confirmed, not collected yet', 'awaiting-collection', 'clock', '#/orders?tab=active'),
-        kpi('Collected', n('collected'), 'at the hub or with a driver', 'collected', 'package', '#/orders?status=collected'),
-        kpi('Out for delivery', n('out_for_delivery'), 'on the way to recipients', 'out-for-delivery', 'bike', '#/orders?status=out_for_delivery'),
-        kpi('Completed', delivered.length, onDay(delivered, o => deliveredAt(o)) + ' delivered today', 'completed', 'check-circle', '#/orders?tab=done'),
-        kpi('Failed', n('failed'), 'need a decision', 'failed', 'alert-triangle', '#/orders?tab=failed'),
-        kpi('Cancelled', cancelled.length, onDay(cancelled, o => o.cancelledAt || o.updatedAt) + ' today', 'cancelled', 'x', '#/orders?status=cancelled'),
-        kpi('Pending payments', pendingPay.length, money(pendingPay.reduce((t, o) => t + o.totals.total, 0)) + ' outstanding', 'pending-payments', 'receipt', '#/orders?payment=requested'),
-        kpi('Active drivers', active.length, 'of ' + drivers.length + ' on the team', 'active-drivers', 'users', can('drivers') ? '#/drivers' : null));
+      // Built on the first render, with its numbers, so the count-up starts from the real figures.
+      if (!v.tiles.total) buildTiles();
+      setTile('pending', n('requested'), 'Need a price');
+      setTile('awaiting-collection', n(AWAITING), 'Not collected yet');
+      setTile('collected', n('collected'), 'At hub or with driver');
+      setTile('out-for-delivery', n('out_for_delivery'), 'On the way');
+      setTile('completed', delivered.length, onDay(delivered, o => deliveredAt(o)) + ' today');
+      setTile('total', orders.length, onDay(orders, o => o.createdAt) + ' today');
+      setTile('failed', n('failed'), 'Need a decision');
+      setTile('cancelled', cancelled.length, onDay(cancelled, o => o.cancelledAt || o.updatedAt) + ' today');
+      setTile('pending-payments', pendingPay.length, money(pendingPay.reduce((t, o) => t + o.totals.total, 0)) + ' due');
+      setTile('active-drivers', active.length, 'of ' + drivers.length);
       v.slots.revenue.textContent = money(revenueToday) + ' received today';
       v.slots.attention.replaceChildren(attention(orders, requests, leaves, batches, drivers, accounts));
       const recent = orders.slice(0, 10);
-      const cols = ['code', 'customer', 'type', 'total', 'status', 'created'];
+      const cols = ['code', 'total', 'status', 'created'];
       v.slots.recent.replaceChildren(recent.length
-        ? el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'recent-orders' }, orderTableHead(cols), el('tbody', null, recent.map(o => orderRow(o, cols, { drivers })))))
-        : emptyBlock('No orders yet.', 'Orders placed on the site or created here appear in this list.'));
+        ? el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'recent-orders' }, orderTableHead(cols), el('tbody', null, recent.map(o => orderRow(o, cols, { drivers, narrow: true, who: true })))))
+        : emptyBlock('No orders yet.'));
       await syncRiders(drivers);
     }
     async function syncRiders(drivers) {
@@ -472,25 +526,26 @@
     return {
       title: 'Overview',
       async mount(host) {
-        v.host = host; v.alive = true; v.fitted = false;
-        v.slots.kpis = el('div', { class: 'kpi-row kpi-row--fluid', 'data-testid': 'overview-kpis' });
-        v.slots.attention = el('div', { class: 'card' });
+        v.host = host; v.alive = true; v.fitted = false; v.tiles = {};
+        v.slots.kpis = el('div', { class: 'kpi-row kpi-row--overview', 'data-testid': 'overview-kpis' });
+        v.slots.attention = el('div', { class: 'attention' });
         v.slots.recent = el('div', { class: 'card' });
         v.mapEl = el('div', { class: 'map map--short', 'data-testid': 'overview-map' }, el('div', { class: 'skeleton', style: { height: '100%' } }));
-        v.slots.riders = el('p', { class: 'map-legend', 'data-testid': 'overview-riders' });
-        const attentionSec = section('attention', 'Needs attention', null, el('a', { href: '#/orders' }, 'See all orders'));
+        v.slots.riders = el('p', { class: 'overview-riders', 'data-testid': 'overview-riders' });
+        const more = (href, text) => el('a', { class: 'section-link', href }, text, html(MDM.icon('chevron-right', 14)));
+        const attentionSec = section('attention', 'Needs attention', null, more('#/orders', 'All orders'));
         attentionSec.appendChild(v.slots.attention);
-        const ridersSec = section('riders', 'Drivers online', null, can('live') ? el('a', { href: '#/live' }, 'Open the live map') : null);
-        ridersSec.append(v.mapEl, v.slots.riders);
-        const recentSec = section('recent', 'Recent orders', 'The 10 newest orders. Click a row to open it.', el('a', { href: '#/orders' }, 'See all orders'));
+        const ridersSec = section('riders', 'Drivers online', null, can('live') ? more('#/live', 'Live map') : null);
+        ridersSec.appendChild(el('div', { class: 'card overview-map' }, v.mapEl, v.slots.riders));
+        const recentSec = section('recent', 'Recent orders', null, more('#/orders', 'All orders'));
         recentSec.appendChild(v.slots.recent);
         const s = state.session || {};
         v.slots.revenue = el('a', { href: can('reports') ? '#/reports' : '#/orders?payment=paid', 'data-testid': 'overview-revenue' });
         host.append(
-          el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, greeting() + (s.name ? ', ' + s.name.split(' ')[0] : '')), el('p', { class: 'page-head__desc' }, todayLine() + ' · ', v.slots.revenue, ' · Click a figure to see its orders.')),
+          el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, greeting() + (s.name ? ', ' + s.name.split(' ')[0] : '')), el('p', { class: 'page-head__desc' }, todayLine() + ' · ', v.slots.revenue)),
           v.slots.kpis,
-          el('div', { class: 'admin-grid' }, attentionSec, ridersSec),
-          recentSec);
+          attentionSec,
+          el('div', { class: 'admin-grid admin-grid--overview' }, recentSec, ridersSec));
         await render();
         const schedule = () => { clearTimeout(v.timer); v.timer = setTimeout(() => render().catch(() => {}), 40); };
         ['orders', 'business_requests', 'business_accounts', 'drivers', 'leaves', 'batches'].forEach(c => v.unsubs.push(MDM.store.subscribe(c, schedule)));

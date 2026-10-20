@@ -20,7 +20,7 @@
   const diffText = v => v === 0 ? 'None' : (v > 0 ? '+' : '') + money(v);
 
   MDM.admin.views.cash = (function () {
-    let ctx = null, root = null, tabsEl = null, filtersEl = null, body = null, tab = 'cod', range = null, account = '';
+    let ctx = null, root = null, tabsEl = null, filtersEl = null, body = null, tab = 'cod', range = null, account = '', enterNext = false;
     const TABS = [{ value: 'cod', label: 'Cash on delivery' }, { value: 'charges', label: 'Naalu and charges' }];
     const PRESETS = [{ value: '7d', label: '7 days' }, { value: '30d', label: '30 days' }, { value: 'month', label: 'This month' }, { value: 'last', label: 'Last month' }];
     function preset(p) {
@@ -40,7 +40,7 @@
       ctx = K.context(); root = host;
       readQuery(params);
       tabsEl = el('div', { class: 'cash-tabs' }); filtersEl = el('div', { class: 'cash-filters' }); body = el('div', { class: 'stack-6' });
-      root.replaceChildren(pageHead('Cash & COD', 'Cash our drivers collect for business customers: receive it from the driver, then pay it to the business. Naalu and other charges drivers paid on the way: reimburse the driver and bill the customer.'), tabsEl, filtersEl, body);
+      root.replaceChildren(pageHead('Cash & COD', 'Receive cash from drivers, pay businesses, reimburse charges.'), tabsEl, filtersEl, body);
       ['orders', 'drivers', 'business_accounts'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
       await render();
@@ -52,10 +52,12 @@
     async function render() {
       const [orders, drivers, accounts] = await Promise.all([MDM.store.list('orders', { order: 'code' }), MDM.store.list('drivers', { order: 'name' }), MDM.store.list('business_accounts')]);
       if (!ctx || !ctx.alive) return;
-      tabsEl.replaceChildren(tabs(TABS, tab, t => { tab = t; setQuery(); ctx.schedule(render); }, 'cash-tab'));
+      tabsEl.replaceChildren(tabs(TABS, tab, t => { tab = t; enterNext = true; setQuery(); ctx.schedule(render); }, 'cash-tab'));
       filtersEl.replaceChildren(filters(accounts));
       const data = { orders, drivers, accounts, driverName: id => F.driverName(id, drivers) || 'Driver', accountName: id => (accounts.find(a => a.id === id) || {}).name || 'Business' };
       if (tab === 'charges') body.replaceChildren(...chargesTab(data)); else body.replaceChildren(...codTab(data));
+      // A tab switch eases the new panel in once; live re-renders do not.
+      if (enterNext) { enterNext = false; if (MDM.motion) MDM.motion.enter(body); }
     }
     function filters(accounts) {
       const from = dateInput('cash-from', range.from, 'From'), to = dateInput('cash-to', range.to, 'To');
@@ -81,9 +83,9 @@
       const kpis = el('div', { class: 'kpi-row kpi-row--fluid', 'data-testid': 'cash-kpis' },
         kpi('With drivers', money(sumGot(withDrivers)), plural(withDrivers.length, 'order') + ' to receive', 'cash-drivers'),
         kpi('With the office', money(sumGot(withOffice)), plural(withOffice.length, 'order') + ' to pay out', 'cash-office'),
-        kpi('To collect', money(sumDue(pending)), plural(pending.length, 'order') + ' not delivered yet', 'cash-pending'),
-        kpi('Paid to businesses', money(sumGot(paid)), plural(paid.length, 'order') + ' in this period', 'cash-paid'),
-        kpi('Cash differences', diffText(diffs.reduce((t, o) => t + variance(o.cod), 0)), plural(diffs.length, 'order') + ' in this period', 'cash-variance'));
+        kpi('To collect', money(sumDue(pending)), plural(pending.length, 'order') + ' not delivered', 'cash-pending'),
+        kpi('Paid to businesses', money(sumGot(paid)), plural(paid.length, 'order') + ' in period', 'cash-paid'),
+        kpi('Cash differences', diffText(diffs.reduce((t, o) => t + variance(o.cod), 0)), plural(diffs.length, 'order') + ' in period', 'cash-variance'));
 
       // Cash with drivers, by driver: "Receive cash" → MDM.store.cashHandover.
       const byDriver = {};
@@ -145,15 +147,15 @@
       const issues = notCollected.concat(diffs.filter(o => notCollected.indexOf(o) < 0));
       const scope = account ? ' for ' + d.accountName(account) : '';
       return [kpis,
-        el('section', { 'aria-labelledby': 'cash-drv' }, sectionHead('cash-drv', 'Cash with drivers', 'Collected on delivery and not yet handed in' + scope + ', any date. Count the cash, then receive it.'),
-          driverCards.length ? el('div', { class: 'stack-4' }, driverCards) : card(null, empty('No cash with drivers.', 'Cash drivers collect on proof of delivery shows here until it is handed in.'))),
-        el('section', { 'aria-labelledby': 'cash-off' }, sectionHead('cash-off', 'With the office, to pay businesses', 'Cash handed in by drivers' + scope + ', any date. Pay each business and record the transfer reference.'),
-          officeCards.length ? el('div', { class: 'stack-4' }, officeCards) : card(null, empty('Nothing to pay out.', 'Cash received from drivers waits here until it is paid to the business.'))),
-        el('section', { 'aria-labelledby': 'cash-pend' }, sectionHead('cash-pend', 'To collect', 'Orders with cash on delivery that are not delivered yet' + scope + '.'),
+        el('section', { 'aria-labelledby': 'cash-drv' }, sectionHead('cash-drv', 'Cash with drivers', 'Not handed in yet' + scope + ' · any date'),
+          driverCards.length ? el('div', { class: 'stack-4' }, driverCards) : card(null, empty('No cash with drivers.'))),
+        el('section', { 'aria-labelledby': 'cash-off' }, sectionHead('cash-off', 'To pay businesses', 'Handed in by drivers' + scope + ' · any date'),
+          officeCards.length ? el('div', { class: 'stack-4' }, officeCards) : card(null, empty('Nothing to pay out.'))),
+        el('section', { 'aria-labelledby': 'cash-pend' }, sectionHead('cash-pend', 'To collect', 'Not delivered yet' + scope),
           card(null, pending.length ? table(pendingCols, pending.map(o => ({ data: o, attrs: { 'data-testid': 'cash-pending-row', 'data-code': o.code } })), { testid: 'cash-pending' }) : empty('Nothing to collect.'))),
-        el('section', { 'aria-labelledby': 'cash-paid' }, sectionHead('cash-paid', 'Paid to businesses', 'Cash paid out in this period, with the transfer reference.', csvBtn('cash-export-paid', 'Paid to businesses', () => [['Paid', 'Order', 'Business', 'Reference', 'Paid by', 'Amount MVR']].concat(paid.map(o => [o.cod.remittedAt, o.code, d.accountName(o.accountId), o.cod.remittanceRef || '', F.byLabel(o.cod.remittedBy), o.cod.collectedAmount || 0])), 'paid')),
+        el('section', { 'aria-labelledby': 'cash-paid' }, sectionHead('cash-paid', 'Paid to businesses', 'In this period', csvBtn('cash-export-paid', 'Paid to businesses', () => [['Paid', 'Order', 'Business', 'Reference', 'Paid by', 'Amount MVR']].concat(paid.map(o => [o.cod.remittedAt, o.code, d.accountName(o.accountId), o.cod.remittanceRef || '', F.byLabel(o.cod.remittedBy), o.cod.collectedAmount || 0])), 'paid')),
           card(null, paid.length ? table(paidCols, paid.map(o => ({ data: o, attrs: { 'data-testid': 'cash-paid-row', 'data-code': o.code } })), { testid: 'cash-paid' }) : empty('Nothing paid in this period.'))),
-        el('section', { 'aria-labelledby': 'cash-diff' }, sectionHead('cash-diff', 'Not collected and cash differences', 'Orders where the driver brought back less or more than expected, or no cash at all, in this period.'),
+        el('section', { 'aria-labelledby': 'cash-diff' }, sectionHead('cash-diff', 'Not collected and differences', 'In this period'),
           card(null, issues.length ? table(issueCols, issues.map(o => ({ data: o, attrs: { 'data-testid': 'cash-issue-row', 'data-code': o.code } })), { testid: 'cash-issues' }) : empty('No differences in this period.')))];
     }
     function diffCell(v) { return el('span', { class: v < 0 ? 'cash-diff cash-diff--short' : v > 0 ? 'cash-diff cash-diff--over' : 'cash-diff' }, diffText(v)); }
@@ -168,8 +170,8 @@
     }
     async function receive(driverId, name, list) {
       const total = list.reduce((t, o) => t + (o.cod.collectedAmount || 0), 0);
-      const v = await MDM.ui.dialog({ title: 'Receive cash from ' + name, message: 'Count the cash: ' + money(total) + ' for ' + plural(list.length, 'order') + '. Untick an order if its cash is not in the envelope.', okLabel: 'Receive cash',
-        fields: pickFields(list, o => o.cod.collectedAmount || 0).concat([{ name: 'reference', label: 'Handover reference', type: 'text', placeholder: 'Cash sheet ' + MDM.ui.fmtDate(new Date(), { dateOnly: true }), hint: 'Optional, for example the cash sheet or envelope number' }]),
+      const v = await MDM.ui.dialog({ title: 'Receive cash from ' + name, message: 'Count ' + money(total) + ' for ' + plural(list.length, 'order') + '. Untick any order whose cash is missing.', okLabel: 'Receive cash',
+        fields: pickFields(list, o => o.cod.collectedAmount || 0).concat([{ name: 'reference', label: 'Handover reference', type: 'text', placeholder: 'Cash sheet ' + MDM.ui.fmtDate(new Date(), { dateOnly: true }), hint: 'Optional: cash sheet or envelope number' }]),
         validate: vals => list.some(o => vals['o_' + o.id]) ? null : 'Tick at least one order' });
       if (!v) return;
       const ids = list.filter(o => v['o_' + o.id]).map(o => o.id);
@@ -180,8 +182,8 @@
     }
     async function remit(accountId, name, list) {
       const total = list.reduce((t, o) => t + (o.cod.collectedAmount || 0), 0);
-      const v = await MDM.ui.dialog({ title: 'Pay ' + name, message: 'Pay the cash collected for ' + name + ': ' + money(total) + ' for ' + plural(list.length, 'order') + '. The business is told and sees the payment on its orders.', okLabel: 'Record payment',
-        fields: pickFields(list, o => o.cod.collectedAmount || 0).concat([{ name: 'reference', label: 'Transfer reference', type: 'text', required: true, placeholder: 'FT-88214', hint: 'The bank transfer reference, or "Cash" with the receipt number' }]),
+      const v = await MDM.ui.dialog({ title: 'Pay ' + name, message: money(total) + ' for ' + plural(list.length, 'order') + '. The business is told.', okLabel: 'Record payment',
+        fields: pickFields(list, o => o.cod.collectedAmount || 0).concat([{ name: 'reference', label: 'Transfer reference', type: 'text', required: true, placeholder: 'FT-88214', hint: 'Bank reference, or "Cash" and receipt number' }]),
         validate: vals => list.some(o => vals['o_' + o.id]) ? null : 'Tick at least one order' });
       if (!v) return;
       const ids = list.filter(o => v['o_' + o.id]).map(o => o.id);
@@ -209,11 +211,11 @@
       const sum = list => list.reduce((t, x) => t + x.c.amount, 0);
       const owedDrivers = {}; owed.forEach(x => { const k = payerOf(x); (owedDrivers[k] = owedDrivers[k] || []).push(x); });
       const kpis = el('div', { class: 'kpi-row kpi-row--fluid', 'data-testid': 'charges-kpis' },
-        kpi('Owed to drivers', money(sum(owed)), plural(owed.length, 'charge') + ' · ' + plural(Object.keys(owedDrivers).length, 'driver') + ', any date', 'owed'),
-        kpi('Reimbursed', money(sum(reimbursed)), plural(reimbursed.length, 'charge') + ' in this period', 'reimbursed'),
+        kpi('Owed to drivers', money(sum(owed)), plural(owed.length, 'charge') + ' · ' + plural(Object.keys(owedDrivers).length, 'driver'), 'owed'),
+        kpi('Reimbursed', money(sum(reimbursed)), plural(reimbursed.length, 'charge') + ' in period', 'reimbursed'),
         kpi('Naalu paid', money(sum(naalu)), plural(naalu.length, 'payment') + ' · ' + money(sum(naalu.filter(x => x.c.billable))) + ' billed', 'naalu'),
         kpi('Packing and other', money(sum(others)), money(sum(others.filter(x => x.c.type === 'packing'))) + ' packing · ' + (others.some(x => x.c.type === 'cargo') ? money(sum(others.filter(x => x.c.type === 'cargo'))) + ' Maldivian Cargo · ' : '') + money(sum(others.filter(x => x.c.type === 'other'))) + ' other', 'other'),
-        kpi('Not billed', money(sum(all.filter(x => !x.c.billable))), 'paid by us, not charged', 'unbilled'));
+        kpi('Not billed', money(sum(all.filter(x => !x.c.billable))), 'Paid by us', 'unbilled'));
 
       // Owed to drivers, any date: one card per driver with "Reimburse" → MDM.store.reimburseCharges.
       const owedCols = [
@@ -272,13 +274,13 @@
       ];
       const chargesCsv = () => [['Date', 'Order', 'Charge', 'Description', 'Recorded', 'Paid by', 'Amount MVR', 'Billed', 'Reimbursement']].concat(others.map(x => [dayKey(x.c.at), x.o.code, chargeName(x.c), x.c.description || '', K.STAGE[x.c.stage] || x.c.stage || '', payerName(x), x.c.amount, x.c.billable ? 'yes' : 'no', statusText(x)]));
       return [kpis,
-        el('section', { 'aria-labelledby': 'owed-sec' }, sectionHead('owed-sec', 'Owed to drivers', 'Naalu, packing, Maldivian Cargo and other charges drivers paid out of their own pocket and not reimbursed yet, any date. Pay the driver, then record it with the voucher or transfer reference.'),
-          owedCards.length ? el('div', { class: 'stack-4', 'data-testid': 'owed-list' }, owedCards) : card(null, empty('Nothing owed to drivers.', 'Charges a driver pays on proof of collection or delivery show here until they are reimbursed.'))),
-        el('section', { 'aria-labelledby': 'naalu-sec' }, sectionHead('naalu-sec', 'Naalu reconciliation', 'Naalu paid when collecting from or delivering to a boat in this period, by driver and day, and whether it was reimbursed.', csvBtn('naalu-export', 'Naalu', naaluCsv, 'naalu')),
-          naaluCards.length ? el('div', { class: 'stack-4', 'data-testid': 'naalu-list' }, naaluCards) : card(null, empty('No naalu in this period.', 'Drivers record naalu on proof of collection or delivery.'))),
-        el('section', { 'aria-labelledby': 'reimb-sec' }, sectionHead('reimb-sec', 'Reimbursed to drivers', 'Charges paid back to drivers in this period, with the reference.', csvBtn('reimbursed-export', 'Reimbursements', reimbCsv, 'reimbursed')),
+        el('section', { 'aria-labelledby': 'owed-sec' }, sectionHead('owed-sec', 'Owed to drivers', 'Paid from their own pocket · any date'),
+          owedCards.length ? el('div', { class: 'stack-4', 'data-testid': 'owed-list' }, owedCards) : card(null, empty('Nothing owed to drivers.'))),
+        el('section', { 'aria-labelledby': 'naalu-sec' }, sectionHead('naalu-sec', 'Naalu', 'By driver and day · in this period', csvBtn('naalu-export', 'Naalu', naaluCsv, 'naalu')),
+          naaluCards.length ? el('div', { class: 'stack-4', 'data-testid': 'naalu-list' }, naaluCards) : card(null, empty('No naalu in this period.'))),
+        el('section', { 'aria-labelledby': 'reimb-sec' }, sectionHead('reimb-sec', 'Reimbursed to drivers', 'In this period', csvBtn('reimbursed-export', 'Reimbursements', reimbCsv, 'reimbursed')),
           card(null, reimbursed.length ? table(reimbCols, reimbursed.map(x => ({ data: x, attrs: { 'data-testid': 'reimbursed-row', 'data-code': x.o.code, 'data-charge-id': x.c.id } })), { testid: 'reimbursed-table' }) : empty('Nothing reimbursed in this period.'))),
-        el('section', { 'aria-labelledby': 'charges-sec' }, sectionHead('charges-sec', 'Packing and other charges', 'Packing, Maldivian Cargo and other charges recorded on proof of delivery or by the office in this period. Billed charges are on the customer\'s price.', csvBtn('charges-export', 'Charges', chargesCsv, 'charges')),
+        el('section', { 'aria-labelledby': 'charges-sec' }, sectionHead('charges-sec', 'Packing and other charges', 'In this period · billed ones are on the customer\'s price', csvBtn('charges-export', 'Charges', chargesCsv, 'charges')),
           card(null, others.length ? table(chargeCols, others.map(x => ({ data: x, attrs: { 'data-testid': 'charge-row', 'data-code': x.o.code, 'data-type': x.c.type } })), { testid: 'charges-table' }) : empty('No packing or other charges in this period.')))];
     }
     function reimbursedBadge(x) {
@@ -287,9 +289,9 @@
     }
     async function reimburse(driverId, name, list) {
       const total = list.reduce((t, x) => t + x.c.amount, 0);
-      const v = await MDM.ui.dialog({ title: 'Reimburse ' + name, message: 'Pay ' + name + ' ' + money(total) + ' for ' + plural(list.length, 'charge') + ' paid on the job. Untick a charge you are not paying now.', okLabel: 'Record reimbursement',
+      const v = await MDM.ui.dialog({ title: 'Reimburse ' + name, message: money(total) + ' for ' + plural(list.length, 'charge') + '. Untick any you are not paying now.', okLabel: 'Record reimbursement',
         fields: list.map(x => ({ name: 'c_' + x.c.id, label: x.o.code + ' · ' + chargeName(x.c) + ' ' + (K.STAGE[x.c.stage] || '').toLowerCase() + ' · ' + money(x.c.amount), type: 'checkbox', value: true }))
-          .concat([{ name: 'reference', label: 'Reimbursement reference', type: 'text', required: true, placeholder: 'PCV-0412', hint: 'The petty cash voucher or bank transfer reference' }]),
+          .concat([{ name: 'reference', label: 'Reimbursement reference', type: 'text', required: true, placeholder: 'PCV-0412', hint: 'Petty cash voucher or transfer reference' }]),
         validate: vals => list.some(x => vals['c_' + x.c.id]) ? null : 'Tick at least one charge' });
       if (!v) return;
       const ids = list.filter(x => v['c_' + x.c.id]).map(x => x.c.id);

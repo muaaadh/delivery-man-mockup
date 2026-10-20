@@ -26,8 +26,10 @@
     c.schedule = fn => { if (c.pending) return; c.pending = setTimeout(() => { c.pending = null; if (c.alive) fn().catch(e => setTimeout(() => { throw e; }, 0)); }, 0); };
     return c;
   }
-  function pageHead(title, desc, actions) {
-    return el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, title), desc ? el('p', { class: 'page-head__desc' }, desc) : null,
+  // back = { href, label }: a "‹ label" link above the title of a detail page.
+  function pageHead(title, desc, actions, back) {
+    return el('div', { class: 'page-head' }, back ? el('a', { class: 'back-link', href: back.href, 'data-testid': 'back-link' }, icon('chevron-left', 18), back.label) : null,
+      el('h1', { tabindex: '-1' }, title), desc ? el('p', { class: 'page-head__desc' }, desc) : null,
       actions && actions.filter(Boolean).length ? el('div', { class: 'page-head__actions' }, actions.filter(Boolean)) : null);
   }
   function sectionHead(id, title, desc, action) {
@@ -62,7 +64,7 @@
   }
   function dateInput(name, value, aria) { return el('input', { class: 'input', type: 'date', name, value: value || '', 'aria-label': aria, 'data-testid': name }); }
   // Shown under the date filters when From is after To, so an empty report is not mistaken for "nothing happened".
-  const rangeWarning = () => el('div', { class: 'alert alert--warn range-warning', role: 'status', 'data-testid': 'range-warning' }, icon('alert-triangle'), el('div', { class: 'alert__body' }, 'The start date is after the end date, so nothing can match. Pick a start date on or before the end date.'));
+  const rangeWarning = () => el('div', { class: 'alert alert--warn range-warning', role: 'status', 'data-testid': 'range-warning' }, icon('alert-triangle'), el('div', { class: 'alert__body' }, 'The start date is after the end date, so nothing matches.'));
   const inRange = (iso, from, to) => { const d = iso ? dayKey(iso) : ''; return !!d && (!from || d >= from) && (!to || d <= to); };
   const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const queryOf = p => p && p.query instanceof URLSearchParams ? p.query : new URLSearchParams();
@@ -129,16 +131,17 @@
         { label: 'Created', nowrap: true, render: b => F.whenCell(b.createdAt) },
       ];
       root.replaceChildren(
-        pageHead(acc ? 'Bulk orders · ' + acc.name : 'Bulk orders', 'Business packages collected in one go, sorted by zone and delivered by the zone\'s driver. Every package is its own trackable order with its size category, rate and any cash to collect.',
-          [acc ? el('a', { class: 'btn btn--ghost', href: '#/bulk' }, 'All businesses') : null, el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'bulk-new', on: { click: () => run(() => newBatch(accounts, account)) } }, icon('plus'), 'New bulk order')]),
+        pageHead('Bulk orders', null,
+          [acc ? el('a', { class: 'btn btn--ghost', href: '#/bulk' }, 'All businesses') : null, el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'bulk-new', on: { click: () => run(() => newBatch(accounts, account)) } }, icon('plus'), 'New bulk order')],
+          acc ? { href: '#/business/' + encodeURIComponent(acc.id), label: acc.name } : null),
         card(null, list.length ? table(cols, list.map(b => ({ data: b, attrs: { class: 'is-clickable', 'data-testid': 'bulk-row', 'data-batch-id': b.id, on: { click: e => { if (e.target.closest('a, button')) return; location.hash = '#/bulk/' + encodeURIComponent(b.id); } } } })), { testid: 'bulk-table' })
-          : empty('No bulk orders yet.', 'Create one for a business account, or the business uploads it from their portal.')));
+          : empty('No bulk orders yet.', 'Create one, or the business uploads it.')));
     }
     async function renderDetail() {
       const [b, orders, drivers, zones, settings] = await Promise.all([MDM.store.get('batches', id), MDM.store.list('orders', { order: 'code' }), MDM.store.list('drivers'), MDM.store.list('zones', { order: 'createdAt' }), MDM.store.settings()]);
       const acc = b ? await MDM.store.get('business_accounts', b.accountId) : null;
       if (!ctx || !ctx.alive) return;
-      if (!b) { root.replaceChildren(pageHead('Bulk order not found'), card(null, empty('This bulk order does not exist in this browser.', null, el('a', { class: 'btn btn--secondary btn--sm', href: '#/bulk' }, 'All bulk orders')))); return; }
+      if (!b) { root.replaceChildren(pageHead('Bulk order not found', null, null, { href: '#/bulk', label: 'Bulk orders' }), card(null, empty('Not in this browser.'))); return; }
       const kids = orders.filter(o => o.batchId === b.id).sort((x, y) => (x.batchIndex || 0) - (y.batchIndex || 0));
       const st = MDM.store._batchStatus(b);
       const cod = codTotals(kids);
@@ -149,7 +152,6 @@
       const point = ((acc && acc.collectionPoints) || []).find(p => p.id === (b.collectionPointId || c.pointId)) || null;
       const preferred = b.preferredTime || c.preferredTime || '';
       const actions = [
-        el('a', { class: 'btn btn--ghost', href: '#/bulk' }, 'All bulk orders'),
         el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?batch=' + encodeURIComponent(b.id)), target: '_blank', rel: 'noopener', 'data-testid': 'bulk-labels' }, icon('printer'), 'Print labels'),
         b.status === 'confirmed' ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-collected', on: { click: () => run(async () => { await MDM.store.batchCollected(b.id, { by: by() }); toast(b.code + ' collected, packages at the hub'); }) } }, 'Mark collected') : null,
         unassigned.length ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-zone', on: { click: () => run(async () => { const r = await MDM.store.assignByZone(b.id, { by: by() }); toast(plural(r.assigned, 'package') + ' assigned by zone' + (r.unmatched ? ', ' + r.unmatched + ' with no zone driver' : ''), r.unmatched ? 'warn' : 'ok'); }) } }, 'Assign by zone') : null,
@@ -159,7 +161,7 @@
       const summary = el('div', { class: 'rate-table' },
         rowNode('Status', badge(s[0], s[1], { 'data-testid': 'bulk-status', 'data-status': st.status })),
         rowNode('Business', el('a', { href: '#/business/' + encodeURIComponent(b.accountId) }, b.name)),
-        rowNode('Collection point', el('span', { 'data-testid': 'bulk-point' }, point ? point.label : 'Address entered on the order', point && point.isDefault ? el('small', null, 'Default collection point') : null)),
+        rowNode('Collection point', el('span', { 'data-testid': 'bulk-point' }, point ? point.label : 'Address on the order', point && point.isDefault ? el('small', null, 'Default') : null)),
         rowNode('Collect from', el('span', null, c.address || '', el('small', null, [MDM.geo.zoneLabel(c.zone), c.landmark, [c.contactName, c.contactPhone ? phone.format(c.contactPhone) : ''].filter(Boolean).join(' · '), c.instructions].filter(Boolean).join(' · ')))),
         rowNode('Preferred time', el('span', { 'data-testid': 'bulk-preferred' }, preferred || 'Any time')),
         rowNode('Service', F.LEVEL[b.serviceLevel] || 'Normal'),
@@ -197,22 +199,22 @@
           { label: 'Actions', actions: true, render: o => el('div', { class: 'table__actions-row bulk-actions' }, rowActions(o, drivers, zones)) },
         ];
         return el('section', { class: 'bulk-zone', 'aria-labelledby': 'bz-' + zk, 'data-zone': zk },
-          sectionHead('bz-' + zk, (z ? z.name : MDM.geo.zoneLabel(zk)) + ' · ' + plural(byZone[zk].length, 'package'), zd.length ? 'Zone drivers: ' + zd.join(', ') : 'No driver assigned to this zone yet'),
+          sectionHead('bz-' + zk, (z ? z.name : MDM.geo.zoneLabel(zk)) + ' · ' + plural(byZone[zk].length, 'package'), zd.length ? zd.join(', ') : 'No zone driver yet'),
           card(null, table(cols, byZone[zk].map(o => ({ data: o, attrs: { 'data-testid': 'bulk-package', 'data-order-id': o.id, 'data-code': o.code, 'data-status': o.status } })), { testid: 'bulk-packages-' + zk })));
       });
       const returnAlert = returns.length ? el('div', { class: 'alert alert--warn', role: 'status', 'data-testid': 'bulk-returns' }, icon('alert-triangle'),
-        el('div', { class: 'alert__body' }, el('strong', null, plural(returns.length, 'cancelled package') + ' to bring back. '), returns.map(o => o.code + (o.driverId ? ' with ' + F.driverName(o.driverId, drivers) : '')).join(', ') + '. ' + b.name + ' cancelled after collection; the driver returns the package and marks it returned.')) : null;
+        el('div', { class: 'alert__body' }, el('strong', null, plural(returns.length, 'cancelled package') + ' to bring back: '), returns.map(o => o.code + (o.driverId ? ' with ' + F.driverName(o.driverId, drivers) : '')).join(', ') + '.')) : null;
       root.replaceChildren(
-        pageHead(b.code + ' · ' + b.name, plural(st.total, 'package') + ' · ' + money(st.amount) + ' on the monthly invoice' + (cod.n ? ' · ' + money(cod.amount) + ' cash on delivery' : '') + ' · collect from ' + (point ? point.label : (c.address || 'the business')) + (preferred ? ' at ' + preferred : ''), actions),
-        el('div', { class: 'kpi-row kpi-row--fluid kpi-row--bulk' }, kpi('Packages', st.total, null, 'bulk-total'), kpi('Collected', kids.filter(o => o.status !== 'confirmed').length, 'at the hub or later', 'bulk-collected'),
+        pageHead(b.code + ' · ' + b.name, plural(st.total, 'package') + ' · ' + money(st.amount) + ' invoiced' + (cod.n ? ' · ' + money(cod.amount) + ' cash' : '') + ' · from ' + (point ? point.label : (c.address || 'the business')) + (preferred ? ' at ' + preferred : ''), actions, { href: '#/bulk', label: 'Bulk orders' }),
+        el('div', { class: 'kpi-row kpi-row--fluid kpi-row--bulk' }, kpi('Packages', st.total, null, 'bulk-total'), kpi('Collected', kids.filter(o => o.status !== 'confirmed').length, 'At the hub or later', 'bulk-collected'),
           kpi('Out for delivery', st.out, null, 'bulk-out'), kpi('Delivered', st.delivered, null, 'bulk-delivered'),
           kpi('Cancelled or failed', st.cancelled + st.failed, [st.cancelled + ' cancelled', st.failed + ' failed', returns.length ? returns.length + ' to return' : ''].filter(Boolean).join(' · '), 'bulk-cancelled'),
-          kpi('Cash on delivery', money(cod.amount), plural(cod.n, 'order') + ' · ' + money(cod.collected) + ' collected', 'bulk-cod')),
+          kpi('Cash on delivery', money(cod.amount), money(cod.collected) + ' collected', 'bulk-cod')),
         ...(returnAlert ? [returnAlert] : []),
         el('div', { class: 'admin-grid admin-grid--wide' }, el('section', { 'aria-labelledby': 'bulk-sum' }, sectionHead('bulk-sum', 'Collection'), card(null, el('div', { class: 'card__body' }, summary))),
           el('div', { class: 'stack-6' },
             el('section', { 'aria-labelledby': 'bulk-prog' }, sectionHead('bulk-prog', 'Progress'), card(null, el('div', { class: 'card__body stack-4' }, progress(st.delivered, st.total, st.out + ' out now'),
-              el('p', { class: 'muted small' }, unassigned.length ? plural(unassigned.length, 'package') + ' still need a driver. "Assign by zone" gives each package to the first driver of its delivery zone.' : 'Every package has a driver.')))),
+              el('p', { class: 'muted small' }, unassigned.length ? plural(unassigned.length, 'package') + ' need a driver.' : 'Every package has a driver.')))),
             el('section', { 'aria-labelledby': 'bulk-tot' }, sectionHead('bulk-tot', 'Totals'), card(null, el('div', { class: 'card__body' }, totals))))),
         ...zoneCards);
     }
@@ -238,7 +240,7 @@
     // §5.3 note: the speedboat changed or the driver missed it; the driver, the office and the business are told.
     async function editBoat(o) {
       const bt = (o.delivery || {}).boat || {};
-      const v = await MDM.ui.dialog({ title: 'Boat details for ' + o.code, message: 'Change the vessel or departure if the boat changed or the package goes on the next one. The driver and the business are told.', okLabel: 'Save boat details',
+      const v = await MDM.ui.dialog({ title: 'Boat details for ' + o.code, message: 'The driver and the business are told.', okLabel: 'Save boat details',
         fields: [
           { name: 'vesselType', label: 'Vessel', type: 'select', options: MDM.VESSEL_TYPES, value: bt.vesselType || 'speedboat' },
           { name: 'name', label: 'Boat, ferry or speedboat name', type: 'text', required: true, value: bt.name || '' },
@@ -256,14 +258,14 @@
     async function cancelOne(o) {
       const withUs = ['collected', 'out_for_delivery'].indexOf(o.status) >= 0;
       const v = await MDM.ui.dialog({ title: 'Cancel ' + o.code, danger: true, okLabel: 'Cancel this order', cancelLabel: 'Keep it',
-        message: withUs ? 'The package is already with us' + (o.status === 'out_for_delivery' ? ' and out for delivery' : '') + '. The driver is told not to deliver it and to bring it back to the business; the rest of the bulk order is not affected.' : 'Not collected yet: the driver skips this package. The rest of the bulk order is not affected.',
+        message: withUs ? 'Already with us: the driver brings it back to the business. The rest of the bulk order is not affected.' : 'Not collected yet: the driver skips it. The rest of the bulk order is not affected.',
         fields: [{ name: 'reason', label: 'Reason', type: 'textarea', rows: 2, required: true, placeholder: 'Their customer cancelled the order' }] });
       if (!v) return;
       await MDM.store.businessCancel(o.id, { reason: v.reason, by: by() });
       toast(o.code + ' cancelled' + (withUs ? ', return to the business pending' : ''), withUs ? 'warn' : 'ok');
     }
     async function markReturned(o) {
-      const v = await MDM.ui.dialog({ title: 'Returned ' + o.code, message: 'Confirm the cancelled package is back with the business.', okLabel: 'Mark returned',
+      const v = await MDM.ui.dialog({ title: 'Returned ' + o.code, message: 'The package is back with the business.', okLabel: 'Mark returned',
         fields: [{ name: 'note', label: 'Note', type: 'text', placeholder: 'Handed to Ahmed at the shop' }] });
       if (!v) return;
       await MDM.store.markReturned(o.id, { note: v.note, by: by() });
@@ -336,7 +338,7 @@
       let acc = approved.find(a => a.id === preset);
       if (!acc && approved.length === 1) acc = approved[0];
       if (!acc) {
-        const pick = await MDM.ui.dialog({ title: 'New bulk order', message: 'Which business is it for?', okLabel: 'Next',
+        const pick = await MDM.ui.dialog({ title: 'New bulk order', okLabel: 'Next',
           fields: [{ name: 'accountId', label: 'Business account', type: 'select', options: approved.map(a => ({ value: a.id, label: a.name })), value: approved[0].id }] });
         if (!pick) return;
         acc = approved.find(a => a.id === pick.accountId);
@@ -345,7 +347,7 @@
       const points = acc.collectionPoints || [];
       const def = points.find(p => p.isDefault) || points[0] || null;
       const sample = COLUMNS + '\nAishath Nadha, 7720001, "Amin Avenue, Block B", Hulhumalé Phase 1, ' + (tiers[0] ? tiers[0].label : 'Small') + ', Grade 7 books, KB-2301, home, 320';
-      const v = await MDM.ui.dialog({ title: 'New bulk order for ' + acc.name, message: 'One line per package. Each package becomes its own order at the agreed rate for its size: ' + tiers.map(t => t.label + ' ' + money(t.rate)).join(', ') + '.', okLabel: 'Create bulk order',
+      const v = await MDM.ui.dialog({ title: 'New bulk order for ' + acc.name, message: 'One line per package, at the agreed rates: ' + tiers.map(t => t.label + ' ' + money(t.rate)).join(', ') + '.', okLabel: 'Create bulk order',
         fields: [
           { name: 'pointId', label: 'Collection point', type: 'select', options: points.map(p => ({ value: p.id, label: p.label + ' · ' + p.address })).concat([{ value: '', label: 'Another address' }]), value: def ? def.id : '' },
           { name: 'address', label: 'Collection address', type: 'text', hint: 'Only for "Another address"', validate: (val, all) => all.pointId === '' && !val ? 'Enter the collection address' : null },
@@ -353,7 +355,7 @@
           { name: 'instructions', label: 'Collection instructions', type: 'text', placeholder: 'Ask for the dispatch shelf' },
           { name: 'level', label: 'Service', type: 'segmented', options: MDM.SERVICE_LEVELS.filter(x => x.value !== 'advance'), value: 'normal' },
           { name: 'rows', label: 'Packages (paste from a spreadsheet or CSV)', type: 'textarea', rows: 8, required: true, placeholder: sample,
-            hint: 'Columns: ' + COLUMNS + '. Size category: ' + tiers.map(t => t.label).join(', ') + '. Delivery method: home or cargo (Maldivian Cargo: put the island in the address; the ' + money((settings.rates || {}).cargo || 0) + ' Maldivian Cargo fee is added once per order). Cash to collect: the amount in MVR, empty for none. Zones: ' + zones.filter(z => z.active !== false).map(z => z.short || z.name).join(', ') + '.',
+            hint: 'Columns: ' + COLUMNS + '. Sizes: ' + tiers.map(t => t.label).join(', ') + '. Method: home or cargo (island in the address, ' + money((settings.rates || {}).cargo || 0) + ' fee per order). Cash: MVR, empty for none. Zones: ' + zones.filter(z => z.active !== false).map(z => z.short || z.name).join(', ') + '.',
             validate: val => { const r = parseRows(val, zones, tiers); return r.errors.length ? r.errors.slice(0, 3).join('; ') + (r.errors.length > 3 ? ' and ' + (r.errors.length - 3) + ' more' : '') : (!r.rows.length ? 'Add at least one package' : null); } },
           { name: 'notes', label: 'Notes', type: 'text' }] });
       if (!v) return;
@@ -366,7 +368,7 @@
       toast(b.code + ' created with ' + plural(parsed.rows.length, 'package') + (cash ? ', ' + money(cash) + ' cash to collect' : ''));
       location.hash = '#/bulk/' + encodeURIComponent(b.id);
     }
-    return { title: 'Bulk orders', mount, update, unmount };
+    return { title: 'Bulk orders', mount, update, unmount, enterOnId: true };
   })();
 
   // ==== #/zones ==================================================================================================================
@@ -376,7 +378,7 @@
     async function mount(host) {
       ctx = context(); root = host; markers = {}; editing = null;
       ui = { mapEl: el('div', { class: 'map zones-map', 'data-testid': 'zones-map', role: 'region', 'aria-label': 'Zones map' }), side: el('div', { class: 'zones-side' }) };
-      root.replaceChildren(pageHead('Zones', 'Where we deliver: each zone has its drivers, its island for pricing (same island or across the bridge) and, for the airport, its service areas.',
+      root.replaceChildren(pageHead('Zones', null,
         [el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'zones-add', on: { click: () => startEdit('new') } }, icon('plus'), 'Add zone')]),
         el('div', { class: 'zones-layout' }, ui.mapEl, ui.side));
       ['zones', 'drivers'].forEach(c => ctx.sub(c, () => { if (!editing) ctx.schedule(render); }));
@@ -386,7 +388,7 @@
     }
     function unmount() { if (ctx) ctx.dispose(); Object.keys(markers).forEach(k => markers[k].remove()); markers = {}; if (draftMarker) draftMarker.remove(); draftMarker = null; if (map) MDM.map.destroy(map); map = null; ctx = null; root = null; ui = null; editing = null; }
     async function initMap() {
-      if (!MDM.map.available()) { ui.mapEl.appendChild(el('div', { class: 'map__fallback' }, el('div', { class: 'alert alert--warn' }, icon('alert-triangle'), el('div', { class: 'alert__body' }, 'Map unavailable. Enter the centre as latitude and longitude.')))); return; }
+      if (!MDM.map.available()) { ui.mapEl.appendChild(el('div', { class: 'map__fallback' }, el('div', { class: 'alert alert--warn' }, icon('alert-triangle'), el('div', { class: 'alert__body' }, 'Map unavailable. Enter the centre by hand.')))); return; }
       try { map = await MDM.map.create(ui.mapEl, { zoom: 12 }); } catch (e) { return; }
       if (!ctx || !ctx.alive) { MDM.map.destroy(map); map = null; return; }
       map.on('click', e => { if (!editing) return; setDraft(e.lngLat.lat, e.lngLat.lng); });
@@ -430,12 +432,12 @@
       ui.form = el('form', { class: 'form zone-form', novalidate: true, 'data-testid': 'zone-form', on: { submit: e => { e.preventDefault(); run(() => save(z, drivers)); } } },
         el('h2', null, z.id ? 'Edit ' + z.name : 'New zone'),
         el('div', { class: 'grid-2' }, fld('Name', inp('name', z.name, { required: true, placeholder: 'Thilafushi' })), fld('Short label', inp('short', z.short, { placeholder: 'Thila' }))),
-        fld('Island', sel, 'Trips within one island use the lower rate, trips between islands the higher one'),
+        fld('Island', sel, 'Sets the same-island or bridge rate'),
         el('div', { class: 'grid-2' }, fld('Latitude', inp('lat', z.center ? z.center[0] : '', { inputmode: 'decimal' })), fld('Longitude', inp('lng', z.center ? z.center[1] : '', { inputmode: 'decimal' }))),
-        el('p', { class: 'muted small' }, map ? 'Click the map to set the centre of the zone.' : 'Enter the centre of the zone.'),
-        el('div', { class: 'stack-2' }, chk('active', z.active !== false, 'Active: customers can choose it'), chk('quoteOnly', z.quoteOnly, 'Price on request (confirmed before collection)'), chk('airport', z.airport, 'Airport zone with service areas')),
+        el('p', { class: 'muted small' }, map ? 'Click the map to set the centre.' : 'Enter the centre.'),
+        el('div', { class: 'stack-2' }, chk('active', z.active !== false, 'Active: customers can choose it'), chk('quoteOnly', z.quoteOnly, 'Price on request'), chk('airport', z.airport, 'Airport zone with service areas')),
         el('fieldset', { class: 'zone-drivers' }, el('legend', { class: 'field__label' }, 'Drivers for this zone'), drivers.map(d => chk('drv_' + d.id, (z.driverIds || []).indexOf(d.id) >= 0, d.name))),
-        fld('Airport service areas', el('textarea', { class: 'textarea', name: 'areas', rows: 4, 'data-testid': 'zone-areas', value: areas }), 'One per line, for example Arrivals hall, Departures entrance, MACL cargo terminal'),
+        fld('Airport service areas', el('textarea', { class: 'textarea', name: 'areas', rows: 4, 'data-testid': 'zone-areas', value: areas }), 'One per line'),
         fld('Notes', inp('notes', z.notes)),
         el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'zone-cancel', on: { click: stopEdit } }, 'Cancel'),
           z.id ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'zone-toggle', on: { click: () => run(async () => { await MDM.store.update('zones', z.id, { active: z.active === false }); await MDM.store.audit('zone_updated', (z.active === false ? 'Activated zone ' : 'Paused zone ') + z.name, by()); stopEdit(); toast(z.name + (z.active === false ? ' is active' : ' is paused')); }) } }, z.active === false ? 'Activate' : 'Pause') : null,
@@ -463,7 +465,7 @@
         if (has !== want) await MDM.store.update('drivers', d.id, { zones: want ? (d.zones || []).concat([saved.key]) : (d.zones || []).filter(k => k !== saved.key) });
       }
       await MDM.store.audit(z.id ? 'zone_updated' : 'zone_created', (z.id ? 'Updated zone ' : 'Created zone ') + name, by());
-      toast(z.id ? 'Zone saved' : name + ' added. It shows on the request form now.');
+      toast(z.id ? 'Zone saved' : name + ' added');
       stopEdit();
     }
     return { title: 'Zones', mount, unmount };
@@ -472,14 +474,14 @@
   // ==== #/team (attendance, records, leave, employees) ===========================================================================
   MDM.admin.views.team = (function () {
     let ctx = null, root = null, tab = 'today', range = null, body = null, tabsEl = null;
-    const TABS = [{ value: 'today', label: 'Today' }, { value: 'records', label: 'Attendance records' }, { value: 'leave', label: 'Leave' }, { value: 'people', label: 'Employees' }];
+    const TABS = [{ value: 'today', label: 'Today' }, { value: 'records', label: 'Attendance' }, { value: 'leave', label: 'Leave' }, { value: 'people', label: 'Employees' }];
     async function mount(host, params) {
       ctx = context(); root = host;
       const q = queryOf(params);
       tab = TABS.some(t => t.value === q.get('tab')) ? q.get('tab') : 'today';
       range = { from: q.get('from') || dayKey(new Date(Date.now() - 6 * 864e5)), to: q.get('to') || dayKey(new Date()), staff: q.get('staff') || '', status: q.get('status') || 'pending' };
       body = el('div', { class: 'stack-6' });
-      root.replaceChildren(pageHead('Team & HR', 'Who is on duty, attendance records, leave requests and the people on the team.', [el('a', { class: 'btn btn--secondary', href: MDM.href('staff/'), target: '_blank', rel: 'noopener' }, 'Staff self-service')]), el('div', { class: 'team-tabs' }), body);
+      root.replaceChildren(pageHead('Team & HR', null, [el('a', { class: 'btn btn--secondary', href: MDM.href('staff/'), target: '_blank', rel: 'noopener' }, 'Staff portal', icon('external-link', 14))]), el('div', { class: 'team-tabs' }), body);
       ['staff', 'attendance', 'leaves', 'drivers', 'settings'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
       ctx.timers.push(setInterval(() => { if (tab === 'today') ctx.schedule(render); }, 60000));
@@ -487,7 +489,9 @@
     }
     async function update(params) { const t = queryOf(params).get('tab'); tab = t && TABS.some(x => x.value === t) ? t : 'today'; await render(); }
     function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; }
-    function pick(t) { tab = t; MDM.admin.setQuery({ tab: t === 'today' ? null : t }); ctx.schedule(render); }
+    // A tab switch eases the new panel in once (enterNext), unlike the live re-renders.
+    let enterNext = false;
+    function pick(t) { tab = t; enterNext = true; MDM.admin.setQuery({ tab: t === 'today' ? null : t }); ctx.schedule(render); }
     async function render() {
       const [staff, attendance, leaves, settings] = await Promise.all([MDM.store.list('staff', { order: 'name' }), MDM.store.list('attendance', { order: '-inAt' }), MDM.store.list('leaves'), MDM.store.settings()]);
       if (!ctx || !ctx.alive) return;
@@ -504,6 +508,7 @@
       else if (tab === 'records') body.replaceChildren(...records(ctxData));
       else if (tab === 'leave') body.replaceChildren(...leaveTab(ctxData));
       else body.replaceChildren(...people(ctxData));
+      if (enterNext) { enterNext = false; if (MDM.motion) MDM.motion.enter(body); }
     }
     const onLeave = (s, leaves, day) => leaves.find(l => l.staffId === s.id && l.status === 'approved' && l.from <= day && l.to >= day);
     function late(rec, hr) { const start = MDM.ui.parseHHMM(hr.shiftStart || '08:00'); const d = new Date(rec.inAt); return start != null && d.getHours() * 60 + d.getMinutes() > start + (Number(hr.graceMinutes) || 0); }
@@ -527,7 +532,7 @@
           : r.state !== 'leave' ? smallBtn('Punch in', 'team-punch-in', async () => { await MDM.store.punchIn(r.s.id, { source: 'office', note: 'Recorded by ' + MDM.byName(by()) }); toast(r.s.name + ' punched in'); }, 'btn--secondary') : null) },
       ];
       return [
-        el('div', { class: 'kpi-row kpi-row--fluid' }, kpi('On duty', count('on'), 'shift ' + (c.hr.shiftStart || '08:00') + ' to ' + (c.hr.shiftEnd || '17:00'), 'team-on'), kpi('Late', rows.filter(r => r.late && r.recs.length).length, 'after ' + (c.hr.graceMinutes || 0) + ' min grace', 'team-late'),
+        el('div', { class: 'kpi-row kpi-row--fluid' }, kpi('On duty', count('on'), 'Shift ' + (c.hr.shiftStart || '08:00') + ' to ' + (c.hr.shiftEnd || '17:00'), 'team-on'), kpi('Late', rows.filter(r => r.late && r.recs.length).length, 'After ' + (c.hr.graceMinutes || 0) + ' min grace', 'team-late'),
           kpi('Not in yet', count('absent'), null, 'team-absent'), kpi('On leave', count('leave'), null, 'team-leave'), kpi('Punched out', count('out'), null, 'team-out')),
         card(null, table(cols, rows.map(r => ({ data: r, attrs: { 'data-testid': 'team-row', 'data-staff-id': r.s.id, 'data-duty': r.state } })), { testid: 'team-today' })),
       ];
@@ -574,7 +579,7 @@
       ];
       return [
         el('div', { class: 'filters' }, status, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'leave-add', on: { click: () => run(() => addLeave(c)) } }, icon('plus'), 'Record leave')),
-        card(null, list.length ? table(cols, list.map(l => ({ data: l, attrs: { 'data-testid': 'leave-row', 'data-leave-id': l.id, 'data-status': l.status } })), { testid: 'leave-table' }) : empty('No leave requests here.', 'Staff request leave from the staff portal; requests appear here for approval.')),
+        card(null, list.length ? table(cols, list.map(l => ({ data: l, attrs: { 'data-testid': 'leave-row', 'data-leave-id': l.id, 'data-status': l.status } })), { testid: 'leave-table' }) : empty('No leave requests here.', 'Staff request leave in the staff portal.')),
       ];
     }
     function offDayText(b) { return plural(b.balance, 'accumulated off day') + ' available (' + [b.opening + ' opening', b.earned + ' earned on ' + WEEKDAYS[b.weeklyOffDay] + 's', b.adjust ? (b.adjust > 0 ? '+' : '') + b.adjust + ' adjusted' : '', b.taken + ' taken'].filter(Boolean).join(', ') + ')' + (b.overdrawn ? ', overdrawn by ' + plural(b.overdrawn, 'day') : ''); }
@@ -582,7 +587,7 @@
       const b = l.type === 'off_day' ? c.offDays[l.staffId] : null;
       // Accumulated off days: approving more than the balance would take it below 0, so it is refused here (adjust the balance first).
       const short = approve && b && l.days > b.balance;
-      const msg = label(MDM.LEAVE_TYPES, l.type) + ', ' + plural(l.days, 'day') + ' from ' + F.fmtDay(l.from) + '.' + (b ? ' ' + offDayText(b) + '.' + (short ? ' This is more than the balance: add off days with "Adjust" on the Employees tab, or reject the request.' : '') : '');
+      const msg = label(MDM.LEAVE_TYPES, l.type) + ', ' + plural(l.days, 'day') + ' from ' + F.fmtDay(l.from) + '.' + (b ? ' ' + offDayText(b) + '.' + (short ? ' More than the balance: adjust it on Employees, or reject.' : '') : '');
       const v = await MDM.ui.dialog({ title: (approve ? 'Approve' : 'Reject') + ' leave', message: msg, okLabel: approve ? 'Approve' : 'Reject', danger: !approve,
         fields: [{ name: 'remarks', label: approve ? 'Remarks' : 'Reason', type: 'textarea', rows: 2, required: !approve }],
         validate: () => short ? 'Only ' + plural(b.balance, 'accumulated off day') + ' available, so ' + plural(l.days, 'day') + ' cannot be approved' : null });
@@ -616,12 +621,12 @@
       ];
       return [el('div', { class: 'filters' }, el('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-testid': 'staff-add', on: { click: () => run(() => editStaff(null)) } }, icon('plus'), 'Add employee')),
         card(null, table(cols, c.staff.map(s => ({ data: s, attrs: { 'data-testid': 'staff-row', 'data-staff-id': s.id } })), { testid: 'staff-table' })),
-        el('p', { class: 'muted small' }, 'Off days: working on the weekly off day (' + WEEKDAYS[c.hr.weeklyOffDay != null ? Number(c.hr.weeklyOffDay) : 5] + ', set in Settings) earns one; approved "Accumulated off day" leave uses them.')];
+        el('p', { class: 'muted small' }, 'Working on ' + WEEKDAYS[c.hr.weeklyOffDay != null ? Number(c.hr.weeklyOffDay) : 5] + ' earns one off day.')];
     }
     async function adjustOffDays(s, b) {
-      const v = await MDM.ui.dialog({ title: 'Off days for ' + s.name, message: offDayText(b) + '. Add days the employee earned outside the attendance record, or remove days already given.', okLabel: 'Save off days',
+      const v = await MDM.ui.dialog({ title: 'Off days for ' + s.name, message: offDayText(b) + '.', okLabel: 'Save off days',
         fields: [
-          { name: 'change', label: 'Add or remove days', type: 'number', step: 1, required: true, hint: 'For example 1 for a public holiday worked, or -1 for a day taken without a leave request',
+          { name: 'change', label: 'Add or remove days', type: 'number', step: 1, required: true, hint: '1 adds a day, -1 removes one',
             validate: val => Math.round(val) !== val ? 'Enter a whole number of days' : val === 0 ? 'Enter a number other than 0' : b.balance + val < 0 ? 'The balance cannot go below 0' : null },
           { name: 'reason', label: 'Reason', type: 'text', required: true, placeholder: 'Worked on Independence Day' }] });
       if (!v) return;
@@ -638,10 +643,10 @@
       const v = await MDM.ui.dialog({ title: s ? 'Edit ' + s.name : 'Add employee', okLabel: s ? 'Save' : 'Add employee',
         fields: [
           { name: 'name', label: 'Name', type: 'text', required: true, value: s ? s.name : '' },
-          { name: 'role', label: 'Role', type: 'select', options: MDM.ROLES, value: s ? s.role : 'operator', hint: 'Admins see everything; operators run orders and drivers; office staff handle customers and payments; drivers use the driver app' },
+          { name: 'role', label: 'Role', type: 'select', options: MDM.ROLES, value: s ? s.role : 'operator', hint: 'Sets which pages they can open' },
           { name: 'title', label: 'Job title', type: 'text', value: s ? s.title : '' },
           { name: 'phone', label: 'Mobile number', type: 'tel', required: true, value: s ? phone.format(s.phone) : '' },
-          { name: 'username', label: 'Username', type: 'text', value: s ? s.username : '', hint: 'Drivers sign in with their mobile number' },
+          { name: 'username', label: 'Username', type: 'text', value: s ? s.username : '', hint: 'Drivers use their mobile number' },
           { name: 'status', label: 'Status', type: 'select', options: [{ value: 'active', label: 'Active' }, { value: 'on_leave', label: 'On leave' }, { value: 'inactive', label: 'Inactive' }], value: s ? s.status : 'active' }] });
       if (!v) return;
       const ph = phone.normalize(v.phone);
@@ -675,7 +680,7 @@
       const q = queryOf(params);
       range = q.get('from') ? { from: q.get('from'), to: q.get('to') || dayKey(new Date()) } : preset('month');
       body = el('div', { class: 'stack-6' });
-      root.replaceChildren(pageHead('Reports', 'Orders, deliveries, revenue and payments for a date range, by driver, business, request type, delivery method and zone, with naalu, other charges and cash on delivery. Every table exports to CSV.'), el('div', { class: 'report-range' }), body);
+      root.replaceChildren(pageHead('Reports'), el('div', { class: 'report-range' }), body);
       ['orders', 'drivers', 'business_accounts'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
       await render();
@@ -702,10 +707,10 @@
       const pending = orders.filter(o => o.payment && (o.payment.status === 'requested' || o.payment.status === 'received'));
       const pendingAmt = pending.reduce((t, o) => t + o.totals.total, 0);
       const kpis = el('div', { class: 'kpi-row kpi-row--fluid', 'data-testid': 'report-kpis' },
-        kpi('Orders', created.length, 'placed in this period', 'r-orders'), kpi('Completed', deliveredIn.length, 'delivered in this period', 'r-completed'),
-        kpi('Failed', failedIn.length, 'a failed attempt in this period', 'r-failed'), kpi('Cancelled', cancelledIn.length, null, 'r-cancelled'),
-        kpi('Revenue received', money(revenue), plural(paidIn.length, 'payment') + ' verified', 'r-revenue'), kpi('Invoiced to businesses', money(invoiced), 'delivered on account', 'r-invoiced'),
-        kpi('Pending payments', money(pendingAmt), plural(pending.length, 'order') + ' waiting, any date', 'r-pending'));
+        kpi('Orders', created.length, 'Placed', 'r-orders'), kpi('Completed', deliveredIn.length, 'Delivered', 'r-completed'),
+        kpi('Failed', failedIn.length, 'At least one attempt', 'r-failed'), kpi('Cancelled', cancelledIn.length, null, 'r-cancelled'),
+        kpi('Revenue received', money(revenue), plural(paidIn.length, 'payment') + ' verified', 'r-revenue'), kpi('Invoiced', money(invoiced), 'To businesses', 'r-invoiced'),
+        kpi('Pending payments', money(pendingAmt), plural(pending.length, 'order') + ', any date', 'r-pending'));
       // By driver
       const drvRows = drivers.map(d => [d.name, deliveredIn.filter(o => o.driverId === d.id).length, failedIn.filter(o => o.driverId === d.id).length, deliveredIn.filter(o => o.driverId === d.id).reduce((n, o) => n + (o.packages || []).length, 0), money(deliveredIn.filter(o => o.driverId === d.id).reduce((n, o) => n + o.totals.total, 0))]);
       // By business
@@ -753,28 +758,33 @@
       }).filter(r => r[6]).map(r => r.slice(0, 6));
       const naaluTotal = naalu.reduce((t, x) => t + x.c.amount, 0);
       const codCollected = orders.filter(o => codOf(o) && o.cod.collectedAt && o.cod.status !== 'not_collected' && inRange(o.cod.collectedAt, range.from, range.to)).reduce((t, o) => t + (o.cod.collectedAmount || 0), 0);
-      kpis.append(kpi('Naalu paid', money(naaluTotal), plural(naalu.length, 'payment') + ' by drivers and the office', 'r-naalu'),
-        kpi('Owed to drivers', money(owedNow.reduce((t, c) => t + c.amount, 0)), plural(owedNow.length, 'charge') + ' not reimbursed, any date', 'r-owed'),
-        kpi('Cash collected', money(codCollected), 'cash on delivery for businesses', 'r-cod'));
+      kpis.append(kpi('Naalu paid', money(naaluTotal), plural(naalu.length, 'payment'), 'r-naalu'),
+        kpi('Owed to drivers', money(owedNow.reduce((t, c) => t + c.amount, 0)), plural(owedNow.length, 'charge') + ', any date', 'r-owed'),
+        kpi('Cash collected', money(codCollected), 'Cash on delivery', 'r-cod'));
+      // Two groups, each a grid of tables: the order tables first, then the money (naalu, charges, cash on delivery).
+      const group = (id, title, ...blocks) => el('section', { class: 'report-group', 'aria-labelledby': id }, el('h2', { class: 'report-group__title', id }, title), el('div', { class: 'report-grid' }, blocks));
       body.replaceChildren(kpis,
-        reportTable('rep-drivers', 'By driver', ['Driver', 'Delivered', 'Failed', 'Packages', 'Value'], drvRows, 'drivers'),
-        reportTable('rep-business', 'By business account', ['Business', 'Orders', 'Packages', 'Delivered', 'Value'], bizRows, 'business'),
-        el('div', { class: 'admin-grid' },
+        group('rep-orders', 'Orders',
+          reportTable('rep-drivers', 'By driver', ['Driver', 'Delivered', 'Failed', 'Packages', 'Value'], drvRows, 'drivers'),
+          reportTable('rep-business', 'By business', ['Business', 'Orders', 'Packages', 'Delivered', 'Value'], bizRows, 'business'),
           reportTable('rep-types', 'By request type', ['Type', 'Orders', 'Delivered', 'Cancelled'], Object.values(types).sort((a, b) => b[1] - a[1]), 'types'),
-          reportTable('rep-zones', 'By delivery zone', ['Zone', 'Orders', 'Delivered'], Object.values(zones).sort((a, b) => b[1] - a[1]), 'zones')),
-        reportTable('rep-methods', 'By delivery method', ['Delivery method', 'Orders', 'Delivered', 'Cancelled', 'Maldivian Cargo fees', 'Airport fees'], methodRows, 'methods'),
-        reportTable('rep-days', 'By day', ['Date', 'Orders', 'Delivered', 'Cancelled', 'Revenue'], dayRows, 'days'),
-        reportTable('rep-naalu-drivers', 'Naalu by driver', ['Paid by', 'Payments', 'At collection', 'At delivery', 'Total', 'Reimbursed', 'Still owed'], naaluDriverRows, 'naalu-drivers'),
-        reportTable('rep-naalu-days', 'Naalu by day', ['Date', 'Payments', 'Orders', 'Total'], naaluDayRows, 'naalu-days', { text: [2] }),
-        reportTable('rep-charges', 'Naalu, packing and other charges', ['Charge', 'Recorded', 'Billed to customers', 'Not billed', 'Total'], chargeRows, 'charges'),
-        reportTable('rep-charge-list', 'Packing and other charges', ['Date', 'Order', 'Charge', 'Description', 'Recorded', 'Amount', 'Billed', 'Reimbursement'], chargeList, 'charge-list', { text: [1, 2, 3, 4, 6, 7] }),
-        reportTable('rep-cod', 'Cash on delivery by business', ['Business', 'Collected', 'Handed to the office', 'Paid to the business', 'Outstanding now', 'Still to collect'], codRows, 'cod'));
+          reportTable('rep-zones', 'By delivery zone', ['Zone', 'Orders', 'Delivered'], Object.values(zones).sort((a, b) => b[1] - a[1]), 'zones'),
+          reportTable('rep-methods', 'By delivery method', ['Delivery method', 'Orders', 'Delivered', 'Cancelled', 'Maldivian Cargo fees', 'Airport fees'], methodRows, 'methods', { wide: true }),
+          reportTable('rep-days', 'By day', ['Date', 'Orders', 'Delivered', 'Cancelled', 'Revenue'], dayRows, 'days', { wide: true })),
+        group('rep-money', 'Charges and cash',
+          reportTable('rep-naalu-drivers', 'Naalu by driver', ['Paid by', 'Payments', 'At collection', 'At delivery', 'Total', 'Reimbursed', 'Still owed'], naaluDriverRows, 'naalu-drivers', { wide: true }),
+          reportTable('rep-naalu-days', 'Naalu by day', ['Date', 'Payments', 'Orders', 'Total'], naaluDayRows, 'naalu-days', { text: [2] }),
+          reportTable('rep-charges', 'All charges', ['Charge', 'Recorded', 'Billed to customers', 'Not billed', 'Total'], chargeRows, 'charges', { show: ['Charge', 'Recorded', 'Billed', 'Not billed', 'Total'] }),
+          reportTable('rep-charge-list', 'Packing and other charges', ['Date', 'Order', 'Charge', 'Description', 'Recorded', 'Amount', 'Billed', 'Reimbursement'], chargeList, 'charge-list', { text: [1, 2, 3, 4, 6, 7], wide: true }),
+          reportTable('rep-cod', 'Cash on delivery by business', ['Business', 'Collected', 'Handed to the office', 'Paid to the business', 'Outstanding now', 'Still to collect'], codRows, 'cod', { wide: true })));
     }
     function reportTable(id, title, head, rows, key, opts) {
       const text = (opts && opts.text) || [];
       const exp = el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'report-export-' + key, on: { click: () => { F.downloadCsv([head].concat(rows), 'mdm-report-' + key + '-' + range.from + '-' + range.to + '.csv'); toast(title + ' exported'); } } }, icon('download'), 'CSV');
-      const cols = head.map((h, i) => ({ label: h, num: i > 0 && text.indexOf(i) < 0, primary: i === 0, render: r => String(r[i]) }));
-      return el('section', { class: 'section', 'aria-labelledby': id }, sectionHead(id, title, null, exp),
+      // opts.show: shorter column labels on screen; the CSV keeps the full ones in head.
+      const shown = (opts && opts.show) || head;
+      const cols = head.map((h, i) => ({ label: shown[i] || h, num: i > 0 && text.indexOf(i) < 0, primary: i === 0, render: r => String(r[i]) }));
+      return el('section', { class: 'section' + (opts && opts.wide ? ' report-wide' : ''), 'aria-labelledby': id }, sectionHead(id, title, null, exp),
         card(null, rows.length ? table(cols, rows.map(r => ({ data: r, attrs: { 'data-testid': 'report-row-' + key } })), { testid: 'report-' + key, compact: true }) : empty('Nothing in this period.')));
     }
     function exportOrders(list) {
@@ -798,8 +808,8 @@
       const a = queryOf(params).get('audience');
       f.audience = AUDIENCES.some(x => x.value === a) ? a : f.audience;
       body = el('div', { class: 'stack-4' });
-      root.replaceChildren(pageHead('Notifications', 'Every message sent when an order changes: to customers by SMS, WhatsApp, Viber or email, and to drivers, the operations desk and businesses in the app. The mockup logs them; a live system hands them to a provider.',
-        [MDM.admin.can('settings') ? el('a', { class: 'btn btn--secondary', href: '#/settings' }, 'Notification settings') : null]), body);
+      root.replaceChildren(pageHead('Notifications', 'Messages sent when an order changes.',
+        [MDM.admin.can('settings') ? el('a', { class: 'btn btn--secondary', href: '#/settings' }, icon('settings'), 'Settings') : null]), body);
       ctx.sub('notifications', () => ctx.schedule(render));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
       await render();
@@ -834,7 +844,7 @@
       ];
       const pages = Math.max(1, Math.ceil(list.length / PAGE));
       body.replaceChildren(
-        el('div', { class: 'kpi-row kpi-row--fluid' }, kpi('Sent today', todayN.length, null, 'n-today'), ...Object.keys(chans).map(k => kpi(chans[k], todayN.filter(n => n.channel === k).length, k === 'app' ? 'to drivers, office and businesses' : 'today', 'n-' + k))),
+        el('div', { class: 'kpi-row kpi-row--fluid' }, kpi('Sent today', todayN.length, null, 'n-today'), ...Object.keys(chans).map(k => kpi(chans[k], todayN.filter(n => n.channel === k).length, k === 'app' ? 'Staff and businesses' : 'Today', 'n-' + k))),
         el('div', { class: 'filters' }, q, au, ch, ev),
         card(null, slice.length ? [table(cols, slice.map(n => ({ data: n, attrs: { 'data-testid': 'notif-row', 'data-event': n.event, 'data-audience': audienceOf(n), 'data-code': n.code || '' } })), { testid: 'notif-table' }),
           el('div', { class: 'pagination' }, el('span', null, 'Showing ' + (page * PAGE + 1) + ' to ' + (page * PAGE + slice.length) + ' of ' + list.length),
@@ -862,7 +872,7 @@
     async function mount(host) {
       ctx = context(); root = host; page = 0;
       body = el('div', { class: 'stack-4' });
-      root.replaceChildren(pageHead('Activity log', 'Who did what and when: status changes, price changes, payments, cancellations, priority decisions, attendance, leave and settings.'), body);
+      root.replaceChildren(pageHead('Activity log', 'Who did what, and when.'), body);
       ctx.sub('events', () => ctx.schedule(render));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
       await render();
@@ -902,15 +912,15 @@
 
   // ==== #/store (e-store products and orders) ======================================================================================
   MDM.admin.views.store = (function () {
-    let ctx = null, root = null, body = null, tab = 'products', tabsEl = null;
+    let ctx = null, root = null, body = null, tab = 'products', tabsEl = null, enterNext = false;
     const CATEGORIES = [{ value: 'packaging', label: 'Packaging' }, { value: 'supplies', label: 'Supplies' }, { value: 'bundles', label: 'Delivery bundles' }];
     const LOW = 5;
     async function mount(host, params) {
       ctx = context(); root = host;
       tab = queryOf(params).get('tab') === 'orders' ? 'orders' : 'products';
       body = el('div', { class: 'stack-6' }); tabsEl = el('div');
-      root.replaceChildren(pageHead('E-store', 'Packaging, supplies and delivery bundles sold on the website and delivered with the next order.',
-        [el('a', { class: 'btn btn--secondary', href: MDM.href('store/'), target: '_blank', rel: 'noopener' }, 'Open the store'), el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'product-add', on: { click: () => run(() => edit(null)) } }, icon('plus'), 'Add product')]), tabsEl, body);
+      root.replaceChildren(pageHead('E-store', null,
+        [el('a', { class: 'btn btn--secondary', href: MDM.href('store/'), target: '_blank', rel: 'noopener' }, 'View store', icon('external-link', 14)), el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'product-add', on: { click: () => run(() => edit(null)) } }, icon('plus'), 'Add product')]), tabsEl, body);
       ['products', 'orders'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
       await render();
@@ -922,9 +932,9 @@
       const month = MDM.ui.monthKey(new Date());
       const monthOrders = orders.filter(o => MDM.ui.monthKey(o.createdAt) === month && o.status !== 'cancelled');
       const low = products.filter(p => p.active !== false && p.stock != null && p.stock <= LOW);
-      tabsEl.replaceChildren(tabs([{ value: 'products', label: 'Products', count: products.length }, { value: 'orders', label: 'Store orders', count: orders.length }], tab, t => { tab = t; MDM.admin.setQuery({ tab: t === 'products' ? null : t }); ctx.schedule(render); }, 'store-tab'));
-      const kpis = el('div', { class: 'kpi-row kpi-row--fluid' }, kpi('Products on sale', products.filter(p => p.active !== false).length, null, 's-active'), kpi('Low or out of stock', low.length, LOW + ' or fewer left', 's-low'),
-        kpi('Orders this month', monthOrders.length, null, 's-orders'), kpi('Item sales this month', money(monthOrders.reduce((n, o) => n + ((o.totals || {}).items || 0), 0)), 'excluding delivery', 's-sales'));
+      tabsEl.replaceChildren(tabs([{ value: 'products', label: 'Products', count: products.length }, { value: 'orders', label: 'Store orders', count: orders.length }], tab, t => { tab = t; enterNext = true; MDM.admin.setQuery({ tab: t === 'products' ? null : t }); ctx.schedule(render); }, 'store-tab'));
+      const kpis = el('div', { class: 'kpi-row kpi-row--fluid' }, kpi('On sale', products.filter(p => p.active !== false).length, null, 's-active'), kpi('Low or out of stock', low.length, LOW + ' or fewer left', 's-low'),
+        kpi('Orders this month', monthOrders.length, null, 's-orders'), kpi('Item sales this month', money(monthOrders.reduce((n, o) => n + ((o.totals || {}).items || 0), 0)), 'Excluding delivery', 's-sales'));
       if (tab === 'orders') {
         const cols = [
           { label: 'Order', primary: true, render: o => el('a', { class: 'mono', href: '#/orders/' + encodeURIComponent(o.id) }, o.code) },
@@ -936,6 +946,7 @@
           { label: 'Placed', nowrap: true, render: o => F.whenCell(o.createdAt) },
         ];
         body.replaceChildren(kpis, card(null, orders.length ? table(cols, orders.map(o => ({ data: o, attrs: { class: 'is-clickable', 'data-testid': 'store-order-row', on: { click: e => { if (e.target.closest('a')) return; MDM.admin.openOrder(o.id); } } } })), { testid: 'store-orders' }) : empty('No store orders yet.')));
+        entered();
         return;
       }
       const stockBadge = p => p.stock == null ? badge('neutral', 'Unlimited') : p.stock === 0 ? badge('danger', 'Out of stock', { 'data-stock': 'out' }) : p.stock <= LOW ? badge('warn', p.stock + ' left', { 'data-stock': 'low' }) : el('span', { class: 'mono' }, String(p.stock));
@@ -949,7 +960,10 @@
           smallBtn(p.active === false ? 'Show' : 'Hide', 'product-toggle', async () => { await MDM.store.update('products', p.id, { active: p.active === false }); await MDM.store.audit('product_updated', (p.active === false ? 'Put on sale: ' : 'Hidden from the store: ') + p.name, by()); toast(p.name + (p.active === false ? ' is on sale' : ' is hidden')); })) },
       ];
       body.replaceChildren(kpis, card(null, products.length ? table(cols, products.map(p => ({ data: p, attrs: { 'data-testid': 'product-row', 'data-product-id': p.id } })), { testid: 'products-table' }) : empty('No products yet.')));
+      entered();
     }
+    // A tab switch eases the new panel in once; live re-renders do not.
+    function entered() { if (enterNext) { enterNext = false; if (MDM.motion) MDM.motion.enter(body); } }
     async function edit(p) {
       const v = await MDM.ui.dialog({ title: p ? 'Edit ' + p.name : 'Add product', okLabel: p ? 'Save product' : 'Add product',
         fields: [
@@ -958,7 +972,7 @@
           { name: 'category', label: 'Category', type: 'select', options: CATEGORIES, value: p ? p.category : 'packaging' },
           { name: 'price', label: 'Price (MVR)', type: 'number', required: true, min: 0, step: 1, value: p ? p.price : '' },
           { name: 'unit', label: 'Sold per', type: 'text', value: p ? p.unit : 'piece', placeholder: 'pack, roll, box' },
-          { name: 'stock', label: 'Stock', type: 'number', min: 0, step: 1, value: p && p.stock != null ? p.stock : '', hint: 'Leave empty for bundles and services with no stock' },
+          { name: 'stock', label: 'Stock', type: 'number', min: 0, step: 1, value: p && p.stock != null ? p.stock : '', hint: 'Empty for items with no stock count' },
           { name: 'description', label: 'Description', type: 'textarea', rows: 2, value: p ? p.description : '' },
           { name: 'active', label: 'On sale', type: 'checkbox', value: p ? p.active !== false : true }] });
       if (!v) return;
@@ -969,7 +983,7 @@
     }
     async function restock(p) {
       const v = await MDM.ui.dialog({ title: 'Stock for ' + p.name, message: p.stock == null ? 'This product has no stock count.' : p.stock + ' in stock now.', okLabel: 'Save stock',
-        fields: [{ name: 'change', label: 'Add or remove', type: 'number', step: 1, required: true, hint: 'For example 50 for a delivery from the supplier, or −2 for damaged items' }, { name: 'note', label: 'Note', type: 'text' }] });
+        fields: [{ name: 'change', label: 'Add or remove', type: 'number', step: 1, required: true, hint: '50 adds stock, -2 removes it' }, { name: 'note', label: 'Note', type: 'text' }] });
       if (!v) return;
       const next = Math.max(0, (p.stock || 0) + Math.round(v.change));
       await MDM.store.update('products', p.id, { stock: next });

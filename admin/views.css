@@ -2,9 +2,10 @@
    Also holds the few layout rules of the printable invoice (body.page-invoice), which loads this file next to base.css. */
 
 /* ---------- Live map: map fills the main height, 320px rider column, stacked below 960px ---------- */
-body.page-admin .live-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; height: calc(100dvh - 64px); min-height: 420px; }
-body.page-admin .live-layout > .map { height: 100%; min-height: 0; }
-body.page-admin .live-side { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
+body.page-admin .live-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; height: calc(100dvh - var(--header-h) - 150px); min-height: 460px; }
+body.page-admin .live-layout > .map { height: 100%; min-height: 0; border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+html[data-theme="dark"] body.page-admin .live-layout > .map { box-shadow: inset 0 0 0 1px var(--border); }
+body.page-admin .live-side { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 2px; margin: -2px; }
 body.page-admin .live-side > .card { flex: none; }
 body.page-admin .live-rider { cursor: pointer; }
 body.page-admin .live-rider.is-selected { background: var(--surface); }
@@ -32,6 +33,7 @@ body.page-admin .table__actions-row { display: inline-flex; gap: 4px; }
 
 /* ---------- Business tabs and the account page ---------- */
 body.page-admin .tabs { margin-bottom: 24px; }
+body.page-admin .view > .tabs { margin-bottom: 0; }
 body.page-admin .wrap-value { display: block; max-width: 40ch; margin-left: auto; }
 @media (max-width: 480px) { body.page-admin .wrap-value { max-width: 22ch; } }
 body.page-admin .business-tab__count { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -49,9 +51,36 @@ body.page-admin .form-card__body > * + * { margin-top: 16px; }
 body.page-admin .form .card { max-width: none; }
 @media (max-width: 480px) { body.page-admin .rates-grid { grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; } }
 
-/* ---------- Settings ---------- */
+/* ---------- Settings and Rates: an index of the sections on the left (a scrollable pill row below 1200px), grouped cards on the right ---------- */
+body.page-admin .settings-layout { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 40px; align-items: start; }
+body.page-admin .settings-main { min-width: 0; max-width: 880px; }
+body.page-admin .settings-main > .stack-6 > * + *, body.page-admin .settings-main > .form--wide > * + * { margin-top: 36px; }
+body.page-admin .section-index { position: sticky; top: calc(var(--header-h) + 28px); display: flex; flex-direction: column; gap: 2px; }
+body.page-admin .section-index__item { display: block; width: 100%; padding: 7px 12px; border: 0; border-radius: var(--radius-sm); background: none; font: inherit; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--text-2); text-align: left; cursor: pointer; transition: background-color .2s ease, color .2s ease; }
+body.page-admin .section-index__item[aria-current="true"] { background: var(--card); color: var(--text); box-shadow: var(--shadow-sm); }
+html[data-theme="dark"] body.page-admin .section-index__item[aria-current="true"] { background: var(--surface-2); box-shadow: none; }
+@media (hover: hover) { body.page-admin .section-index__item:not([aria-current="true"]):hover { color: var(--text); background: var(--surface-2); } }
+body.page-admin .section-index__item:focus-visible { box-shadow: var(--focus); outline: none; }
+body.page-admin .settings-section h2[id] { scroll-margin-top: calc(var(--header-h) + 24px); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+body.page-admin .section-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--warn-bg); color: var(--warn); font-size: 12px; font-weight: 500; letter-spacing: 0; }
+@media (max-width: 1199px) {
+  body.page-admin .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  body.page-admin .section-index { position: static; flex-direction: row; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 2px 16px 4px; }
+  body.page-admin .section-index::-webkit-scrollbar { display: none; }
+  body.page-admin .section-index__item { width: auto; flex: none; padding: 7px 14px; border-radius: var(--radius-pill); white-space: nowrap; background: var(--card); box-shadow: var(--shadow-sm); }
+  body.page-admin .section-index__item[aria-current="true"] { background: var(--text); color: var(--bg); box-shadow: none; }
+  html[data-theme="dark"] body.page-admin .section-index__item { background: var(--surface); }
+  html[data-theme="dark"] body.page-admin .section-index__item[aria-current="true"] { background: var(--text); color: var(--bg); }
+}
+@media (max-width: 720px) { body.page-admin .section-index__item { min-height: 40px; } }
 body.page-admin .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 body.page-admin .settings-note { font-size: 13px; line-height: 1.4; color: var(--text-2); max-width: 60ch; }
+body.page-admin .checkbox-row { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+body.page-admin .checkbox-row > .checkbox + .checkbox { margin-top: 0; }
+/* One Save for the whole Rates form, in a frosted bar that stays at the bottom of the window. */
+body.page-admin .save-bar { position: sticky; bottom: 16px; z-index: 5; margin-top: 24px; padding: 10px 10px 10px 20px; border-radius: var(--radius-pill); background: var(--header-bg); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); box-shadow: var(--shadow); }
+html[data-theme="dark"] body.page-admin .save-bar { box-shadow: inset 0 0 0 1px var(--border), var(--shadow); }
+@media (max-width: 720px) { body.page-admin .save-bar { bottom: calc(10px + env(safe-area-inset-bottom)); padding-left: 16px; } body.page-admin .save-bar .form-caption { font-size: 12px; } }
 
 /* ---------- Printable invoice ---------- */
 body.page-invoice main { padding-bottom: 48px; }

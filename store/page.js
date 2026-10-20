@@ -12,6 +12,10 @@
   const money = n => MDM.pricing.format(n);
   const app = document.querySelector('[data-slot="app"]');
   const state = { products: [], settings: {}, cat: 'all', view: 'catalogue', me: null, customer: null };
+  // The catalogue is built once per visit (cat holds its parts); a cart change only swaps the tiles' buttons and the cart button,
+  // so nothing re-enters or flickers. revealed: tiles that have already scrolled in, so a rebuilt grid shows them at rest.
+  let cat = null;
+  const revealed = new Set();
 
   // ---- Cart --------------------------------------------------------------------------------------------------------------
   function readCart() { try { const v = JSON.parse(localStorage.getItem(CART) || '[]'); return Array.isArray(v) ? v.filter(x => x && x.productId && x.qty > 0) : []; } catch (e) { return []; } }
@@ -59,61 +63,105 @@
     if (p.stock <= LOW) return el('span', { class: 'store-stock' }, per, el('span', { class: 'store-stock--low' }, 'Only ' + p.stock + ' left'));
     return el('span', { class: 'store-stock' }, per + 'In stock');
   }
-  function card(p, open) {
+  function tileAction(p, open) {
     const qty = qtyOf(p.id), out = maxQty(p) <= 0;
-    return el('article', { class: 'card store-card' + (out ? ' is-out' : ''), 'data-testid': 'store-product-' + p.id },
-      el('div', { class: 'store-card__art', 'aria-hidden': 'true' }, html(MDM.icon(ICONS[p.id] || CAT_ICON[p.category] || 'package', 40))),
+    if (!open) return null;
+    if (qty) return stepper(p, qty);
+    return el('button', { type: 'button', class: 'btn btn--primary btn--sm store-card__add', disabled: out, 'data-testid': 'store-add-' + p.id, on: { click: () => { setQty(p.id, 1); MDM.ui.toast(p.name + ' added to your cart', 'ok', { action: { label: 'View cart', onClick: openCart } }); } } }, out ? 'Sold out' : 'Add to cart');
+  }
+  // A product tile: the icon on a grey stage, the category, name and one line of description, the price and stock, then the button.
+  // reveal: the first build fades the tiles up as they scroll in; a rebuild (category switch, catalogue change) shows them at once.
+  function card(p, open, reveal, i) {
+    const out = maxQty(p) <= 0;
+    const attrs = { class: 'store-card' + (out ? ' is-out' : ''), 'data-testid': 'store-product-' + p.id, 'data-id': p.id };
+    // A row of tiles rises left to right (80 ms apart), so a tile far down the page does not wait for the ones above it.
+    if (reveal) attrs['data-reveal'] = '';
+    if (reveal && revealed.has(p.id)) attrs.class += ' is-in';
+    const tile = el('article', attrs,
+      el('div', { class: 'store-card__art', 'aria-hidden': 'true' }, html(MDM.icon(ICONS[p.id] || CAT_ICON[p.category] || 'package', 48))),
       el('div', { class: 'store-card__body' },
         el('div', { class: 'store-card__cat' }, (CATEGORIES.find(c => c.value === p.category) || { label: p.category }).label),
         el('h3', { class: 'store-card__name' }, p.name),
         el('p', { class: 'store-card__desc' }, p.description || ''),
         el('div', { class: 'store-card__foot' },
           el('div', { class: 'store-card__pricebox' }, el('div', { class: 'store-card__price mono' }, money(p.price)), stockNote(p, p.unit)),
-          !open ? null : qty ? stepper(p, qty) : el('button', { type: 'button', class: 'btn btn--primary btn--sm', disabled: out, 'data-testid': 'store-add-' + p.id, on: { click: () => { setQty(p.id, 1); MDM.ui.toast(p.name + ' added to your cart', 'ok', { action: { label: 'View cart', onClick: openCart } }); } } }, out ? 'Sold out' : 'Add to cart'))));
+          el('div', { class: 'store-card__action' }, tileAction(p, open)))));
+    if (reveal) tile.style.setProperty('--d', ((i || 0) % 4) * 80 + 'ms');
+    return tile;
   }
+  let lastCount = null;
   function cartButton() {
     const n = itemCount();
-    return el('button', { type: 'button', class: 'btn btn--secondary store-cartbtn', 'data-testid': 'store-cart-open', on: { click: openCart } },
-      html(MDM.icon('shopping-bag', 16)), n ? 'Cart · ' + n + ' · ' + money(itemsTotal()) : 'Cart');
+    const bump = lastCount != null && n > lastCount;
+    lastCount = n;
+    return el('button', { type: 'button', class: ['btn btn--secondary store-cartbtn', bump ? 'is-bump' : null], 'data-testid': 'store-cart-open', on: { click: openCart } },
+      html(MDM.icon('shopping-bag', 16)), 'Cart', n ? el('span', { class: 'store-cartbtn__count' }, String(n)) : null, n ? el('span', { class: 'store-cartbtn__total' }, money(itemsTotal())) : null);
   }
 
   // ---- Catalogue -----------------------------------------------------------------------------------------------------------
   function renderCatalogue() {
     const s = state.settings, open = (s.store || {}).open !== false;
-    const visible = state.products.filter(p => p.active !== false && (state.cat === 'all' || p.category === state.cat));
-    const chips = el('div', { class: 'filters__chips store-chips', role: 'group', 'aria-label': 'Category' }, CATEGORIES.map(c => {
-      const n = c.value === 'all' ? state.products.filter(p => p.active !== false).length : state.products.filter(p => p.active !== false && p.category === c.value).length;
-      return el('button', { type: 'button', class: 'chip', 'aria-pressed': state.cat === c.value ? 'true' : 'false', 'data-testid': 'store-cat-' + c.value, on: { click: () => { state.cat = c.value; paint(); } } }, c.label, el('span', { class: 'count' }, String(n)));
-    }));
+    cat = { open, cart: el('div', { class: 'page-head__actions' }), chips: el('div', { class: 'filters__chips store-chips', role: 'group', 'aria-label': 'Category' }), grid: el('div', { class: 'store-grid' }) };
+    cat.chipBtns = CATEGORIES.map(c => el('button', { type: 'button', class: 'chip', 'data-testid': 'store-cat-' + c.value, 'data-cat': c.value,
+      on: { click: () => { if (state.cat === c.value) return; state.cat = c.value; refreshCatalogue({ grid: 'switch' }); } } }, c.label, el('span', { class: 'count' })));
+    cat.chips.append(...cat.chipBtns);
+    const how = [
+      ['Add to cart', 'Delivery is added at checkout, from ' + money(deliveryFee('').amount) + '.'],
+      ['Pay after delivery, or now', 'By bank transfer. Upload the slip on the tracking page.'],
+      ['Track it', 'You get an order code to follow it to your door.'],
+    ];
     app.replaceChildren(el('div', { class: 'container' },
       el('div', { class: 'page-head' },
         el('h1', null, 'Store'),
-        el('p', { class: 'page-head__desc' }, 'Boxes, mailers, tape, labels and prepaid delivery bundles. A rider brings your order like any other delivery, usually within the day.'),
-        el('div', { class: 'page-head__actions' }, cartButton())),
-      !open ? MDM.ui.notice('warn', 'The store is closed right now. You can still browse; orders open again soon.', { title: 'Store closed' }) : null,
-      el('div', { class: 'store-bar' }, chips, el('p', { class: 'small muted' }, (s.store || {}).note || '')),
-      visible.length ? el('div', { class: 'store-grid' }, visible.map(p => card(p, open))) : el('div', { class: 'empty' }, el('div', { class: 'empty__title' }, 'Nothing in this category yet')),
+        el('p', { class: 'page-head__desc' }, (s.store || {}).note || 'Boxes, tape, labels and prepaid delivery bundles.'),
+        cat.cart),
+      !open ? MDM.ui.notice('warn', 'You can still browse. Orders open again soon.', { title: 'The store is closed' }) : null,
+      el('div', { class: 'store-bar' }, cat.chips),
+      cat.grid,
       el('section', { class: 'section store-how', 'aria-labelledby': 'store-how' },
         el('div', { class: 'section-head' }, el('h2', { id: 'store-how' }, 'How store orders work')),
-        el('ol', { class: 'steps' }, [
-          ['Add to cart', 'Prices include the item only; delivery is added at checkout from ' + money(deliveryFee('').amount) + '.'],
-          ['Pay after delivery, or now', 'Pay by bank transfer once it arrives, or transfer now and upload the slip on the tracking page.'],
-          ['Track it', 'You get an order code. Follow it from our store to your door like any other delivery.'],
-        ].map((it, i) => el('li', { class: 'steps__item' }, el('div', { class: 'steps__head' }, el('span', { class: 'steps__num mono' }, String(i + 1)), el('h3', { class: 'steps__title' }, it[0])), el('p', { class: 'steps__text' }, it[1])))))));
+        el('ol', { class: 'store-steps', 'data-reveal-group': '' }, how.map((it, i) => el('li', { class: 'store-step', 'data-reveal': '' },
+          el('span', { class: 'store-step__num mono' }, String(i + 1)), el('h3', { class: 'store-step__title' }, it[0]), el('p', { class: 'store-step__text' }, it[1])))))));
+    refreshCatalogue({ grid: 'first' });
+  }
+  // grid: 'first' builds the tiles with the scroll reveal, 'switch' rebuilds them for another category with a short staggered rise,
+  // 'data' rebuilds them in place (catalogue changes); without it only the buttons, the counts and the cart button follow the cart.
+  function refreshCatalogue(opts) {
+    opts = opts || {};
+    const active = state.products.filter(p => p.active !== false);
+    cat.cart.replaceChildren(cartButton());
+    cat.chipBtns.forEach(b => {
+      const c = b.dataset.cat;
+      b.setAttribute('aria-pressed', state.cat === c ? 'true' : 'false');
+      b.querySelector('.count').textContent = String(c === 'all' ? active.length : active.filter(p => p.category === c).length);
+    });
+    const visible = active.filter(p => state.cat === 'all' || p.category === state.cat);
+    const tiles = cat.grid.querySelectorAll('.store-card');
+    const same = tiles.length === visible.length && visible.every((p, i) => tiles[i].dataset.id === p.id);
+    if (opts.grid || !same) {
+      tiles.forEach(t => { if (t.classList.contains('is-in')) revealed.add(t.dataset.id); });
+      // After the first build every tile is at rest: a category switch eases them in once, a data change just redraws them.
+      const reveal = opts.grid === 'first';
+      cat.grid.replaceChildren(...(visible.length ? visible.map((p, i) => card(p, cat.open, reveal, i)) : [el('div', { class: 'empty store-empty' }, el('div', { class: 'empty__title' }, 'Nothing here yet'))]));
+      if (opts.grid === 'switch' && MDM.motion) MDM.motion.enter(cat.grid, { max: 12 });
+      return;
+    }
+    visible.forEach((p, i) => tiles[i].querySelector('.store-card__action').replaceChildren(tileAction(p, cat.open) || ''));
   }
 
   // ---- Cart drawer ---------------------------------------------------------------------------------------------------------
   function cartBody() {
     const ls = lines();
-    if (!ls.length) return el('div', { class: 'empty' }, el('div', { class: 'empty__title' }, 'Your cart is empty'), el('div', { class: 'empty__hint' }, 'Add boxes, mailers or a delivery bundle from the store.'));
+    if (!ls.length) return el('div', { class: 'empty store-cart-empty' }, el('div', { class: 'empty__title' }, 'Your cart is empty'), el('div', { class: 'empty__hint' }, 'Add something from the store.'));
     const fee = deliveryFee('');
     return el('div', { class: 'stack-4' },
       el('div', { class: 'list store-lines' }, ls.map(l => el('div', { class: 'list__item', 'data-testid': 'store-line-' + l.p.id },
-        el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, l.p.name), el('div', { class: 'list__meta' }, money(l.p.price) + (l.p.unit ? ' / ' + l.p.unit : '') + (l.p.stock != null && l.qty >= l.p.stock ? ' · that is all we have' : ''))),
+        el('span', { class: 'store-line__art', 'aria-hidden': 'true' }, html(MDM.icon(ICONS[l.p.id] || CAT_ICON[l.p.category] || 'package', 22))),
+        el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, l.p.name), el('div', { class: 'list__meta' }, money(l.p.price) + (l.p.unit ? ' / ' + l.p.unit : '') + (l.p.stock != null && l.qty >= l.p.stock ? ' · all we have' : ''))),
         el('div', { class: 'store-line__aside' }, stepper(l.p, l.qty, { removable: true }), el('div', { class: 'mono small' }, money(l.p.price * l.qty)))))),
       el('div', { class: 'summary' },
         el('div', { class: 'summary__line' }, el('span', null, 'Items'), el('span', { class: 'summary__amount' }, money(itemsTotal()))),
-        el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Delivery', el('small', null, 'Set by your zone at checkout')), el('span', { class: 'summary__amount' }, 'from ' + money(fee.amount)))));
+        el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Delivery', el('small', null, 'Set by your zone')), el('span', { class: 'summary__amount' }, 'from ' + money(fee.amount)))));
   }
   function openCart() {
     const open = (state.settings.store || {}).open !== false;
@@ -136,7 +184,7 @@
   }
   function renderCheckout() {
     const ls = lines();
-    if (!ls.length) { history.replaceState(null, '', location.pathname); state.view = 'catalogue'; renderCatalogue(); return; }
+    if (!ls.length) { history.replaceState(null, '', location.pathname); state.view = 'catalogue'; cat = null; renderCatalogue(); return; }
     const me = state.me || {}, c = state.customer || {};
     const saved = (c.addresses || [])[0] || {};
     const form = el('form', { class: 'form store-form', novalidate: true, 'data-testid': 'store-form' });
@@ -152,15 +200,15 @@
       el('h2', { class: 'h3' }, 'Your details'),
       el('div', { class: 'grid-2' },
         f('name', 'Name', el('input', { class: 'input', autocomplete: 'name', value: me.name || c.name || '', 'data-testid': 'store-name' })),
-        f('phone', 'Mobile number', el('input', { class: 'input', type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', value: me.phone || '', 'data-testid': 'store-phone' }), { hint: 'We send the order code and updates here' })),
+        f('phone', 'Mobile number', el('input', { class: 'input', type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', value: me.phone || '', 'data-testid': 'store-phone' }), { hint: 'For the order code and updates' })),
       el('h2', { class: 'h3 store-form__h' }, 'Delivery'),
       f('address', 'Address', el('input', { class: 'input', autocomplete: 'street-address', placeholder: 'House or building, floor, road', value: saved.address || '', 'data-testid': 'store-address' })),
       el('div', { class: 'grid-2' }, f('zone', 'Island or zone', zoneSel), f('landmark', 'Landmark', el('input', { class: 'input', placeholder: 'Near the mosque' }), { optional: true })),
       f('instructions', 'Instructions for the rider', el('input', { class: 'input', placeholder: 'Call when downstairs' }), { optional: true }),
       el('h2', { class: 'h3 store-form__h' }, 'Payment'),
-      MDM.ui.field({ label: 'When do you pay?', control: pay, hint: 'Bank transfer to BML or MIB. Card payments are not taken.' }),
+      MDM.ui.field({ label: 'When do you pay?', control: pay, hint: 'Bank transfer to BML or MIB. No cards.' }),
       failure,
-      el('div', { class: 'form-actions' }, el('a', { class: 'btn btn--ghost', href: '#', on: { click: e => { e.preventDefault(); history.replaceState(null, '', location.pathname); state.view = 'catalogue'; paint(); } } }, 'Back to the store'), submit));
+      el('div', { class: 'form-actions' }, el('a', { class: 'btn btn--ghost', href: '#', on: { click: e => { e.preventDefault(); history.replaceState(null, '', location.pathname); state.view = 'catalogue'; cat = null; paint(); } } }, 'Back to the store'), submit));
     const drawSum = () => sumSlot.replaceChildren(checkoutSummary(zoneSel.value));
     zoneSel.addEventListener('change', drawSum); drawSum();
     const rules = {
@@ -193,18 +241,31 @@
       } finally { if (document.contains(submit)) MDM.ui.setLoading(submit, false); }
     });
     app.replaceChildren(el('div', { class: 'container' },
-      el('div', { class: 'page-head' }, el('h1', null, 'Checkout'), el('p', { class: 'page-head__desc' }, MDM.ui.plural(itemCount(), 'item') + ' from the Mr. Delivery Man store.')),
+      el('div', { class: 'page-head' }, el('h1', null, 'Checkout'), el('p', { class: 'page-head__desc' }, MDM.ui.plural(itemCount(), 'item') + ' from our store.')),
       el('div', { class: 'store-checkout' }, form, el('aside', { class: 'store-checkout__aside' }, el('h2', { class: 'h3' }, 'Order summary'), sumSlot))));
+    if (MDM.motion) MDM.motion.enter(app.querySelector('.store-checkout'));
   }
 
   // ---- Render ----------------------------------------------------------------------------------------------------------------
+  // A quantity button is redrawn when the cart changes: keyboard focus moves to its replacement (Add → +, last − → Add), in the tile
+  // or in the drawer, wherever it was.
+  function restoreFocus(id, inDrawer) {
+    if (!id || !/^store-(add|plus|minus)-/.test(id)) return;
+    const scope = inDrawer ? document.querySelector('.drawer') : app;
+    const pid = id.replace(/^store-(add|plus|minus)-/, '');
+    const n = scope && ['', 'store-plus-' + pid, 'store-add-' + pid].map(t => scope.querySelector('[data-testid="' + (t || id) + '"]')).find(x => x && !x.disabled);
+    if (n && document.activeElement !== n) n.focus();
+  }
   function paint() {
+    const active = document.activeElement, focusId = active && active.getAttribute('data-testid'), inDrawer = !!(active && active.closest('.drawer'));
     state.view = location.hash === '#checkout' ? 'checkout' : 'catalogue';
     if (state.view === 'checkout') {
       // Re-rendering the checkout would wipe what was typed; only the summary and the cart button follow the cart.
       if (!app.querySelector('[data-testid="store-form"]')) renderCheckout();
-    } else renderCatalogue();
+    } else if (cat && app.contains(cat.grid)) refreshCatalogue();
+    else renderCatalogue();
     if (MDM.ui.drawer.isOpen()) { MDM.ui.drawer.setBody(cartBody()); if (!lines().length) MDM.ui.drawer.setFooter(null); }
+    restoreFocus(focusId, inDrawer);
   }
   async function loadProducts() { state.products = (await MDM.store.list('products', { order: 'createdAt' })).sort((a, b) => (a.category < b.category ? -1 : a.category > b.category ? 1 : 0)); }
   async function main() {
@@ -214,9 +275,9 @@
     if (state.me && state.me.phone) state.customer = (await MDM.store.list('customers', { where: { phone: state.me.phone } }))[0] || null;
     await loadProducts();
     paint();
-    window.addEventListener('hashchange', () => { app.replaceChildren(); paint(); window.scrollTo(0, 0); });
-    MDM.store.subscribe('products', async () => { await loadProducts(); if (state.view === 'catalogue') paint(); });
-    MDM.store.subscribe('settings', async () => { state.settings = await MDM.store.settings(); if (state.view === 'catalogue') paint(); });
+    window.addEventListener('hashchange', () => { app.replaceChildren(); cat = null; paint(); window.scrollTo(0, 0); });
+    MDM.store.subscribe('products', async () => { await loadProducts(); if (state.view === 'catalogue' && cat) refreshCatalogue({ grid: 'data' }); });
+    MDM.store.subscribe('settings', async () => { state.settings = await MDM.store.settings(); if (state.view === 'catalogue') renderCatalogue(); });
     window.addEventListener('storage', e => { if (e.key === CART) { memCart = null; paint(); } });
   }
   main();

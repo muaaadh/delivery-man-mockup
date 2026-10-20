@@ -58,20 +58,46 @@
     const c = { alive: true, subs: [], timers: [], pending: null };
     c.sub = (col, fn) => { c.subs.push(MDM.store.subscribe(col, fn)); };
     c.every = (ms, fn) => { c.timers.push(setInterval(fn, ms)); };
+    c.listen = (target, type, fn, opts) => { target.addEventListener(type, fn, opts); c.subs.push(() => target.removeEventListener(type, fn, opts)); };
     c.dispose = () => { c.alive = false; c.subs.forEach(u => { try { u(); } catch (e) { /* already released */ } }); c.timers.forEach(clearInterval); c.subs = []; c.timers = []; };
     // Bursts of store notifications collapse into one render on the next tick.
     c.schedule = fn => { if (c.pending) return; c.pending = setTimeout(() => { c.pending = null; if (c.alive) fn().catch(rethrow); }, 0); };
     return c;
   }
 
-  function pageHead(title, desc, actions) {
+  // pageHead(title, desc, actions, back): back = { href, label } puts a "‹ label" link above the title of a detail page.
+  function pageHead(title, desc, actions, back) {
     return el('div', { class: 'page-head' },
+      back ? el('a', { class: 'back-link', href: back.href, 'data-testid': 'back-link' }, icon('chevron-left', 18), back.label) : null,
       el('h1', { tabindex: '-1' }, title),
       desc ? el('p', { class: 'page-head__desc' }, desc) : null,
       actions && actions.length ? el('div', { class: 'page-head__actions' }, actions) : null);
   }
   function sectionHead(id, title, desc, action) {
     return el('div', { class: 'section-head' }, el('h2', { id }, title), desc ? el('p', { class: 'section-head__desc' }, desc) : null, action ? el('div', { class: 'section-head__action' }, action) : null);
+  }
+  // A small tag beside a section title for figures still to be confirmed with the client ("To confirm", "Demo defaults").
+  function noteTag(text) { return el('span', { class: 'section-tag' }, text); }
+  // In-page index of a long settings page: one button per section that scrolls to it, the section in view marked aria-current.
+  // Buttons rather than #anchors, because the hash belongs to the router. items: [{ id: heading id, label }].
+  function sectionIndex(ctx, items) {
+    const buttons = items.map(it => el('button', { type: 'button', class: 'section-index__item', 'data-target': it.id, 'data-testid': 'section-index-' + it.id,
+      on: { click: () => { const h = document.getElementById(it.id); if (!h) return; h.scrollIntoView({ behavior: MDM.motion && MDM.motion.reduced ? 'auto' : 'smooth', block: 'start' }); mark(it.id); hold = Date.now() + 900; } } }, it.label));
+    const nav = el('nav', { class: 'section-index', 'aria-label': 'Sections' }, buttons);
+    let hold = 0, ticking = false;
+    function mark(id) { buttons.forEach(b => { if (b.dataset.target === id) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); }); }
+    // The last section whose title has passed under the top bar is the one in view; at the very bottom, the last section.
+    function spy() {
+      ticking = false;
+      if (Date.now() < hold || !nav.isConnected) return;
+      let cur = items[0].id;
+      items.forEach(it => { const h = document.getElementById(it.id); if (h && h.getBoundingClientRect().top < 140) cur = it.id; });
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) cur = items[items.length - 1].id;
+      mark(cur);
+    }
+    ctx.listen(window, 'scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(spy); } }, { passive: true });
+    mark(items[0].id);
+    return nav;
   }
   function badge(map, status) { const s = map[status] || { label: status || '', kind: 'neutral' }; return html(MDM.ui.badge(s.kind, s.label, { 'data-status': status })); }
   function telLink(raw) {
@@ -287,7 +313,7 @@
       ui.riderCount = el('span', { class: 'count' });
       ui.orderCount = el('span', { class: 'count' });
       fill(root,
-        pageHead('Live map', 'Riders online now, the order each one is on and their next stop.'),
+        pageHead('Live map'),
         el('div', { class: 'live-layout' }, ui.mapEl,
           el('div', { class: 'live-side' },
             card([el('h2', null, 'Riders'), ui.riderCount], ui.riders),
@@ -317,7 +343,7 @@
     }
     function renderRiders() {
       ui.riderCount.textContent = state.drivers.length ? String(state.drivers.length) : '';
-      if (!state.drivers.length) { ui.riders.replaceChildren(el('li', null, empty('No riders online.', 'Riders appear here once they go online in the rider console.'))); return; }
+      if (!state.drivers.length) { ui.riders.replaceChildren(el('li', null, empty('No riders online.', 'They show here once online.'))); return; }
       fill(ui.riders, state.drivers.map(d => {
         const route = state.routes[d.id] || { orders: [], stops: [] };
         const stop = currentStop(route);
@@ -339,7 +365,7 @@
     }
     function renderOrders() {
       ui.orderCount.textContent = state.orders.length ? String(state.orders.length) : '';
-      if (!state.orders.length) { ui.orders.replaceChildren(el('li', null, empty('No active orders.', 'Assigned, picked up, in transit and on hold orders show here.'))); return; }
+      if (!state.orders.length) { ui.orders.replaceChildren(el('li', null, empty('No active orders.'))); return; }
       const byId = {}; state.drivers.forEach(d => { byId[d.id] = d; });
       fill(ui.orders, state.orders.map(o => {
         const rider = o.driverId ? byId[o.driverId] : null;
@@ -378,7 +404,7 @@
         if (!ctx || !ctx.alive || !ui) return;
         state.mapFailed = true; ui.overlay.hidden = true;
         ui.mapEl.appendChild(el('div', { class: 'map__fallback', 'data-testid': 'live-map-fallback' },
-          el('div', { class: 'alert alert--warn', role: 'status' }, icon('alert-triangle'), el('div', { class: 'alert__body' }, 'Map unavailable right now. Stops and status are still updated below.'))));
+          el('div', { class: 'alert alert--warn', role: 'status' }, icon('alert-triangle'), el('div', { class: 'alert__body' }, 'Map unavailable. The lists still update.'))));
       });
     }
     function drawMap() {
@@ -448,7 +474,7 @@
       ctx = context(); root = host;
       body = el('div', null, el('div', { class: 'skeleton', style: 'height: 96px' }));
       root.replaceChildren(
-        pageHead('Drivers', 'Every driver, the zones they cover, whether they are on duty, today\'s deliveries and where they were last seen.',
+        pageHead('Drivers', null,
           [el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'drivers-add', on: { click: addRider } }, icon('plus'), 'Add driver')]),
         card(null, body, { 'data-testid': 'drivers-card' }));
       ['drivers', 'orders', 'zones', 'attendance', 'staff', 'positions'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
@@ -460,7 +486,7 @@
     async function render() {
       const [drivers, zones, attendance, orders, positions] = await Promise.all([MDM.store.list('drivers', { order: 'name' }), MDM.store.list('zones', { order: 'createdAt' }), MDM.store.list('attendance'), MDM.store.list('orders'), MDM.store.list('positions')]);
       if (!ctx || !ctx.alive) return;
-      if (!drivers.length) { body.replaceChildren(empty('Nothing here yet.', 'Add a driver to start assigning orders.')); return; }
+      if (!drivers.length) { body.replaceChildren(empty('No drivers yet.', 'Add one to start assigning orders.')); return; }
       const today = MDM.ui.dayKey(new Date());
       const zonesOf = d => zones.filter(z => (z.driverIds || []).indexOf(d.id) >= 0 || (d.zones || []).indexOf(z.key) >= 0);
       const shift = d => attendance.find(a => a.staffId === d.staffId && !a.outAt);
@@ -501,7 +527,7 @@
     }
     async function addRider() {
       const zones = await MDM.store.list('zones', { order: 'createdAt' });
-      const v = await MDM.ui.dialog({ title: 'Add driver', message: 'The driver signs in with this mobile number and appears on the team list for attendance and leave.', fields: riderFields(null, zones), okLabel: 'Add driver' });
+      const v = await MDM.ui.dialog({ title: 'Add driver', message: 'They sign in with this mobile number.', fields: riderFields(null, zones), okLabel: 'Add driver' });
       if (!v) return;
       try {
         const ph = phone.normalize(v.phone);
@@ -537,7 +563,7 @@
     async function mount(host) {
       ctx = context(); root = host;
       body = el('div', null, el('div', { class: 'skeleton', style: 'height: 96px' }));
-      root.replaceChildren(pageHead('Customers', 'Everyone who has placed an order, with payments still due. Open a customer to see their order history.'), card(null, body));
+      root.replaceChildren(pageHead('Customers'), card(null, body));
       ctx.sub('customers', () => ctx.schedule(render));
       ctx.sub('orders', () => ctx.schedule(render));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
@@ -547,7 +573,7 @@
     async function render() {
       const [customers, orders] = await Promise.all([MDM.store.list('customers'), MDM.store.list('orders')]);
       if (!ctx || !ctx.alive) return;
-      if (!customers.length) { body.replaceChildren(empty('Nothing here yet.', 'Customers appear here after their first order.')); return; }
+      if (!customers.length) { body.replaceChildren(empty('No customers yet.', 'They show here after a first order.')); return; }
       const stats = {};
       orders.forEach(o => { if (o.status === 'draft') return; const s = stats[o.customerId] || (stats[o.customerId] = { count: 0, last: null, unpaid: 0 }); s.count += 1; if (!s.last || o.createdAt > s.last) s.last = o.createdAt; if (o.payment && (o.payment.status === 'requested' || o.payment.status === 'received')) s.unpaid += o.totals.total; });
       const rows = customers.map(c => { const s = stats[c.id] || { count: c.orderCount || 0, last: c.lastOrderAt || null, unpaid: 0 }; return { c, count: s.count, last: s.last || c.lastOrderAt || null, unpaid: s.unpaid || 0 }; })
@@ -567,7 +593,7 @@
 
   // ==== #/business (tabs Requests | Accounts) and #/business/:accountId ============================================================
   MDM.admin.views.business = (function () {
-    let ctx = null, root = null, ui = null, accountId = null, tab = 'requests';
+    let ctx = null, root = null, ui = null, accountId = null, tab = 'requests', enterNext = false;
     async function mount(host, params) {
       ctx = context(); root = host;
       accountId = params && params.id ? params.id : null;
@@ -586,12 +612,12 @@
     function buildList() {
       ui.tabs = el('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Business' },
         tabButton('requests', 'Requests'), tabButton('accounts', 'Accounts'));
-      root.replaceChildren(pageHead('Business', 'Account requests from the website and the accounts you invoice monthly. Each business is approved on its package sizes, with a fixed rate for each size.'), ui.tabs, ui.body);
+      root.replaceChildren(pageHead('Business'), ui.tabs, ui.body);
     }
     function tabButton(key, label) {
       const count = el('span', { class: 'business-tab__count', 'data-tab-count': key });
       return el('button', { type: 'button', class: 'tab', role: 'tab', id: 'business-tab-' + key, 'aria-selected': tab === key ? 'true' : 'false', 'aria-controls': 'business-panel', 'data-testid': 'business-tab-' + key,
-        on: { click: () => { if (tab === key) return; tab = key; setQuery({ tab: key === 'requests' ? null : key }); ui.tabs.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.id === 'business-tab-' + key ? 'true' : 'false')); ctx.schedule(render); } } }, label, count);
+        on: { click: () => { if (tab === key) return; tab = key; enterNext = true; setQuery({ tab: key === 'requests' ? null : key }); ui.tabs.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.id === 'business-tab-' + key ? 'true' : 'false')); ctx.schedule(render); } } }, label, count);
     }
     async function renderList() {
       const [requests, accounts, orders, settings] = await Promise.all([MDM.store.list('business_requests'), MDM.store.list('business_accounts'), MDM.store.list('orders'), MDM.store.settings()]);
@@ -602,11 +628,13 @@
       rc.textContent = pending ? String(pending) : ''; ac.textContent = accounts.length ? String(accounts.length) : '';
       ui.body.id = 'business-panel'; ui.body.setAttribute('role', 'tabpanel'); ui.body.setAttribute('aria-labelledby', 'business-tab-' + tab);
       ui.body.replaceChildren(tab === 'requests' ? requestsCard(requests, settings, files) : accountsCard(accounts, orders, settings));
+      // A tab switch eases the new panel in once; live re-renders do not.
+      if (enterNext) { enterNext = false; if (MDM.motion) MDM.motion.enter(ui.body); }
     }
     // The business's own guess of its usual package (small / medium / large) as the size category name.
     function guessText(r, settings) { const t = tierInfo(r.typicalSize, settings); return t ? t.label + ' · ' + MDM.pricing.sizeLabel(t.size) : (r.typicalSize || 'Not given'); }
     function requestsCard(requests, settings, files) {
-      if (!requests.length) return card(null, empty('Nothing here yet.', 'Requests from the business page appear here.'));
+      if (!requests.length) return card(null, empty('No requests yet.'));
       const sorted = requests.slice().sort((a, b) => (a.status === 'pending') === (b.status === 'pending') ? 0 : a.status === 'pending' ? -1 : 1);
       const cols = [
         { label: 'Business', primary: true, render: r => el('span', null, r.name, el('span', { class: 'table__sub nowrap' }, 'Requested ' + fmtDate(r.createdAt)), r.volume ? el('span', { class: 'table__sub nowrap' }, VOLUMES[r.volume] || r.volume) : null) },
@@ -624,7 +652,7 @@
       return card(null, table(cols, sorted.map(r => ({ data: r, attrs: { 'data-testid': 'business-request-row', 'data-request-id': r.id, 'data-status': r.status } })), { testid: 'business-requests' }));
     }
     function accountsCard(accounts, orders, settings) {
-      if (!accounts.length) return card(null, empty('Nothing here yet.', 'Approve a request to open the first business account.'));
+      if (!accounts.length) return card(null, empty('No accounts yet.', 'Approve a request to open one.'));
       const month = thisMonth();
       const cols = [
         { label: 'Business', primary: true, render: a => el('a', { href: '#/business/' + a.id, on: { click: e => { e.preventDefault(); navigate('#/business/' + a.id); } } }, a.name) },
@@ -643,7 +671,7 @@
         const [settings, accounts] = await Promise.all([MDM.store.settings(), MDM.store.list('business_accounts')]);
         const existing = accounts.find(a => a.phone === r.phone);
         if (existing) {
-          const ok = await MDM.ui.confirm({ title: 'Link to ' + existing.name, message: 'An account for ' + phone.format(r.phone) + ' already exists. Approving links this request to ' + existing.name + ' and keeps its agreed rates.', okLabel: 'Approve and link' });
+          const ok = await MDM.ui.confirm({ title: 'Link to ' + existing.name, message: phone.format(r.phone) + ' already has this account. Approving links the request and keeps its rates.', okLabel: 'Approve and link' });
           if (!ok) return;
           await MDM.store.update('business_requests', r.id, { status: 'approved', accountId: existing.id, decidedAt: nowIso(), decidedBy: actor() });
           await MDM.store.audit('business_approved', 'Business request from ' + r.name + ' linked to ' + existing.name, actor(), { accountId: existing.id });
@@ -662,16 +690,16 @@
               r.volume ? el('p', { class: 'muted small' }, VOLUMES[r.volume] || r.volume) : null,
               r.notes ? el('p', { class: 'muted small' }, r.notes) : null)),
           el('fieldset', { class: 'tier-fieldset' }, el('legend', { class: 'field__label' }, 'Package sizes and agreed rates'), editor.el),
-          field('Assessment', notes, { optional: true, hint: 'What the photo shows; kept on the account for the team' }),
+          field('Assessment', notes, { optional: true, hint: 'Kept on the account' }),
         ];
         let account = null;
-        const ok = await formDialog({ title: 'Approve ' + r.name, message: 'Check the package photo, pick the sizes this business sends and agree a fixed rate per package for each size.', content, wide: true, okLabel: 'Approve and open account',
+        const ok = await formDialog({ title: 'Approve ' + r.name, message: 'Pick the sizes they send and agree a rate for each.', content, wide: true, okLabel: 'Approve and open account',
           onOk: async () => { const rates = editor.read(); if (!rates) return false; account = await MDM.store.approveBusinessRequest(r.id, { rates, notes: notes.value.trim(), by: actor() }); return true; } });
         if (ok && account) toast('Account opened for ' + r.name + ': ' + ratesText(account, settings));
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function decline(r) {
-      const v = await MDM.ui.dialog({ title: 'Decline ' + r.name, message: 'The reason is kept on the request for your records.', danger: true, okLabel: 'Decline request',
+      const v = await MDM.ui.dialog({ title: 'Decline ' + r.name, danger: true, okLabel: 'Decline request',
         fields: [{ name: 'reason', label: 'Reason', type: 'textarea', required: true, placeholder: 'Outside our delivery area' }] });
       if (!v) return;
       try { await MDM.store.update('business_requests', r.id, { status: 'declined', declineReason: v.reason, declinedAt: nowIso() }); toast('Request from ' + r.name + ' declined'); }
@@ -679,8 +707,9 @@
     }
 
     // ---- Account page ----
+    const BACK = { href: '#/business?tab=accounts', label: 'Business accounts' };
     function buildAccount() {
-      ui.head = pageHead('Business account');
+      ui.head = pageHead('Business account', null, null, BACK);
       ui.details = el('div', { class: 'rate-table' });
       ui.rates = el('div', { class: 'card' });
       ui.ratesAction = el('div');
@@ -693,10 +722,10 @@
       root.replaceChildren(ui.head,
         el('div', { class: 'stack-6' },
           el('section', { 'aria-labelledby': 'acc-details' }, sectionHead('acc-details', 'Account'), card(null, ui.details)),
-          el('section', { 'aria-labelledby': 'acc-rates' }, sectionHead('acc-rates', 'Package sizes and agreed rates', 'Fixed delivery rate per package for each size category this business is approved on.', ui.ratesAction), ui.rates),
+          el('section', { 'aria-labelledby': 'acc-rates' }, sectionHead('acc-rates', 'Sizes and agreed rates', null, ui.ratesAction), ui.rates),
           el('div', { class: 'admin-grid' },
-            el('section', { 'aria-labelledby': 'acc-points' }, sectionHead('acc-points', 'Collection points', 'Where we collect bulk orders from; the business picks one per bulk order.', ui.pointsAction), ui.points),
-            el('section', { 'aria-labelledby': 'acc-cod' }, sectionHead('acc-cod', 'Cash on delivery', 'Cash our drivers collect from this business\'s customers, any date.', ui.codAction), ui.cod)),
+            el('section', { 'aria-labelledby': 'acc-points' }, sectionHead('acc-points', 'Collection points', null, ui.pointsAction), ui.points),
+            el('section', { 'aria-labelledby': 'acc-cod' }, sectionHead('acc-cod', 'Cash on delivery', 'Any date', ui.codAction), ui.cod)),
           el('section', { 'aria-labelledby': 'acc-orders' }, sectionHead('acc-orders', 'Delivered this month'), ui.orders),
           el('section', { 'aria-labelledby': 'acc-invoices' }, sectionHead('acc-invoices', 'Invoices'), ui.invoices)));
     }
@@ -705,16 +734,14 @@
       const files = account ? await loadFiles([account.packagePhotoId]) : {};
       if (!ctx || !ctx.alive) return;
       if (!account) {
-        root.replaceChildren(pageHead('Business account'), card(null, empty('No account with this link.', 'It may have been removed when the demo data was reset.',
-          el('button', { type: 'button', class: 'btn btn--secondary btn--sm', on: { click: () => navigate('#/business?tab=accounts') } }, 'Back to accounts'))));
+        root.replaceChildren(pageHead('Business account', null, null, BACK), card(null, empty('No account with this link.', 'It may have gone with a demo reset.')));
         return;
       }
       const month = thisMonth(), mine = monthOrders(orders, account.id, month);
       const generate = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'business-generate-invoice', on: { click: () => generateInvoice(account, mine, invoices, month) } }, icon('receipt'), 'Generate invoice');
-      const back = el('a', { class: 'btn btn--ghost', href: '#/business?tab=accounts', on: { click: e => { e.preventDefault(); navigate('#/business?tab=accounts'); } } }, 'All accounts');
       const allOrders = el('a', { class: 'btn btn--secondary', href: '#/orders?account=' + encodeURIComponent(account.id), 'data-testid': 'business-all-orders' }, 'Order history');
       const bulk = canView('bulk') ? el('a', { class: 'btn btn--secondary', href: '#/bulk?account=' + encodeURIComponent(account.id), 'data-testid': 'business-bulk' }, 'Bulk orders') : null;
-      const head = pageHead(account.name, 'Business account since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · fixed rates per package size, invoiced monthly' + (account.priorityAllowed ? ' · may request priority' : '') + '.', [back, allOrders, bulk, generate].filter(Boolean));
+      const head = pageHead(account.name, 'Since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · invoiced monthly' + (account.priorityAllowed ? ' · may request priority' : ''), [allOrders, bulk, generate].filter(Boolean), BACK);
       ui.head.replaceWith(head); ui.head = head;
       renderRates(account, settings, files[account.packagePhotoId]);
       renderPoints(account);
@@ -732,7 +759,7 @@
         rateRow('Status', badge({ approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } }, account.status)),
         rateRow('Invoice terms', 'Due in ' + plural(settings.invoiceDueDays, 'day') + (Number(settings.gstPercent) > 0 ? ' · GST ' + settings.gstPercent + '%' : '')));
       // This month's delivered orders
-      if (!mine.length) ui.orders.replaceChildren(empty('Nothing here yet.', 'Delivered business orders for ' + monthLabel(month) + ' appear here.'));
+      if (!mine.length) ui.orders.replaceChildren(empty('Nothing delivered in ' + monthLabel(month) + ' yet.'));
       else {
         const sorted = mine.slice().sort((a, b) => deliveredAt(b) < deliveredAt(a) ? -1 : 1);
         const cols = [
@@ -746,7 +773,7 @@
           el('div', { class: 'pagination' }, el('span', null, plural(packageCount(mine), 'package') + ' delivered in ' + monthLabel(month)), el('span', { class: 'mono' }, money(orderTotal(mine)))));
       }
       // Invoices
-      if (!invoices.length) ui.invoices.replaceChildren(empty('No invoices yet.', 'Generate the invoice for ' + monthLabel(month) + ' once the month is delivered.'));
+      if (!invoices.length) ui.invoices.replaceChildren(empty('No invoices yet.', 'Generate one when the month is done.'));
       else {
         const cols = [
           { label: 'Number', primary: true, render: i => el('span', { class: 'mono nowrap' }, i.number) },
@@ -769,25 +796,25 @@
         tiers.map(t => el('div', { class: 'rate-table__row', 'data-tier': t.value },
           el('div', { class: 'rate-table__label' }, t.label + ' · ' + MDM.pricing.sizeLabel(t.size), t.hint ? el('small', null, t.hint) : null),
           el('div', { class: 'rate-table__value mono', 'data-testid': 'business-rate-' + t.value }, money(t.rate)))),
-        agreed ? null : el('p', { class: 'muted small' }, 'No agreed sizes yet: every size is offered at the default rate until you edit the rates.'));
+        agreed ? null : el('p', { class: 'muted small' }, 'No agreed sizes yet: default rates apply.'));
       ui.rates.replaceChildren(el('div', { class: 'card__body account-rates' },
         el('div', { class: 'account-rates__photo' },
           photoThumb(photo, 'Typical package from ' + account.name, { large: true, testid: 'business-package-photo' }),
-          el('div', { class: 'account-rates__assess' }, el('div', { class: 'field__label' }, 'Assessment'), el('p', { 'data-testid': 'business-assessment' }, account.assessment || 'No assessment written yet.'))),
+          el('div', { class: 'account-rates__assess' }, el('div', { class: 'field__label' }, 'Assessment'), el('p', { 'data-testid': 'business-assessment' }, account.assessment || 'No assessment yet.'))),
         rows));
     }
     async function editRates(account, settings) {
       const tiers = MDM.pricing.businessTiers(settings);
       const has = t => account.rates && account.rates[t.value] != null;
       const editor = tierEditor(tiers, { picked: t => account.rates && Object.keys(account.rates).length ? has(t) : true, rate: t => has(t) ? account.rates[t.value] : t.rate });
-      const ok = await formDialog({ title: 'Rates for ' + account.name, message: 'Agreed fixed rate per package for each size this business sends. New bulk orders use these rates; existing orders keep their prices.', content: editor.el, wide: true, okLabel: 'Save rates',
+      const ok = await formDialog({ title: 'Rates for ' + account.name, message: 'New bulk orders use these rates. Existing orders keep their prices.', content: editor.el, wide: true, okLabel: 'Save rates',
         onOk: async () => { const rates = editor.read(); if (!rates) return false; await MDM.store.setBusinessRates(account.id, rates, actor()); return true; } });
       if (ok) toast('Rates saved for ' + account.name);
     }
     function renderPoints(account) {
       const points = account.collectionPoints || [];
-      ui.pointsAction.replaceChildren(el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-point-add', on: { click: () => editPoint(account, null) } }, icon('plus'), 'Add collection point'));
-      if (!points.length) { ui.points.replaceChildren(empty('No collection points yet.', 'Bulk orders are collected from the pickup address until you add one.')); return; }
+      ui.pointsAction.replaceChildren(el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-point-add', on: { click: () => editPoint(account, null) } }, icon('plus'), 'Add point'));
+      if (!points.length) { ui.points.replaceChildren(empty('No collection points yet.', 'Bulk orders use the pickup address.')); return; }
       ui.points.replaceChildren(el('ul', { class: 'list business-points', 'data-testid': 'business-points' }, points.map(p => el('li', { class: 'list__item', 'data-testid': 'business-point', 'data-point-id': p.id },
         el('div', { class: 'list__main' },
           el('div', { class: 'list__title' }, p.label, p.isDefault ? html(MDM.ui.badge('neutral', 'Default')) : null),
@@ -807,7 +834,7 @@
           { name: 'landmark', label: 'Landmark', type: 'text', value: p.landmark || '' },
           { name: 'contactName', label: 'Contact person', type: 'text', value: p.contactName || account.contactName || '' },
           { name: 'contactPhone', label: 'Contact number', type: 'tel', value: p.contactPhone ? phone.format(p.contactPhone) : phone.format(account.phone) },
-          { name: 'preferredTime', label: 'Preferred collection time', type: 'time', value: p.preferredTime || '', hint: 'Suggested on new bulk orders from this point' },
+          { name: 'preferredTime', label: 'Preferred collection time', type: 'time', value: p.preferredTime || '', hint: 'Suggested on new bulk orders' },
           { name: 'isDefault', label: 'Default collection point', type: 'checkbox', value: p.id ? !!p.isDefault : !(account.collectionPoints || []).length }] });
       if (!v) return;
       try {
@@ -817,7 +844,7 @@
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function removePoint(account, p) {
-      const ok = await MDM.ui.confirm({ title: 'Remove ' + p.label, message: 'Bulk orders already placed keep their collection address. New bulk orders cannot pick ' + p.label + ' any more.', okLabel: 'Remove', danger: true });
+      const ok = await MDM.ui.confirm({ title: 'Remove ' + p.label, message: 'Bulk orders already placed keep their address.', okLabel: 'Remove', danger: true });
       if (!ok) return;
       try {
         await MDM.store.removeCollectionPoint(account.id, p.id);
@@ -827,13 +854,13 @@
     }
     function renderCod(account, orders) {
       const s = codSummary(orders, account.id);
-      ui.codAction.replaceChildren(canView('cash') ? el('a', { class: 'btn btn--secondary btn--sm', href: '#/cash?account=' + encodeURIComponent(account.id), 'data-testid': 'business-cash-link' }, 'Open Cash & COD') : null);
+      ui.codAction.replaceChildren(canView('cash') ? el('a', { class: 'btn btn--secondary btn--sm', href: '#/cash?account=' + encodeURIComponent(account.id), 'data-testid': 'business-cash-link' }, 'Cash & COD') : null);
       const line = (key, label, sub) => rateRow(label, el('span', { 'data-testid': 'business-cod-' + key }, money(s[key].amount)), { mono: true, sub: plural(s[key].n, 'order') + (sub ? ' · ' + sub : '') });
       const any = Object.keys(s).some(k => s[k].n);
       ui.cod.replaceChildren(el('div', { class: 'card__body' }, any ? el('div', { class: 'rate-table', 'data-testid': 'business-cod' },
         line('pending', 'To collect', 'with the customer'), line('collected', 'With the driver', 'collected, not handed in'), line('with_office', 'With the office', 'to pay the business'),
         line('remitted', 'Paid to the business'), line('not_collected', 'Not collected', 'cancelled or refused'))
-        : empty('No cash on delivery yet.', 'Cash amounts entered on bulk orders appear here.')));
+        : empty('No cash on delivery yet.')));
     }
     function recipients(o) {
       const names = (o.packages || []).map(p => p.dropoff && p.dropoff.recipient ? p.dropoff.recipient.name : '').filter(Boolean);
@@ -875,21 +902,24 @@
 
   // ==== #/rates ================================================================================================================
   MDM.admin.views.rates = (function () {
-    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [];
+    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [], slot = null;
+    const SECTIONS = [{ id: 'rates-sizes', label: 'Package rates' }, { id: 'rates-fees', label: 'Fees' }, { id: 'rates-tiers', label: 'Business sizes' }, { id: 'rates-rules', label: 'Rules' },
+      { id: 'rates-size-guide', label: 'Size guide' }, { id: 'rates-ops', label: 'Operations' }, { id: 'rates-banks', label: 'Bank accounts' }, { id: 'rates-terms', label: 'Terms and invoicing' }];
     async function mount(host) {
       ctx = context(); root = host; dirty = false;
-      root.replaceChildren(pageHead('Rates', 'The figures the website quotes and the checkout uses. Saved values apply to new requests; existing orders keep their prices.'), el('div', { class: 'skeleton', style: 'height: 96px' }));
+      slot = el('div', { class: 'settings-main' }, el('div', { class: 'skeleton', style: 'height: 96px' }));
+      root.replaceChildren(pageHead('Rates'), el('div', { class: 'settings-layout' }, sectionIndex(ctx, SECTIONS), slot));
       ctx.sub('settings', () => { if (!dirty) ctx.schedule(render); });
       ctx.sub('business_accounts', () => { if (!dirty) ctx.schedule(render); });
       ctx.sub('*', m => { if (m && m.op === 'reset') { dirty = false; ctx.schedule(render); } });
       await render();
     }
-    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; form = null; tierList = null; tierRows = []; }
+    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; form = null; tierList = null; tierRows = []; slot = null; }
     const grid = (s) => {
       const sizes = s.rates.sizes;
       const cell = (size, side) => numInput('sizes.' + size + '.' + side, sizes[size][side], { 'aria-label': MDM.pricing.sizeLabel(size) + ', ' + (side === 'same' ? 'within one island' : 'crossing the bridge'), 'data-testid': 'rates-size-' + size + '-' + side });
       return el('div', { class: 'rates-grid', role: 'group', 'aria-label': 'Package rates in MVR' },
-        el('div', { class: 'rates-grid__head' }, 'Size'), el('div', { class: 'rates-grid__head' }, 'Within one island'), el('div', { class: 'rates-grid__head' }, 'Crossing the bridge'),
+        el('div', { class: 'rates-grid__head' }, 'Size'), el('div', { class: 'rates-grid__head' }, 'Same island'), el('div', { class: 'rates-grid__head' }, 'Across the bridge'),
         ['bag', 'box', 'xl'].map(size => [el('div', { class: 'rates-grid__label' }, MDM.pricing.sizeLabel(size)), cell(size, 'same'), cell(size, 'cross')]));
     };
     // §4: the website shows each size as a range (MVR 35–45, MVR 45–60, MVR 60++), worked out from the two figures above as you type.
@@ -918,7 +948,7 @@
           users.length ? el('span', { class: 'muted small' }, 'Agreed with ' + users.map(a => a.name).join(', ')) : null,
           el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'tier-remove', 'aria-label': 'Remove size category ' + (i + 1), on: { click: () => removeTier(row) } }, 'Remove')),
         el('div', { class: 'grid-2' }, field('Name', row.label), field('Matching size', row.size)),
-        el('div', { class: 'grid-2' }, field('Default rate, MVR', row.rate, { hint: 'Offered when a business is approved' }), field('Description', row.hint, { optional: true })));
+        el('div', { class: 'grid-2' }, field('Default rate, MVR', row.rate), field('Description', row.hint, { optional: true })));
       row.users = users;
       return row;
     }
@@ -962,40 +992,42 @@
       while (banks.length < 2) banks.push({ id: banks.length ? 'bank2' : 'bank1', name: '', accountName: '', accountNo: '' });
       // Same section rhythm as #/settings (SPEC §2.5): <section aria-labelledby> → .section-head (H2 + caption as its desc) → full-width card,
       // with the fields inside capped at the 640px form width by .form-card__body.
-      const formSection = (id, title, caption, children) => el('section', { 'aria-labelledby': id }, sectionHead(id, title, caption),
+      // One <section aria-labelledby> per group: an H2 (with a "To confirm" tag where the figure is an assumption), a short note, one
+      // card of fields capped at the 640px form width. One Save for the whole form, in a bar that stays in view.
+      const formSection = (id, title, caption, children, tag) => el('section', { class: 'settings-section', 'aria-labelledby': id }, sectionHead(id, [title, tag ? noteTag(tag) : null], caption),
         card(null, el('div', { class: 'card__body' }, el('div', { class: 'form-card__body' }, children))));
       form = el('form', { class: 'form form--wide', novalidate: true, 'data-testid': 'rates-form', on: { submit: save, input: e => { dirty = true; if (e.target && /^sizes\./.test(e.target.name || '')) ranges.update(); } } },
-        formSection('rates-sizes', 'Package rates', 'Assumed rule, confirm with client. MVR per package. The lower figure applies within one island, the higher one when pickup and drop-off are on different islands. The website shows the two as a range.',
-          [grid(s), ranges.el, checkbox('xlQuoted', s.rates.sizes.xl.quoted, 'XL is quoted before pickup', 'The website prints "' + MDM.pricing.rangeLabel('xl', s) + '" for XL and the request waits for your quote')]),
+        formSection('rates-sizes', 'Package rates', 'MVR per package. The website shows each size as a range.',
+          [grid(s), ranges.el, checkbox('xlQuoted', s.rates.sizes.xl.quoted, 'Quote XL before pickup', 'Website shows "' + MDM.pricing.rangeLabel('xl', s) + '"')], 'To confirm'),
         formSection('rates-fees', 'Fees', null, [
-          el('div', { class: 'rates-cargo' }, field('Maldivian Cargo fee (only for Maldivian Cargo deliveries)', numInput('cargo', s.rates.cargo), { hint: 'MVR, once per order. Its own line on the order, charged only when the delivery method is Maldivian Cargo (counter at the main bus terminal)' })),
-          el('div', { class: 'grid-2' }, field('Airport fee, MVR', numInput('airport', s.rates.airport), { hint: 'For airport deliveries, per order or per package as set under Rules' }), field('Shopping fee, % of the receipt', numInput('shoppingPct', s.rates.shoppingPct, { max: '100' }))),
-          el('div', { class: 'grid-2' }, field('Extra vehicle charge, MVR', numInput('vehicle', s.rates.vehicle == null ? '' : s.rates.vehicle, { placeholder: 'Ask each time' }), { optional: true, hint: 'Suggested when an operator adds a vehicle to an order. Leave empty to enter it each time.' }), field('Business rate without size categories, MVR', numInput('business', s.rates.business), { hint: 'Only for older business accounts with no agreed sizes' }))]),
-        formSection('rates-tiers', 'Business size categories', 'The package sizes businesses are approved on. Each business agrees its own fixed rate per category; the default rate is the starting offer.', [
+          el('div', { class: 'rates-cargo' }, field('Maldivian Cargo fee, MVR', numInput('cargo', s.rates.cargo), { hint: 'Once per Maldivian Cargo order' })),
+          el('div', { class: 'grid-2' }, field('Airport fee, MVR', numInput('airport', s.rates.airport), { hint: 'Per order or package, see Rules' }), field('Shopping fee, % of receipt', numInput('shoppingPct', s.rates.shoppingPct, { max: '100' }))),
+          el('div', { class: 'grid-2' }, field('Extra vehicle, MVR', numInput('vehicle', s.rates.vehicle == null ? '' : s.rates.vehicle, { placeholder: 'Ask each time' }), { optional: true, hint: 'Empty: enter it each time' }), field('Business rate, no sizes, MVR', numInput('business', s.rates.business), { hint: 'Older accounts only' }))]),
+        formSection('rates-tiers', 'Business sizes', 'The default rate is the starting offer to a business.', [
           tierList,
-          el('div', null, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'rates-tier-add', on: { click: addTier } }, icon('plus'), 'Add size category'))]),
-        formSection('rates-rules', 'Rules', 'Assumed, confirm with client', [
-          checkbox('airportReplacesCross', s.rules.airportReplacesCross, 'Airport replaces the cross-island figure', 'A package touching the airport is priced at its same-island figure and the airport fee is added once'),
+          el('div', null, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'rates-tier-add', on: { click: addTier } }, icon('plus'), 'Add size'))]),
+        formSection('rates-rules', 'Rules', null, [
+          checkbox('airportReplacesCross', s.rules.airportReplacesCross, 'Airport replaces the cross-island figure', 'Same-island rate plus the airport fee once'),
           el('div', { class: 'grid-2' },
-            field('Airport fee charged per', select('airportFeePer', s.rules.airportFeePer, [{ value: 'order', label: 'Order' }, { value: 'package', label: 'Package' }])))]),
-        formSection('rates-size-guide', 'Size guide', 'Wording to confirm with client', [
-          field('Bag', textarea('guide.bag', s.sizeGuide.bag, { rows: 2 })), field('Box', textarea('guide.box', s.sizeGuide.box, { rows: 2 })), field('XL', textarea('guide.xl', s.sizeGuide.xl, { rows: 2 }))]),
-        formSection('rates-ops', 'Operations', 'Operations · demo defaults, not from the client brief', [
+            field('Airport fee charged per', select('airportFeePer', s.rules.airportFeePer, [{ value: 'order', label: 'Order' }, { value: 'package', label: 'Package' }])))], 'To confirm'),
+        formSection('rates-size-guide', 'Size guide', null, [
+          field('Bag', textarea('guide.bag', s.sizeGuide.bag, { rows: 2 })), field('Box', textarea('guide.box', s.sizeGuide.box, { rows: 2 })), field('XL', textarea('guide.xl', s.sizeGuide.xl, { rows: 2 }))], 'To confirm'),
+        formSection('rates-ops', 'Operations', null, [
           el('div', { class: 'grid-2' }, field('Opens at', input('hours.open', hours.open, { placeholder: '09:00', inputmode: 'numeric' })), field('Closes at', input('hours.close', hours.close, { placeholder: '23:00', inputmode: 'numeric' }))),
           field('Days', input('days', ops.days)),
-          field('ASAP wording', input('asapText', ops.asapText), { hint: 'Shown under "ASAP" on the request page' }),
+          field('ASAP wording', input('asapText', ops.asapText), { hint: 'Under "ASAP" on the request page' }),
           el('div', { class: 'grid-2' }, field('Payment review time', input('reviewText', ops.reviewText), { hint: 'Shown as "usually within …"' }), field('Business reply time', input('businessReplyText', ops.businessReplyText))),
           el('div', { class: 'grid-3' }, field('First slot', input('slotStart', ops.slotStart, { placeholder: '09:00' })), field('Last slot', input('slotEnd', ops.slotEnd, { placeholder: '23:00' })), field('Slot length, minutes', numInput('slotMinutes', ops.slotMinutes))),
           el('div', { class: 'grid-3' }, field('City speed, km/h', numInput('speedCityKmh', ops.speedCityKmh)), field('Bridge speed, km/h', numInput('speedHighwayKmh', ops.speedHighwayKmh)), field('Peak buffer, minutes', numInput('peakBufferMin', ops.peakBufferMin))),
-          field('Peak windows', input('peakWindows', (ops.peakWindows || []).join(', ')), { hint: 'Comma separated, 24 h clock: 08:00-09:30, 17:00-19:30' }),
-          field('Closed windows', input('closedWindows', (ops.closedWindows || []).join(', ')), { hint: 'Comma separated, optional day prefix: Fri 12:00-13:30' })]),
-        formSection('rates-banks', 'Bank accounts', 'Printed at checkout and on invoices. Transfer reference is always the order or invoice number.', banks.map((b, i) => el('div', { class: 'grid-3' },
+          field('Peak windows', input('peakWindows', (ops.peakWindows || []).join(', ')), { hint: '24 h, comma separated: 08:00-09:30' }),
+          field('Closed windows', input('closedWindows', (ops.closedWindows || []).join(', ')), { hint: 'Optional day first: Fri 12:00-13:30' })], 'Demo defaults'),
+        formSection('rates-banks', 'Bank accounts', 'On checkout and invoices. The reference is the order or invoice number.', banks.map((b, i) => el('div', { class: 'grid-3' },
           field('Bank ' + (i + 1), input('banks.' + i + '.name', b.name)), field('Account name', input('banks.' + i + '.accountName', b.accountName)), field('Account number', input('banks.' + i + '.accountNo', b.accountNo, { class: 'input mono', inputmode: 'numeric' }))))),
         formSection('rates-terms', 'Terms and invoicing', null, [
-          field('What we carry', textarea('terms', s.terms), { hint: 'Shown when a new customer signs up or a guest places an order, with the "I\'ve read what we carry" box' }),
-          el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides the GST line on invoices' }))]),
-        el('div', { class: 'form-actions' }, el('span', { class: 'form-caption' }, 'Changes apply to new requests and quotes.'), el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'rates-save' }, 'Save rates')));
-      const old = root.querySelector('form, .skeleton'); if (old) old.replaceWith(form); else root.appendChild(form);
+          field('What we carry', textarea('terms', s.terms), { hint: 'Shown at sign-up and guest checkout' }),
+          el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides GST on invoices' }))]),
+        el('div', { class: 'form-actions save-bar' }, el('span', { class: 'form-caption' }, 'Applies to new requests and quotes.'), el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'rates-save' }, 'Save rates')));
+      slot.replaceChildren(form);
       drawTiers(); ranges.update();
       dirty = false;
     }
@@ -1031,7 +1063,7 @@
       };
       const btn = form.querySelector('[data-testid="rates-save"]');
       MDM.ui.setLoading(btn, true);
-      try { await MDM.store.saveSettings(patch); dirty = false; toast('Rates saved. The website shows the new figures on its next load.'); }
+      try { await MDM.store.saveSettings(patch); dirty = false; toast('Rates saved'); }
       catch (err) { toast(storeMessage(err), 'danger'); }
       finally { MDM.ui.setLoading(btn, false); }
     }
@@ -1040,77 +1072,77 @@
 
   // ==== #/settings =============================================================================================================
   MDM.admin.views.settings = (function () {
-    let ctx = null, root = null, ui = null, dirty = false;
+    let ctx = null, root = null, ui = null, dirty = false, slot = null;
+    const SECTIONS = [{ id: 'set-contact', label: 'Contact details' }, { id: 'set-notice', label: 'Public notice' }, { id: 'set-payment', label: 'Payments and naalu' }, { id: 'set-notify', label: 'Notifications' },
+      { id: 'set-hr', label: 'Staff hours' }, { id: 'set-store', label: 'E-store' }, { id: 'set-demo', label: 'Demo' }, { id: 'set-data', label: 'Your data' }];
     async function mount(host) {
       ctx = context(); root = host; dirty = false; ui = {};
-      root.replaceChildren(pageHead('Settings', 'Contact details, payments and naalu, notifications, staff hours and off days, the e-store, the public notice, the demo switches and your data.'), el('div', { class: 'skeleton', style: 'height: 96px' }));
+      slot = el('div', { class: 'settings-main' }, el('div', { class: 'skeleton', style: 'height: 96px' }));
+      root.replaceChildren(pageHead('Settings'), el('div', { class: 'settings-layout' }, sectionIndex(ctx, SECTIONS), slot));
       ctx.sub('settings', () => { if (!dirty) ctx.schedule(render); });
       ctx.sub('*', m => { if (m && m.op === 'reset') { dirty = false; ctx.schedule(render); } });
       await render();
     }
-    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; ui = null; }
+    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; ui = null; slot = null; }
     async function render() {
       const s = await MDM.store.settings();
       if (!ctx || !ctx.alive) return;
       const c = s.contact || {}, notice = s.notice || {}, demo = s.demo || {};
       const contactForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-contact-form', on: { submit: saveContact, input: () => { dirty = true; } } },
-        el('div', { class: 'alert alert--info', role: 'note' }, icon('info'), el('div', { class: 'alert__body' }, 'Demo contact details, replace before launch')),
-        el('div', { class: 'grid-2' }, field('Phone', input('phone', phone.format(c.phone), { type: 'tel', inputmode: 'numeric', autocomplete: 'tel', class: 'input mono' }), { hint: 'Shown in the footer and on "Call us"' }), field('WhatsApp', input('whatsapp', phone.format(c.whatsapp), { type: 'tel', inputmode: 'numeric', class: 'input mono' }))),
+        el('div', { class: 'grid-2' }, field('Phone', input('phone', phone.format(c.phone), { type: 'tel', inputmode: 'numeric', autocomplete: 'tel', class: 'input mono' }), { hint: 'Footer and "Call us"' }), field('WhatsApp', input('whatsapp', phone.format(c.whatsapp), { type: 'tel', inputmode: 'numeric', class: 'input mono' }))),
         el('div', { class: 'grid-2' }, field('Viber', input('viber', phone.format(c.viber), { type: 'tel', inputmode: 'numeric', class: 'input mono' })), field('Email', input('email', c.email, { type: 'email', autocomplete: 'email' }))),
         el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'settings-save-contact' }, 'Save contact details')));
       const noticeForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-notice-form', on: { submit: saveNotice, input: () => { dirty = true; } } },
-        field('Notice text', textarea('noticeText', notice.text, { rows: 2, 'data-testid': 'settings-notice-text' }), { hint: 'One line under the website header, for closures and delays' }),
-        checkbox('noticeActive', notice.active, 'Show the notice on the public site'),
+        field('Notice text', textarea('noticeText', notice.text, { rows: 2, 'data-testid': 'settings-notice-text' }), { hint: 'One line under the site header' }),
+        checkbox('noticeActive', notice.active, 'Show on the public site'),
         el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'settings-save-notice' }, 'Save notice')));
       const rules = s.rules || {}, notif = s.notifications || {}, chans = notif.channels || {}, hr = s.hr || {}, st = s.store || {};
       const saveBtn = (testid, text) => el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': testid }, text));
       const payForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-payment-form', on: { submit: savePayment, input: () => { dirty = true; } } },
-        field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, the invoice goes out automatically' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping orders are always paid before we buy. Business accounts are invoiced monthly.' }),
-        checkbox('upfrontOptional', rules.upfrontOptional !== false, 'Customers may pay upfront', 'Shows "Pay now" on the tracking page as soon as the price is confirmed'),
-        field('Express handling fee, MVR', numInput('expressFee', (s.rates || {}).express || 0), { hint: 'Suggested when you confirm the price of an express order' }),
-        checkbox('naaluBillable', !!rules.naaluBillable, 'Charge naalu to the customer by default', 'Naalu a driver pays at a jetty is added to the customer\'s price. When off, it is recorded for the driver\'s reimbursement only and the office can still bill it on an order.'),
+        field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, invoice sent automatically' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping: always upfront. Businesses: monthly.' }),
+        checkbox('upfrontOptional', rules.upfrontOptional !== false, 'Customers may pay upfront', 'Shows "Pay now" once the price is confirmed'),
+        field('Express handling fee, MVR', numInput('expressFee', (s.rates || {}).express || 0), { hint: 'Suggested on express orders' }),
+        checkbox('naaluBillable', !!rules.naaluBillable, 'Charge naalu to the customer by default', 'When off, only the driver is reimbursed'),
         saveBtn('settings-save-payment', 'Save payment settings'));
       const notifyForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-notify-form', on: { submit: saveNotify, input: () => { dirty = true; } } },
-        checkbox('notifEnabled', notif.enabled !== false, 'Send customer notifications', 'Submitted, confirmed, price confirmed, driver assigned, collected, out for delivery, delivered or failed, payments, priority and cancellations'),
+        checkbox('notifEnabled', notif.enabled !== false, 'Send customer notifications', 'On every status, payment and cancellation'),
         field('Send by', select('notifChannel', notif.channel || 'customer', [{ value: 'customer', label: 'What each customer chose' }, { value: 'sms', label: 'SMS for everyone' }, { value: 'whatsapp', label: 'WhatsApp for everyone' }, { value: 'viber', label: 'Viber for everyone' }, { value: 'email', label: 'Email for everyone' }])),
-        el('div', { class: 'stack-2' }, el('span', { class: 'field__label' }, 'Channels connected'), [['sms', 'SMS'], ['whatsapp', 'WhatsApp'], ['viber', 'Viber'], ['email', 'Email']].map(c => checkbox('ch_' + c[0], chans[c[0]] !== false, c[1]))),
-        field('Sender name', input('senderName', notif.senderName || 'MrDelivery'), { hint: 'Shown as the SMS sender. The mockup logs messages under Notifications; sending needs an SMS or WhatsApp provider.' }),
+        el('div', { class: 'stack-2' }, el('span', { class: 'field__label' }, 'Channels connected'), el('div', { class: 'checkbox-row' }, [['sms', 'SMS'], ['whatsapp', 'WhatsApp'], ['viber', 'Viber'], ['email', 'Email']].map(c => checkbox('ch_' + c[0], chans[c[0]] !== false, c[1])))),
+        field('Sender name', input('senderName', notif.senderName || 'MrDelivery'), { hint: 'The SMS sender name' }),
         saveBtn('settings-save-notify', 'Save notification settings'));
       const hrForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-hr-form', on: { submit: saveHr, input: () => { dirty = true; } } },
         el('div', { class: 'grid-2' }, field('Shift starts', input('shiftStart', hr.shiftStart || '08:00', { inputmode: 'numeric', placeholder: '08:00' })), field('Shift ends', input('shiftEnd', hr.shiftEnd || '17:00', { inputmode: 'numeric', placeholder: '17:00' }))),
         el('div', { class: 'grid-3' }, field('Late after, minutes', numInput('graceMinutes', hr.graceMinutes != null ? hr.graceMinutes : 10)), field('Annual leave, days', numInput('annualLeaveDays', hr.annualLeaveDays || 30)), field('Sick leave, days', numInput('sickLeaveDays', hr.sickLeaveDays || 30))),
-        field('Weekly off day', select('weeklyOffDay', String(hr.weeklyOffDay != null ? hr.weeklyOffDay : 5), WEEKDAYS.map((d, i) => ({ value: String(i), label: d }))), { hint: 'Working on this day earns the employee one accumulated off day' }),
+        field('Weekly off day', select('weeklyOffDay', String(hr.weeklyOffDay != null ? hr.weeklyOffDay : 5), WEEKDAYS.map((d, i) => ({ value: String(i), label: d }))), { hint: 'Working it earns one off day' }),
         saveBtn('settings-save-hr', 'Save staff settings'));
       const storeForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-store-form', on: { submit: saveStore, input: () => { dirty = true; } } },
-        checkbox('storeOpen', st.open !== false, 'The e-store is open', 'When closed, the store page shows the catalogue without the checkout'),
-        el('div', { class: 'grid-2' }, field('Store address', input('storeAddress', st.address || ''), { hint: 'Where drivers collect store orders' }), field('Zone', select('storeZone', st.zone || 'male', MDM.geo.zoneOptions()))),
+        checkbox('storeOpen', st.open !== false, 'The e-store is open', 'When closed, no checkout'),
+        el('div', { class: 'grid-2' }, field('Store address', input('storeAddress', st.address || ''), { hint: 'Drivers collect store orders here' }), field('Zone', select('storeZone', st.zone || 'male', MDM.geo.zoneOptions()))),
         field('Note on the store page', input('storeNote', st.note || '')),
         saveBtn('settings-save-store', 'Save store settings'));
       ui.autopilot = el('input', { type: 'checkbox', id: 'settings-autopilot', 'data-testid': 'settings-autopilot', checked: !!demo.autopilot, on: { change: saveAutopilot } });
       const demoBody = el('div', { class: 'stack-4' },
-        el('label', { class: 'checkbox', for: 'settings-autopilot' }, ui.autopilot, el('span', null, 'Demo autopilot', el('span', { class: 'hint' }, 'Keeps the sample rider on MDM-1038 moving so the tracking demo is never static. Off in production.'))),
-        el('p', { class: 'settings-note' }, 'Reset puts back the sample orders, riders, customers and invoices and clears everything added since. Your sign-in stays.'),
+        el('label', { class: 'checkbox', for: 'settings-autopilot' }, ui.autopilot, el('span', null, 'Demo autopilot', el('span', { class: 'hint' }, 'Keeps the MDM-1038 rider moving'))),
         el('div', { class: 'settings-actions' }, el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'settings-reset', on: { click: resetDemo } }, icon('refresh'), 'Reset demo data')));
       ui.importInput = el('input', { class: 'sr-only', type: 'file', id: 'settings-import', accept: 'application/json,.json', 'data-testid': 'settings-import', on: { change: importFile } });
       ui.importError = el('div', { class: 'alert alert--danger', role: 'alert', hidden: true, 'data-testid': 'settings-import-error' }, icon('alert-circle'), el('div', { class: 'alert__body' }));
       const dataBody = el('div', { class: 'stack-4' },
-        el('p', { class: 'settings-note' }, 'Export saves everything in this browser as one JSON file. With files includes uploaded slips and photos, which makes it much larger.'),
         el('div', { class: 'settings-actions' },
           el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'settings-export', on: { click: () => exportData(false) } }, icon('download'), 'Export JSON'),
-          el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'settings-export-files', on: { click: () => exportData(true) } }, icon('download'), 'Export JSON with files')),
-        el('p', { class: 'settings-note' }, 'Import replaces the data in this browser with a file exported from this demo.'),
-        el('div', { class: 'settings-actions' }, el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'settings-import-button', on: { click: () => ui.importInput.click() } }, icon('upload'), 'Import JSON'), ui.importInput),
+          el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'settings-export-files', on: { click: () => exportData(true) } }, icon('download'), 'Export with files'),
+          el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'settings-import-button', on: { click: () => ui.importInput.click() } }, icon('upload'), 'Import JSON'), ui.importInput),
+        el('p', { class: 'settings-note' }, 'Import replaces all data in this browser.'),
         ui.importError);
-      const content = el('div', { class: 'stack-6' },
-        el('section', { 'aria-labelledby': 'set-contact' }, sectionHead('set-contact', 'Contact details'), card(null, el('div', { class: 'card__body' }, contactForm))),
-        el('section', { 'aria-labelledby': 'set-payment' }, sectionHead('set-payment', 'Payments and naalu'), card(null, el('div', { class: 'card__body' }, payForm))),
-        el('section', { 'aria-labelledby': 'set-notify' }, sectionHead('set-notify', 'Notifications'), card(null, el('div', { class: 'card__body' }, notifyForm))),
-        el('section', { 'aria-labelledby': 'set-hr' }, sectionHead('set-hr', 'Staff hours, leave and off days'), card(null, el('div', { class: 'card__body' }, hrForm))),
-        el('section', { 'aria-labelledby': 'set-store' }, sectionHead('set-store', 'E-store'), card(null, el('div', { class: 'card__body' }, storeForm))),
-        el('section', { 'aria-labelledby': 'set-notice' }, sectionHead('set-notice', 'Public notice'), card(null, el('div', { class: 'card__body' }, noticeForm))),
-        el('section', { 'aria-labelledby': 'set-demo' }, sectionHead('set-demo', 'Demo'), card(null, el('div', { class: 'card__body' }, demoBody))),
-        el('section', { 'aria-labelledby': 'set-data' }, sectionHead('set-data', 'Your data'), card(null, el('div', { class: 'card__body' }, dataBody))));
-      const old = root.querySelector('.stack-6, .skeleton'); if (old) old.replaceWith(content); else root.appendChild(content);
+      const group = (id, title, body, tag) => el('section', { class: 'settings-section', 'aria-labelledby': id }, sectionHead(id, [title, tag ? noteTag(tag) : null]), card(null, el('div', { class: 'card__body' }, body)));
+      slot.replaceChildren(el('div', { class: 'stack-6' },
+        group('set-contact', 'Contact details', contactForm, 'Demo details'),
+        group('set-notice', 'Public notice', noticeForm),
+        group('set-payment', 'Payments and naalu', payForm),
+        group('set-notify', 'Notifications', notifyForm),
+        group('set-hr', 'Staff hours, leave and off days', hrForm),
+        group('set-store', 'E-store', storeForm),
+        group('set-demo', 'Demo', demoBody),
+        group('set-data', 'Your data', dataBody)));
       dirty = false;
     }
     async function saveContact(e) {

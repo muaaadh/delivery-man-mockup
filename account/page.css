@@ -1,54 +1,83 @@
-/* My orders: identity row, tabs, the "Order again" card, then the order table (stacked cards below 720px), messages and the address book. */
+/* My orders: the name as the title, pill tabs, then per tab: the "Order again" card, filter chips and one row per order; the messages;
+   the address book. Rows and cards use tokens only, so dark mode follows. */
 body.page-account main { padding-bottom: 48px; }
-body.page-account .account-id { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-body.page-account .account-id .row { gap: 8px; }
-body.page-account .tabs { margin-bottom: 20px; }
-body.page-account .tab .count { margin-left: 2px; }
-body.page-account .filters__chips { display: flex; flex-wrap: wrap; gap: 8px; }
-body.page-account .account-table .table td { vertical-align: top; }
-body.page-account .account-table .table__address { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; max-width: 200px; white-space: normal; overflow: hidden; overflow-wrap: anywhere; }
-body.page-account .account-table tr.is-clickable { cursor: pointer; }
-body.page-account .account-table tr.is-clickable:focus-visible { outline: none; box-shadow: inset var(--focus); }
-body.page-account .account-table .table__primary, body.page-account .account-table td.num { white-space: nowrap; }
-body.page-account .account-table .table__primary .table__sub { white-space: normal; }
-body.page-account .account-badges { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-body.page-account .account-badges .badge { white-space: nowrap; }
-body.page-account .account-actions-cell { white-space: nowrap; text-align: right; }
-body.page-account .account-messages .list__item { align-items: flex-start; }
-body.page-account .account-messages .list__aside { text-align: right; white-space: nowrap; }
 body.page-account .btn:not(.btn--sm), body.page-account .tab, body.page-account .chip { min-height: 44px; }
-.account-h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+body.page-account .account-head .page-head__desc { margin-top: 6px; }
+body.page-account .account-terms { margin-top: 4px; font-size: 13px; color: var(--text-3); }
+body.page-account .account-tabs { margin-bottom: 24px; }
+body.page-account .tab .count { margin-left: 2px; }
+.account-h3 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 12px; }
 .account-drawer-actions { gap: 8px; }
+body.page-account .account-orders > * + * { margin-top: 20px; }
+body.page-account .account-orders > .account-filters + .account-list-slot { margin-top: 8px; }
 
-/* "Order again" for the customer's most frequent request type and route. */
-body.page-account .account-again__body { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
-body.page-account .account-again__main { min-width: 0; flex: 1 1 260px; }
-body.page-account .account-again .account-h3 { margin-bottom: 4px; }
-body.page-account .account-again__route { font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+/* "Order again" for the customer's most frequent request type and route: a quiet grey panel, the button on the right. */
+body.page-account .account-again { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px 20px; padding: 20px 24px; background: var(--surface); border-radius: var(--radius-lg); }
+body.page-account .account-again__icon { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--card); color: var(--brand); box-shadow: var(--shadow-sm); }
+body.page-account .account-again__main { min-width: 0; }
+body.page-account .account-again__title { font-size: 13px; font-weight: 500; letter-spacing: 0; line-height: 1.4; color: var(--text-2); }
+body.page-account .account-again__route { margin-top: 2px; max-width: none; font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; overflow-wrap: anywhere; }
+body.page-account .account-again__meta { margin-top: 4px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+
+/* Filters: chips with a quiet count. */
+body.page-account .account-filters { gap: 8px; }
+body.page-account .account-filters .chip { height: 36px; cursor: pointer; }
+body.page-account .account-filters .count { color: inherit; opacity: .6; }
+
+/* Order rows: code and status on top, the route, then what and when; price, payment and Order again on the right. */
+body.page-account .account-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+body.page-account .account-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px 24px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: background-color .2s ease, box-shadow .2s ease; }
+body.page-account .account-row:focus-visible { outline: none; box-shadow: var(--focus); }
+body.page-account .account-row__top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+body.page-account .account-row__code { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+body.page-account .account-row__route { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 6px; font-size: 15px; line-height: 1.4; color: var(--text); }
+body.page-account .account-row__place { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+body.page-account .account-row__arrow { display: inline-flex; color: var(--text-3); }
+body.page-account .account-row__meta { display: flex; flex-wrap: wrap; gap: 2px 0; margin-top: 4px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+body.page-account .account-row__meta > span:not(:last-child)::after { content: "·"; margin: 0 6px; color: var(--text-3); }
+body.page-account .account-row__aside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; text-align: right; }
+body.page-account .account-row__price { font-size: 17px; font-weight: 600; white-space: nowrap; }
+body.page-account .account-row__aside .badge { white-space: nowrap; }
+body.page-account .account-row__action { min-width: 0; }
+/* The hover tint reaches 12px past the text on both sides without moving the hairlines. */
+@media (hover: hover) { body.page-account .account-row:hover { background: var(--surface); box-shadow: -12px 0 0 var(--surface), 12px 0 0 var(--surface); } }
+
+/* Messages */
+body.page-account .account-messages { border-top: 1px solid var(--border); }
+body.page-account .account-messages .list__item { align-items: flex-start; padding: 16px 0; }
+body.page-account .account-messages .list__title { font-weight: 600; }
+body.page-account .account-messages__code { font-weight: 400; color: var(--text-3); }
+body.page-account .account-messages .list__aside { text-align: right; white-space: nowrap; color: var(--text-3); }
+body.page-account .account-more { margin-top: 20px; }
 
 /* Address book: one row per address with Edit and Remove; the form opens in the drawer. */
-body.page-account .account-address-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 16px; }
-body.page-account .account-address-head .account-h3 { margin-bottom: 2px; }
+body.page-account .account-address-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; }
+body.page-account .account-address-head .account-h3 { margin-bottom: 0; }
 body.page-account .account-addresses { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 body.page-account .account-addresses .list__item { flex-wrap: wrap; align-items: flex-start; padding: 16px 0; }
 body.page-account .account-address__line { font-size: 15px; margin-top: 2px; overflow-wrap: anywhere; }
 body.page-account .account-address__actions { display: flex; gap: 8px; margin-left: auto; }
 body.page-account .account-drawer-form { padding: 20px 0; }
 body.page-account .account-labels > label { min-height: 44px; }
+body.page-account .account-empty { padding: 40px 0; }
 
 @media (max-width: 720px) {
-  body.page-account .account-table .table__address { max-width: none; -webkit-line-clamp: 3; }
-  body.page-account .account-actions-cell { padding-top: 8px; text-align: left; }
-  body.page-account .account-badges { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
+  body.page-account .account-again { grid-template-columns: minmax(0, 1fr); padding: 18px; gap: 14px; }
+  body.page-account .account-again__icon { display: none; }
+  body.page-account .account-again__route { font-size: 16px; }
+  body.page-account .account-again__btn { width: 100%; }
+  /* Filter chips scroll sideways in one row instead of wrapping. */
+  body.page-account .account-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 calc(var(--gutter) * -1); padding: 0 var(--gutter); }
+  body.page-account .account-filters::-webkit-scrollbar { display: none; }
+  body.page-account .account-filters .chip { flex: none; }
+  body.page-account .account-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px 0; }
+  body.page-account .account-row__main { grid-column: 1 / -1; }
+  body.page-account .account-row__aside { flex-direction: row; align-items: center; gap: 10px; text-align: left; }
+  body.page-account .account-row__action:empty { display: none; }
   body.page-account .btn--sm { min-height: 44px; }
 }
 @media (max-width: 420px) {
-  body.page-account .account-labels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  body.page-account .account-labels > label + label { border-left: 0; border-top: 0; }
-  body.page-account .account-labels > label:nth-of-type(even) { border-left: 1px solid var(--border-control); }
-  body.page-account .account-labels > label:nth-of-type(n+3) { border-top: 1px solid var(--border-control); }
-  body.page-account .account-address__actions { width: 100%; margin-left: 0; }
-  body.page-account .account-address__actions .btn { flex: 1 1 0; }
+  body.page-account .account-labels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }   /* 2 × 2 instead of base.css's column */
 }
 /* 44px tap targets for the address form fields in the drawer (base.css only lifts them on the other public pages). */
 body.page-account .account-address-form .input, body.page-account .account-address-form .select { min-height: 44px; }

@@ -36,7 +36,7 @@
     document.title = 'Invoice · ' + BRAND;
     slot.replaceChildren(pageHead('Invoice'), el('div', { class: 'empty', 'data-testid': 'invoice-missing' },
       el('p', { class: 'empty__title' }, 'No invoice with this link.'),
-      el('p', { class: 'empty__hint' }, 'Check the link you were sent, or ask us for the invoice again.')));
+      el('p', { class: 'empty__hint' }, 'Check the link, or ask us to send it again.')));
   }
 
   async function render(id) {
@@ -122,7 +122,7 @@
           el('section', { 'aria-labelledby': 'inv-billto' }, el('h2', { id: 'inv-billto' }, 'Billed to'), billTo)),
         el('section', { 'aria-labelledby': 'inv-items' },
           el('div', { class: 'section-head' }, el('h2', { id: 'inv-items' }, 'Deliveries in ' + monthLabel(inv.month)),
-            account ? el('p', { class: 'section-head__desc', 'data-testid': 'invoice-rates' }, 'Agreed rates per package: ' + MDM.pricing.accountTiers(account, settings).map(t => t.label + ' ' + MDM.pricing.format(t.rate)).join(', ') + '. Maldivian Cargo and airport fees are listed as their own lines.') : null),
+            account ? el('p', { class: 'section-head__desc', 'data-testid': 'invoice-rates' }, 'Agreed rates per package: ' + MDM.pricing.accountTiers(account, settings).map(t => t.label + ' ' + MDM.pricing.format(t.rate)).join(', ') + '.') : null),
           el('div', { class: 'stack-6' }, table, summary)),
         codBlock,
         payBlock));
@@ -146,7 +146,7 @@
     const payRows = Object.keys(pays).map(k => pays[k]).sort((a, b) => a.at < b.at ? -1 : 1);
     return el('section', { 'aria-labelledby': 'inv-cod', 'data-testid': 'invoice-cod' },
       el('div', { class: 'section-head' }, el('h2', { id: 'inv-cod' }, 'Cash on delivery in ' + monthLabel(month)),
-        el('p', { class: 'section-head__desc invoice-cod-note' }, 'Cash our drivers collected from your customers. We pay it to you separately; it is not part of this invoice total.')),
+        el('p', { class: 'section-head__desc invoice-cod-note' }, 'Collected from your customers and paid to you separately. Not part of this total.')),
       el('div', { class: 'stack-6' },
         el('div', { class: 'rate-table' },
           rateRow('Cash on delivery entered on your orders', el('span', { 'data-testid': 'invoice-cod-entered' }, money(sum(list, 'amount')), el('small', null, n(list, 'order'))), { mono: true }),

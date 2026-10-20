@@ -1,46 +1,94 @@
-/* Track an order: layout only, every rule scoped to body.page-track. Components come from css/base.css untouched. */
-body.page-track .track-form { margin-bottom: 8px; }
+/* Track an order: the code form, then for an order the hero (status, ETA, quiet pills), the map, the progress steps and the details.
+   Every rule is scoped to body.page-track and uses tokens, so dark mode follows. */
+body.page-track .track-form { max-width: 520px; margin-bottom: 8px; }
+body.page-track .track-form .input-group { gap: 8px; }
+body.page-track .track-form .input-group .input { height: 50px; padding: 0 16px; font-size: 17px; border-radius: 12px; }
+body.page-track .track-form .input-group .btn { height: 50px; margin-left: 0; padding: 0 24px; border-radius: var(--radius-pill); font-size: 16px; }
 body.page-track .track-result:focus { outline: none; box-shadow: none; }
 
-/* Result header: badge and ETA share the polite live region; "Updated" sits beside it outside the region. */
-body.page-track .track-head__back { margin: -8px 0 12px -14px; }
-body.page-track .track-head__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-body.page-track .track-head__live { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
-body.page-track .track-eta { font-size: 14px; font-weight: 500; }
+/* ---- Hero ---- */
+body.page-track .track-hero { padding-top: 24px; }
+body.page-track .track-hero__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+body.page-track .track-hero__back { margin-left: -12px; padding-left: 8px; color: var(--text-2); }
+body.page-track .track-hero__updated { font-size: 13px; color: var(--text-3); text-align: right; }
+body.page-track .track-hero__id { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+body.page-track .track-head__code { font-size: 15px; font-weight: 500; color: var(--text-2); }
+body.page-track .track-hero__live { margin-top: 6px; }
+body.page-track main .track-hero__status { display: flex; align-items: baseline; gap: 14px; font-size: 44px; font-weight: 700; letter-spacing: -.03em; line-height: 1.08; overflow-wrap: anywhere; }
+body.page-track .track-eta { margin-top: 10px; max-width: none; font-size: 21px; font-weight: 500; letter-spacing: -.01em; line-height: 1.3; color: var(--text); }
 body.page-track .track-eta:empty { display: none; }
-body.page-track .track-head__updated { font-size: 13px; color: var(--text-2); }
-body.page-track .track-head__code { margin-top: 10px; font-size: 24px; font-weight: 500; line-height: 1.2; }
-body.page-track .track-head__summary { margin-top: 4px; font-size: 15px; color: var(--text-2); overflow-wrap: anywhere; }
-body.page-track .track-head__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-body.page-track .track-share { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 10px; font-size: 13px; color: var(--text-2); }
+body.page-track .track-hero__note { margin-top: 10px; font-size: 19px; line-height: 1.35; color: var(--text-2); }
+body.page-track .track-hero__summary { margin-top: 10px; font-size: 15px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+body.page-track .track-hero__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+body.page-track .track-pill { height: 36px; padding: 0 14px; gap: 6px; background: var(--surface); color: var(--text); font-size: 14px; border: 0; }
+body.page-track .track-pill .icon { width: 15px; height: 15px; color: var(--text-2); }
+@media (hover: hover) { body.page-track .track-pill:hover { background: var(--surface-2); text-decoration: none; } }
+body.page-track .track-share { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; font-size: 14px; color: var(--text-2); }
 
-/* Status notices and their action buttons. */
-body.page-track .track-notices { margin-top: 24px; }
+/* Status dot: the status colour; a soft pulse while the driver is moving (the only looping motion on the page). */
+body.page-track .track-dot { flex: none; position: relative; top: -.12em; width: 14px; height: 14px; border-radius: 50%; background: var(--text-3); }
+body.page-track .track-dot--info { background: var(--info); }
+body.page-track .track-dot--ok { background: var(--ok); }
+body.page-track .track-dot--warn { background: var(--warn); }
+body.page-track .track-dot--danger { background: var(--danger); }
+body.page-track .track-dot.is-live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: track-pulse 2.2s var(--ease-out) infinite; }
+@keyframes track-pulse { from { transform: scale(1); opacity: .5; } to { transform: scale(2.6); opacity: 0; } }
+
+/* ---- Notices ---- */
+body.page-track .track-notices { margin-top: 28px; }
 body.page-track .track-notices > * + * { margin-top: 12px; }
 body.page-track .track-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 body.page-track .track-actions > .btn--ghost:first-child { margin-left: -14px; }
-body.page-track .track-proof .thumb { width: 56px; height: 56px; }
 
-/* Route: the map keeps its base height (300px, 420px from 720px); the stops list follows it. */
-body.page-track .track-result > .section:first-of-type { margin-top: 32px; }
-body.page-track .track-map-holder + .stops { margin-top: 16px; }
+/* ---- Sections: big quiet titles, more air between them ---- */
+body.page-track .track-result > .section { margin-top: 56px; }
+body.page-track .track-result > .section.track-route { margin-top: 32px; }
+body.page-track .track-result .section-head { margin-bottom: 16px; }
+body.page-track .track-result .section-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
 body.page-track .track-summary-note { margin-top: 12px; }
 
-/* A stop row is a real button while the map is shown, so tapping it pans the map; a hover tint marks it as interactive. */
-body.page-track button.stop { width: calc(100% + 16px); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: var(--radius-xs); cursor: pointer; transition: background-color .15s ease; }
+/* Route: the map edge to edge in its card, the stops under it. A stop row is a real button while the map is shown (tap to pan). */
+body.page-track .track-route .map { border: 0; border-radius: var(--radius-lg); box-shadow: inset 0 0 0 1px var(--border); }
+body.page-track .track-map-holder + .stops { margin-top: 12px; }
+body.page-track button.stop { width: 100%; cursor: pointer; transition: background-color .15s ease, box-shadow .15s ease; }
 body.page-track button.stop:focus-visible { box-shadow: var(--focus); }
 body.page-track .stop__main { min-width: 0; }
 body.page-track .stop__title, body.page-track .stop__meta { display: block; }
-@media (hover: hover) { body.page-track button.stop:hover { background: var(--surface); } }
+body.page-track .stop__title { font-size: 15px; }
+/* The hover tint reaches 8px past the text without moving the hairlines. */
+@media (hover: hover) { body.page-track button.stop:hover { background: var(--surface); box-shadow: -8px 0 0 var(--surface), 8px 0 0 var(--surface); } }
 
-/* Timeline of public events plus what happens next. */
-body.page-track .timeline__item.is-upcoming .timeline__label { font-weight: 400; }
-
-/* Progress (status flow + payment), proof photos, documents */
+/* Progress: larger dots on a continuous line; done steps in ink, the current one ringed in red, upcoming ones grey.
+   Label left, time right on one line. */
+body.page-track .track-progress { padding-left: 28px; }
+body.page-track .track-progress .timeline__item { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 16px; padding-bottom: 18px; font-size: 16px; }
+body.page-track .track-progress .timeline__item::before { left: -28px; top: 5px; width: 12px; height: 12px; background: var(--card); box-shadow: inset 0 0 0 2px var(--border-strong); }
+body.page-track .track-progress .timeline__item::after { left: -23px; top: 19px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--border); }
+body.page-track .track-progress .timeline__item.is-done::before { background: var(--text); box-shadow: none; }
+body.page-track .track-progress .timeline__item.is-done::after { background: var(--text); }
+body.page-track .track-progress .timeline__item.is-current::before { background: var(--brand); box-shadow: 0 0 0 4px var(--red-soft); }
+body.page-track .track-progress .timeline__item.is-current .timeline__label { font-weight: 600; }
+body.page-track .track-progress .track-step--stop::before { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-bg); }
+body.page-track .track-progress .timeline__label { font-weight: 500; }
 body.page-track .track-progress .timeline__label .badge { margin-left: 6px; vertical-align: 1px; }
-body.page-track .track-progress .track-step--stop::before { background: var(--danger); box-shadow: none; }
-body.page-track .track-proof-list .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-xs); border: 1px solid var(--border); }
-body.page-track .track-file { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: var(--radius-xs); border: 1px solid var(--border); font-size: 12px; font-weight: 500; color: var(--text-2); background: var(--surface); }
+body.page-track .track-progress .timeline__time { color: var(--text-3); font-variant-numeric: tabular-nums; }
+body.page-track .timeline__item.is-upcoming .timeline__label { font-weight: 400; }
+html.motion body.page-track .track-progress [data-reveal] { transform: translateY(10px); transition-duration: .6s, .7s; }
+html.motion body.page-track .track-progress [data-reveal].is-in { transform: none; }
+
+/* Driver: initials, name and vehicle, live location, Call. */
+body.page-track .track-driver { display: flex; align-items: center; gap: 16px; padding: 16px 20px; background: var(--surface); border-radius: var(--radius-lg); }
+body.page-track .track-driver__avatar { flex: none; width: 48px; height: 48px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--text); color: var(--bg); font-size: 16px; font-weight: 600; }
+body.page-track .track-driver__main { flex: 1 1 auto; min-width: 0; }
+body.page-track .track-driver__name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+body.page-track .track-driver__meta { font-size: 14px; color: var(--text-2); margin-top: 2px; }
+body.page-track .track-driver__live { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 6px; }
+body.page-track .track-driver__call { flex: none; }
+
+/* Proof photos, documents */
+body.page-track .track-proof .thumb { width: 56px; height: 56px; }
+body.page-track .track-proof-list .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+body.page-track .track-file { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 12px; font-weight: 500; color: var(--text-2); background: var(--surface); }
 body.page-track .track-proof-list .list__item { gap: 12px; }
 body.page-track .track-invoice { margin-top: 12px; }
 body.page-track .track-pay-row { margin-top: 16px; }
@@ -52,3 +100,30 @@ body.page-track .track-items .list__title { overflow-wrap: anywhere; }
 body.page-track .track-changes { margin: 0; padding: 0; list-style: none; }
 body.page-track .track-changes li + li { margin-top: 2px; }
 body.page-track .track-result > .section > .alert + .summary { margin-top: 12px; }
+
+/* Activity: a heading button (title, count, chevron) opens the log under it; the panel grows from 0 to its height. */
+body.page-track .track-more { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+body.page-track .track-more__head { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+body.page-track .track-more__toggle { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0; font: inherit; color: var(--text); text-align: left; cursor: pointer; }
+body.page-track .track-more__toggle:focus-visible { box-shadow: var(--focus); border-radius: var(--radius-xs); }
+body.page-track .track-more__count { font-size: 13px; font-weight: 400; color: var(--text-3); }
+body.page-track .track-more__toggle .icon { margin-left: auto; color: var(--text-3); transition: transform .35s var(--ease-out); }
+body.page-track .track-more.is-open .track-more__toggle .icon { transform: rotate(180deg); }
+body.page-track .track-more__panel { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease-out); }
+body.page-track .track-more.is-open .track-more__panel { grid-template-rows: 1fr; }
+body.page-track .track-more__inner { min-height: 0; overflow: hidden; }
+body.page-track .track-more__inner > .timeline { padding-top: 4px; padding-bottom: 20px; }
+
+@media (max-width: 720px) {
+  body.page-track .track-hero { padding-top: 12px; }
+  body.page-track main .track-hero__status { font-size: 32px; gap: 10px; }
+  body.page-track .track-dot { width: 12px; height: 12px; }
+  body.page-track .track-eta { font-size: 18px; }
+  body.page-track .track-hero__note { font-size: 17px; }
+  body.page-track .track-result > .section { margin-top: 44px; }
+  body.page-track .track-result .section-head h2 { font-size: 21px; }
+  body.page-track .track-progress .timeline__item { display: block; font-size: 15px; }
+  body.page-track .track-driver { padding: 14px 16px; gap: 12px; }
+  body.page-track .track-driver__avatar { width: 40px; height: 40px; font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { body.page-track .track-dot.is-live::after { animation: none; display: none; } }

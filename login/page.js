@@ -5,13 +5,14 @@
 // customers → localStorage mdm:me, businesses → localStorage mdm:business, drivers → sessionStorage mdm:driver,
 // staff → localStorage mdm:staff, office → localStorage mdm:session { user, staffId, role, name }.
 (function (MDM) { 'use strict';
-  const { el } = MDM.ui;
+  const { el, html } = MDM.ui;
+  // The customer's mobile-number sign-in is the default; the other four are a quiet row of chips under the form ("Not a customer?").
   const ROLES = [
-    { value: 'customer', label: 'Customer', hint: 'Order and track', icon: 'user' },
-    { value: 'business', label: 'Business', hint: 'Bulk orders, invoices', icon: 'building' },
-    { value: 'driver', label: 'Driver', hint: 'Today’s jobs', icon: 'bike' },
-    { value: 'staff', label: 'Staff', hint: 'Attendance and leave', icon: 'clock' },
-    { value: 'admin', label: 'Office', hint: 'Admin and operators', icon: 'dashboard' },
+    { value: 'customer', label: 'Customer', title: 'Sign in', icon: 'user' },
+    { value: 'business', label: 'Business', title: 'Business sign-in', icon: 'building' },
+    { value: 'driver', label: 'Driver', title: 'Driver sign-in', icon: 'bike' },
+    { value: 'staff', label: 'Staff', title: 'Staff sign-in', icon: 'clock' },
+    { value: 'admin', label: 'Office', title: 'Office sign-in', icon: 'dashboard' },
   ];
   const params = new URLSearchParams(location.search);
   const asParam = params.get('as') === 'rider' ? 'driver' : params.get('as');
@@ -19,6 +20,7 @@
   if (state.role === 'admin' && params.get('reset') === '1') state.reset = { step: 1, user: '' };
   let view, drivers = [], staff = [], accounts = [], settings = {};
   const DEMO_PASSWORD = 'delivery';
+  const DEMO_CODE = 'Demo: any 4 digits';
 
   function field(id, label, control, hint) {
     return el('div', { class: 'field' }, el('label', { for: id }, label), control, hint ? el('div', { class: 'field__hint' }, hint) : null, el('div', { class: 'field__error' }));
@@ -29,22 +31,24 @@
   function passwordFor(username) { try { return localStorage.getItem('mdm:pw:' + username) || DEMO_PASSWORD; } catch (e) { return DEMO_PASSWORD; } }
   const actions = (...kids) => el('div', { class: 'login-actions' }, kids);
   const submit = (label) => el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'login-submit' }, label);
-  const demo = (text) => el('div', { class: 'alert alert--info' }, el('div', {}, text));
+  const head = (title, desc) => el('div', { class: 'page-head' }, el('h1', null, title), desc ? el('p', { class: 'page-head__desc' }, desc) : null);
 
+  // One view per role and step: the title (and a short line) in the page head, the form, then the other sign-ins.
   function render() {
-    view.textContent = '';
-    view.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Sign in'), el('p', { class: 'page-head__desc' }, 'Choose who you are. Customers and businesses sign in with their mobile number; the team has its own sign-in.')));
-    const roles = el('fieldset', { class: 'login-roles', 'data-testid': 'login-role' }, el('legend', { class: 'sr-only' }, 'Sign in as'),
-      ROLES.map(r => el('label', { class: 'login-role', 'data-testid': 'login-role-' + r.value },
-        el('input', { class: 'sr-only', type: 'radio', name: 'role', value: r.value, checked: state.role === r.value, on: { change: () => { state.role = r.value; state.step = 1; state.reset = null; render(); } } }),
-        el('span', { class: 'login-role__icon', 'aria-hidden': 'true' }, MDM.ui.html(MDM.icon(r.icon, 18))),
-        el('span', { class: 'login-role__label' }, r.label), el('span', { class: 'login-role__hint' }, r.hint))));
-    view.appendChild(roles);
+    const role = ROLES.find(r => r.value === state.role);
     const forms = { customer: () => (state.step === 3 ? signupForm() : phoneForm('customer')), business: () => phoneForm('business'), driver: driverForm, staff: staffForm, admin: state.reset ? resetForm : officeForm };
-    view.appendChild(forms[state.role]());
+    const v = forms[state.role]();
+    const others = state.step === 1 && !state.reset ? el('nav', { class: 'login-other', 'aria-labelledby': 'login-other-h' },
+      el('h2', { id: 'login-other-h', class: 'login-other__title' }, state.role === 'customer' ? 'Not a customer?' : 'Other sign-ins'),
+      el('div', { class: 'login-roles', role: 'group', 'aria-labelledby': 'login-other-h', 'data-testid': 'login-role' },
+        ROLES.map(r => el('button', { type: 'button', class: 'chip login-role', 'aria-pressed': r.value === state.role ? 'true' : 'false', hidden: r.value === state.role, 'data-testid': 'login-role-' + r.value,
+          on: { click: () => { state.role = r.value; state.step = 1; state.reset = null; render(); const first = view.querySelector('.login-form input, .login-form select'); if (first) first.focus(); } } },
+          html(MDM.icon(r.icon, 16)), r.label)))) : null;
+    view.replaceChildren(el('div', { class: 'login' }, head(v.title || role.title, v.desc), v.form, others));
+    if (MDM.motion) MDM.motion.enter(v.form);
   }
 
-  // Customers and businesses: mobile number → one-time code.
+  // Customers and businesses: mobile number → one-time code. Each form returns { form, title, desc } for render().
   function phoneForm(kind) {
     if (state.step === 2) {
       const code = el('input', { class: 'input', id: 'code', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '4', placeholder: '4 digits', 'data-testid': 'login-code' });
@@ -64,14 +68,13 @@
         save(localStorage, 'mdm:me', { name: found.name, phone, email: found.email || '', notify: found.notify || 'whatsapp', signedInAt: new Date().toISOString() });
         go('account/');
       } } },
-        demo('We sent a code to ' + MDM.ui.phone.format(state.phone) + '. In this demo any 4 digits work.'),
-        field('code', 'Code', code),
+        field('code', 'Code', code, DEMO_CODE),
         actions(submit('Sign in'), el('button', { type: 'button', class: 'btn btn--ghost', on: { click: () => { state.step = 1; render(); } } }, 'Use another number')));
       setTimeout(() => code.focus(), 0);
-      return form;
+      return { form, desc: 'Code sent to ' + MDM.ui.phone.format(state.phone) + '.' };
     }
     const phone = el('input', { class: 'input', id: 'phone', type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', value: state.phone, 'data-testid': 'login-phone' });
-    const notMember = el('div', { class: 'alert alert--warn', hidden: true }, el('div', {}, 'This number is not linked to a business account yet. ', el('a', { href: MDM.href('business/#apply') }, 'Apply for an account')));
+    const notMember = el('div', { class: 'alert alert--warn', hidden: true }, el('div', {}, 'No business account on this number. ', el('a', { href: MDM.href('business/#apply') }, 'Apply for one')));
     const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
       e.preventDefault();
       notMember.hidden = true;
@@ -79,13 +82,12 @@
       if (kind === 'business' && !accounts.some(a => MDM.ui.phone.normalize(a.phone) === MDM.ui.phone.normalize(phone.value) && a.status === 'approved')) { notMember.hidden = false; return; }
       state.phone = phone.value; state.step = 2; render();
     } } },
-      kind === 'business' ? demo('Demo accounts: Kandu Books 780 1122, Fonu Online Store 763 3221') : null,
-      field('phone', kind === 'business' ? 'Account mobile number' : 'Mobile number', phone, 'We send a one-time code to this number. No password needed.'),
+      field('phone', kind === 'business' ? 'Account mobile number' : 'Mobile number', phone, kind === 'business' ? 'Demo: 780 1122 or 763 3221' : null),
       notMember,
       actions(el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'login-continue' }, 'Send code'),
-        kind === 'business' ? el('a', { class: 'btn btn--ghost', href: MDM.href('business/#apply') }, 'Open a business account') : el('a', { class: 'btn btn--ghost', href: MDM.href('request/') }, 'New here? Request a delivery')));
+        kind === 'business' ? el('a', { class: 'login-link', href: MDM.href('business/#apply') }, 'Open a business account') : el('a', { class: 'login-link', href: MDM.href('request/') }, 'New here? Request a delivery')));
     if (state.phone && kind === 'customer') setTimeout(() => { if (MDM.ui.phone.valid(state.phone)) form.requestSubmit(); }, 0);
-    return form;
+    return { form, desc: kind === 'business' ? null : 'We text a code to your mobile. No password.' };
   }
 
   // Customer sign-up after the code: their name and the "what we carry" tick, once per number (updates 17/10/2026).
@@ -110,38 +112,37 @@
       save(localStorage, 'mdm:me', { name: c.name, phone, email: c.email || '', notify: c.notify || 'whatsapp', signedInAt: new Date().toISOString() });
       go('account/');
     } } },
-      el('h2', { class: 'login-sub' }, found ? 'One more step' : 'Create your account'),
-      el('p', { class: 'login-note' }, (found ? 'Welcome back. ' : 'This number is new to us. ') + 'Tell us your name and confirm what we carry. You only do this once.'),
       field('signup-name', 'Your name', name),
       terms,
       actions(el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'login-signup-submit' }, found ? 'Continue' : 'Create account'),
         el('button', { type: 'button', class: 'btn btn--ghost', on: { click: () => { state.step = 1; state.signup = null; render(); } } }, 'Use another number')));
     setTimeout(() => (name.value ? tick : name).focus(), 0);
-    return form;
+    return { form, title: found ? 'One more step' : 'Create your account', desc: 'Your name and what we carry. Only once.' };
   }
 
   // Drivers and staff: pick your name, enter your PIN.
-  function pinForm(id, label, people, onOk, cta, hint) {
+  function pinForm(id, label, people, onOk, cta) {
     const sel = el('select', { class: 'select', id, 'data-testid': 'login-' + id }, el('option', { value: '' }, 'Choose your name'), people.map(p => el('option', { value: p.id }, p.name + (p.title ? ' · ' + p.title : ''))));
     const pin = el('input', { class: 'input', id: id + '-pin', type: 'password', inputmode: 'numeric', autocomplete: 'current-password', maxlength: '4', placeholder: '4 digits', 'data-testid': 'login-pin' });
-    return el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
+    const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
       e.preventDefault();
       let ok = true;
       if (!sel.value) { setError(sel, 'Choose your name'); ok = false; }
       if (!/^\d{4}$/.test(pin.value)) { setError(pin, 'Enter your 4-digit PIN'); ok = false; }
       if (ok) onOk(sel.value);
     } } },
-      field(id, label, sel, hint), field(id + '-pin', 'PIN', pin, 'In this demo any 4 digits work.'), actions(submit(cta)));
+      field(id, label, sel), field(id + '-pin', 'PIN', pin, DEMO_CODE), actions(submit(cta)));
+    return { form };
   }
   function driverForm() {
-    return pinForm('driver', 'Driver', drivers, driverId => { save(sessionStorage, 'mdm:driver', { driverId, online: false }); go('driver/'); }, 'Open my jobs', 'Punch in from the jobs screen when your shift starts.');
+    return pinForm('driver', 'Driver', drivers, driverId => { save(sessionStorage, 'mdm:driver', { driverId, online: false }); go('driver/'); }, 'Open my jobs');
   }
   function staffForm() {
     return pinForm('staff', 'Employee', staff.filter(s => s.status !== 'inactive'), staffId => {
       const s = staff.find(x => x.id === staffId);
       save(localStorage, 'mdm:staff', { staffId, name: s.name, role: s.role, at: new Date().toISOString() });
       go('staff/');
-    }, 'Open staff portal', 'Punch in and out, see your hours and request leave.');
+    }, 'Open staff portal');
   }
 
   // Office: username + password, role from the staff record (admin, operator, office).
@@ -149,7 +150,7 @@
     const user = el('input', { class: 'input', id: 'user', type: 'text', autocomplete: 'username', autocapitalize: 'off', 'data-testid': 'login-user' });
     const pass = el('input', { class: 'input', id: 'pass', type: 'password', autocomplete: 'current-password', 'data-testid': 'login-pass' });
     const err = el('div', { class: 'alert alert--danger', hidden: true }, el('div', {}, 'Wrong username or password'));
-    return el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
+    const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
       e.preventDefault();
       const u = user.value.trim().toLowerCase();
       const s = staff.find(x => x.username === u && ['admin', 'operator', 'office'].indexOf(x.role) >= 0);
@@ -159,11 +160,11 @@
         go('admin/');
       } else { err.hidden = false; pass.value = ''; pass.focus(); }
     } } },
-      demo('Demo sign-ins (password delivery): admin for full access, operator for dispatch, lamya for customer care and payments.'),
-      field('user', 'Username', user),
-      field('pass', 'Password', pass),
+      field('user', 'Username', user, 'Demo: admin, operator or lamya'),
+      field('pass', 'Password', pass, 'Demo password: delivery'),
       err,
       actions(submit('Sign in'), el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'login-forgot', on: { click: () => { state.reset = { step: 1, user: user.value.trim() }; render(); } } }, 'Forgot password?')));
+    return { form };
   }
   // Password reset: username → code sent to the phone on file → new password (requirements §21).
   function resetForm() {
@@ -171,18 +172,19 @@
     const back = el('button', { type: 'button', class: 'btn btn--ghost', on: { click: () => { state.reset = null; render(); } } }, 'Back to sign in');
     if (r.step === 1) {
       const user = el('input', { class: 'input', id: 'reset-user', type: 'text', autocapitalize: 'off', value: r.user || '', 'data-testid': 'reset-user' });
-      return el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
+      const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
         e.preventDefault();
         const s = staff.find(x => x.username === user.value.trim().toLowerCase() && ['admin', 'operator', 'office'].indexOf(x.role) >= 0);
         if (!s) { setError(user, 'No office account with that username'); return; }
         state.reset = { step: 2, user: s.username, phone: s.phone, name: s.name }; render();
       } } },
-        el('h2', { class: 'login-sub' }, 'Reset your password'), field('reset-user', 'Username', user, 'We send a reset code to the mobile number on your staff record.'), actions(submit('Send reset code'), back));
+        field('reset-user', 'Username', user), actions(submit('Send reset code'), back));
+      return { form, title: 'Reset your password', desc: 'We text a code to the number on your staff record.' };
     }
     const code = el('input', { class: 'input', id: 'reset-code', type: 'text', inputmode: 'numeric', maxlength: '4', placeholder: '4 digits', 'data-testid': 'reset-code' });
     const pw = el('input', { class: 'input', id: 'reset-pass', type: 'password', autocomplete: 'new-password', 'data-testid': 'reset-pass' });
     const pw2 = el('input', { class: 'input', id: 'reset-pass2', type: 'password', autocomplete: 'new-password', 'data-testid': 'reset-pass2' });
-    return el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
+    const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
       e.preventDefault();
       let ok = true;
       if (!/^\d{4}$/.test(code.value.trim())) { setError(code, 'Enter the 4-digit code'); ok = false; }
@@ -194,10 +196,9 @@
       state.reset = null; render();
       MDM.ui.toast('Password changed. Sign in with your new password.', 'ok');
     } } },
-      el('h2', { class: 'login-sub' }, 'Reset your password'),
-      demo('We sent a code to ' + MDM.ui.phone.format(r.phone) + '. In this demo any 4 digits work.'),
-      field('reset-code', 'Code', code), field('reset-pass', 'New password', pw, 'At least 8 characters.'), field('reset-pass2', 'Repeat new password', pw2),
+      field('reset-code', 'Code', code, DEMO_CODE), field('reset-pass', 'New password', pw, 'At least 8 characters'), field('reset-pass2', 'Repeat new password', pw2),
       actions(submit('Change password'), back));
+    return { form, title: 'Reset your password', desc: 'Code sent to ' + MDM.ui.phone.format(r.phone) + '.' };
   }
 
   async function main() {

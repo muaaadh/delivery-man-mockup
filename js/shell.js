@@ -3,18 +3,18 @@
 // mount() runs once at load, fills the static markup right away and completes the settings-dependent parts after MDM.store.ready.
 (function (MDM) { 'use strict';
   const BRAND = 'Mr. Delivery Man';
+  // Four main links; the phone menu adds the e-store and the account link. Section links point at the home page's sections.
   const PUBLIC_NAV = [
     { label: 'Services', href: '#services', page: null },
-    { label: 'How it works', href: '#how', page: null },
     { label: 'Rates', href: '#rates', page: null },
-    { label: 'Store', href: 'store/', page: 'store' },
-    { label: 'Business', href: 'business/', page: 'business' },
     { label: 'Track', href: 'track/', page: 'track' },
+    { label: 'Business', href: 'business/', page: 'business' },
   ];
+  const MENU_MORE = [{ label: 'E-store', href: 'store/', page: 'store' }, { label: 'Questions', href: '#faq', page: null }];
   const FOOTER_COLUMNS = [
-    { title: 'Services', links: [{ label: 'Pick & Deliver', href: 'request/?category=pick' }, { label: 'Shop & Deliver', href: 'request/?type=shop_buy' }, { label: 'Business Delivery', href: 'business/' }, { label: 'Postal & courier collection', href: 'request/?type=postal' }, { label: 'Administrative services', href: 'request/?type=office' }, { label: 'E-store', href: 'store/' }] },
-    { title: 'Your orders', links: [{ label: 'Request a delivery', href: 'request/' }, { label: 'Track an order', href: 'track/' }, { label: 'My orders', href: 'account/' }, { label: 'For businesses', href: 'business/' }, { label: 'Questions', href: '#faq' }] },
-    { title: 'Team', links: [{ label: 'Customer sign-in', href: 'login/' }, { label: 'Business sign-in', href: 'login/?as=business' }, { label: 'Driver sign-in', href: 'login/?as=driver' }, { label: 'Staff portal', href: 'login/?as=staff' }, { label: 'Office sign-in', href: 'login/?as=admin' }] },
+    { title: 'Services', links: [{ label: 'Pick & Deliver', href: 'request/?category=pick' }, { label: 'Shop & Deliver', href: 'request/?type=shop_buy' }, { label: 'Postal & courier', href: 'request/?type=postal' }, { label: 'Business Delivery', href: 'business/' }, { label: 'E-store', href: 'store/' }] },
+    { title: 'Orders', links: [{ label: 'Request a delivery', href: 'request/' }, { label: 'Track an order', href: 'track/' }, { label: 'My orders', href: 'account/' }, { label: 'Questions', href: '#faq' }] },
+    { title: 'Sign in', links: [{ label: 'Customers', href: 'login/' }, { label: 'Businesses', href: 'login/?as=business' }, { label: 'Drivers', href: 'login/?as=driver' }, { label: 'Staff', href: 'login/?as=staff' }, { label: 'Office', href: 'login/?as=admin' }] },
   ];
   const ADMIN_NAV = [
     { view: 'overview', label: 'Overview', icon: 'dashboard', group: 'Operations' },
@@ -26,10 +26,10 @@
     { view: 'business', label: 'Business', icon: 'building', group: 'Accounts' },
     { view: 'cash', label: 'Cash & COD', icon: 'wallet', group: 'Accounts' },
     { view: 'store', label: 'E-store', icon: 'store', group: 'Accounts' },
-    { view: 'team', label: 'Team & HR', icon: 'clock', group: 'Team' },
-    { view: 'reports', label: 'Reports', icon: 'sliders', group: 'Insights' },
-    { view: 'notifications', label: 'Notifications', icon: 'bell', group: 'Insights' },
-    { view: 'activity', label: 'Activity log', icon: 'history', group: 'Insights' },
+    { view: 'team', label: 'Team & HR', icon: 'clock', group: 'Team and insights' },
+    { view: 'reports', label: 'Reports', icon: 'sliders', group: 'Team and insights' },
+    { view: 'notifications', label: 'Notifications', icon: 'bell', group: 'Team and insights' },
+    { view: 'activity', label: 'Activity log', icon: 'history', group: 'Team and insights' },
     { view: 'zones', label: 'Zones', icon: 'route', group: 'Setup' },
     { view: 'rates', label: 'Rates', icon: 'banknote', group: 'Setup' },
     { view: 'settings', label: 'Settings', icon: 'settings', group: 'Setup' },
@@ -184,6 +184,18 @@
   if (!document.documentElement.dataset.theme) document.documentElement.dataset.theme = currentTheme();
 
   // ---- Public header ------------------------------------------------------------------------------------------------------
+  // The account link follows whoever is signed in on this device: a customer's orders, a business portal, the office, a driver's
+  // jobs or the staff portal; visitors get "Sign in".
+  function accountLink(page) {
+    const read = (store, key) => { try { return JSON.parse(store.getItem(key) || 'null'); } catch (e) { return null; } };
+    const me = read(localStorage, 'mdm:me'), biz = read(localStorage, 'mdm:business'), office = read(localStorage, 'mdm:session');
+    let drv = null; try { drv = read(sessionStorage, 'mdm:driver'); } catch (e) { drv = null; }
+    const staff = read(localStorage, 'mdm:staff');
+    const pick = me && me.phone ? ['My orders', 'account/', 'account'] : biz && biz.accountId ? ['Business portal', 'business/', 'business']
+      : office && office.user ? ['Office', 'admin/', 'admin'] : drv && drv.driverId ? ['My jobs', 'driver/', 'driver']
+      : staff && staff.staffId ? ['Staff portal', 'staff/', 'staff'] : ['Sign in', 'login/', 'login'];
+    return el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href(pick[1]), 'aria-current': page === pick[2] ? 'page' : null }, pick[0]);
+  }
   function renderHeader(header) {
     header.classList.add('site-header');
     header.textContent = '';
@@ -194,23 +206,29 @@
       if (item.page && item.page === page) a.setAttribute('aria-current', 'page');
       nav.appendChild(a);
     });
-    // Signed-in customers (localStorage mdm:me) get "My orders" where visitors get "Sign in".
-    let me = null; try { me = JSON.parse(localStorage.getItem('mdm:me') || 'null'); } catch (e) { me = null; }
-    const account = () => me && me.phone
-      ? el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href('account/'), 'aria-current': page === 'account' ? 'page' : null }, 'My orders')
-      : el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href('login/'), 'aria-current': page === 'login' ? 'page' : null }, 'Sign in');
-    nav.appendChild(account());
+    MENU_MORE.forEach(item => nav.appendChild(el('a', { class: 'site-nav__more', href: MDM.href(item.href), 'aria-current': item.page && item.page === page ? 'page' : null }, item.label)));
+    nav.appendChild(accountLink(page));
     nav.appendChild(el('a', { class: 'btn btn--brand site-nav__cta', href: MDM.href('request/') }, 'Request a delivery'));
+    // Small phones have no room for the theme switch in the bar, so the menu carries a second one.
+    const menuTheme = themeToggle('site-nav__theme'); menuTheme.setAttribute('data-testid', 'theme-toggle-menu');
+    nav.appendChild(menuTheme);
+    Array.from(nav.children).forEach((n, i) => n.style.setProperty('--i', String(i)));
     const toggle = el('button', { type: 'button', class: 'btn btn--ghost btn--icon site-header__toggle', 'aria-expanded': 'false', 'aria-controls': 'site-nav', 'aria-label': 'Menu' }, iconNode('menu', 20));
-    const actions = el('div', { class: 'site-header__actions' },
-      themeToggle(), account(), el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, 'Request a delivery'), toggle);
+    const cta = el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, el('span', { class: 'site-header__cta-long' }, 'Request a delivery'), el('span', { class: 'site-header__cta-short' }, 'Request'));
+    const actions = el('div', { class: 'site-header__actions' }, themeToggle(), accountLink(page), cta, toggle);
     header.appendChild(el('div', { class: 'container' }, brandLink(MDM.href('')), nav, actions));
+    // The hairline under the bar shows once the page has scrolled.
+    const onScroll = () => header.classList.toggle('is-scrolled', window.scrollY > 4);
+    window.addEventListener('scroll', onScroll, { passive: true }); onScroll();
 
     let open = false;
     function setOpen(v) {
       open = !!v;
       nav.classList.toggle('is-open', open);
+      header.classList.toggle('is-menu', open);
+      document.documentElement.classList.toggle('menu-open', open);
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.setAttribute('aria-label', open ? 'Close menu' : 'Menu');
       toggle.innerHTML = MDM.icon(open ? 'x' : 'menu', 20);
       if (open) { const first = nav.querySelector('a'); if (first) first.focus(); }
     }
@@ -241,11 +259,11 @@
     const c = contactLinks();
     const reach = el('div', { class: 'site-footer__reach' });
     if (c.whatsapp) reach.appendChild(el('a', { class: 'btn btn--brand btn--sm', href: c.whatsapp, target: '_blank', rel: 'noopener' }, iconNode('message-circle', 16), 'WhatsApp'));
-    if (c.viber) reach.appendChild(el('a', { class: 'btn btn--on-dark btn--sm', href: c.viber }, 'Viber'));
-    if (c.tel) reach.appendChild(el('a', { class: 'btn btn--on-dark btn--sm', href: c.tel }, iconNode('phone', 16), c.display));
+    if (c.viber) reach.appendChild(el('a', { class: 'btn btn--secondary btn--sm', href: c.viber }, 'Viber'));
+    if (c.tel) reach.appendChild(el('a', { class: 'btn btn--secondary btn--sm', href: c.tel }, iconNode('phone', 16), c.display));
     const about = el('div', { class: 'site-footer__about' },
-      el('a', { class: 'site-footer__logo', href: MDM.href(''), 'aria-label': BRAND + ', home' }, el('img', { src: MDM.href('assets/logo-full.svg'), alt: BRAND, width: '88', height: '88' })),
-      el('p', { class: 'site-footer__tagline' }, 'We pick & deliver, we shop & deliver, and we deliver for businesses across Malé, Hulhumalé and the airport.'),
+      el('a', { class: 'site-footer__logo', href: MDM.href(''), 'aria-label': BRAND + ', home' }, el('img', { src: MDM.href('assets/logo-full.svg'), alt: BRAND, width: '64', height: '64' })),
+      el('p', { class: 'site-footer__tagline' }, 'Pick up, shop and deliver across Greater Malé.'),
       reach,
       el('p', { class: 'site-footer__hours', 'data-shell': 'hours' }, hoursLine(s)),
       c.mailto ? el('p', { class: 'site-footer__mail' }, el('a', { href: c.mailto }, c.email)) : null);
@@ -253,7 +271,7 @@
       el('h2', { class: 'site-footer__title' }, col.title), el('ul', null, col.links.map(l => el('li', null, el('a', { href: MDM.href(l.href) }, l.label)))))));
     footer.appendChild(el('div', { class: 'container' },
       el('div', { class: 'site-footer__main' }, about, cols),
-      el('div', { class: 'site-footer__bottom' }, el('span', null, BRAND + ' · Greater Malé'), el('span', null, 'Prices in Maldivian Rufiyaa · Pay by bank transfer'))));
+      el('div', { class: 'site-footer__bottom' }, el('span', null, BRAND + ' · Greater Malé'), el('span', null, 'Prices in MVR · Pay by bank transfer'))));
   }
 
   // ---- Admin shell --------------------------------------------------------------------------------------------------------
@@ -322,6 +340,94 @@
       admin.riders.classList.toggle('is-idle', !online);
     } catch (e) { /* the pill is decorative; the live map has the real list */ }
   }
+  // ---- Go-to palette: the top bar search suggests pages, actions and matching orders as you type --------------------------------
+  // Arrow keys move, Enter opens the highlighted suggestion (with none highlighted, Enter searches the orders list as before),
+  // Escape closes. ⌘K / Ctrl+K or "/" focuses it from anywhere; on phones the search button opens it over the top bar.
+  function gotoPalette(input, form, topbar) {
+    const list = el('div', { class: 'goto', id: 'goto-list', role: 'listbox', 'aria-label': 'Suggestions', 'data-testid': 'goto-list', hidden: true });
+    form.appendChild(list);
+    let items = [], active = -1, seq = 0, closeTimer = null;
+    const norm = v => String(v || '').toLowerCase();
+    const digits = v => String(v || '').replace(/\D/g, '');
+    function actions() {
+      const out = [];
+      if (allowedViews().indexOf('orders') >= 0) out.push({ group: 'Actions', label: 'New order', icon: 'plus', run: openNewOrder });
+      out.push({ group: 'Actions', label: (MDM.theme && MDM.theme.get() === 'dark') ? 'Light mode' : 'Dark mode', icon: 'moon', run: () => MDM.theme.toggle() });
+      return out;
+    }
+    async function build(q) {
+      const my = ++seq, term = norm(q).trim();
+      const views = ADMIN_NAV.filter(n => allowedViews().indexOf(n.view) >= 0 && (!term || norm(n.label).indexOf(term) >= 0 || n.view.indexOf(term) >= 0))
+        .map(n => ({ group: 'Go to', label: n.label, icon: n.icon, href: MDM.href('admin/#/' + n.view) }));
+      const acts = actions().filter(a => !term || norm(a.label).indexOf(term) >= 0);
+      let orders = [];
+      if (term.length >= 2 && MDM.store && allowedViews().indexOf('orders') >= 0) {
+        try {
+          const all = await MDM.store.list('orders');
+          if (my !== seq) return;
+          const d = digits(term);
+          orders = all.filter(o => norm(o.code).indexOf(term) >= 0 || norm(o.customer && o.customer.name).indexOf(term) >= 0
+            || (d.length >= 3 && digits(o.customer && o.customer.phone).indexOf(d) >= 0))
+            .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 6)
+            .map(o => ({ group: 'Orders', label: o.code + ' · ' + ((o.customer && o.customer.name) || ''), icon: 'package', meta: MDM.ui && MDM.ui.statusLabel ? MDM.ui.statusLabel(o.status) : o.status, href: MDM.href('admin/#/orders/' + encodeURIComponent(o.id)) }));
+        } catch (e) { orders = []; }
+      }
+      if (my !== seq) return;
+      // With a query, the first (highlighted) row is the plain orders search, so Enter keeps doing what it always did.
+      const plain = term ? [{ group: 'Search', label: 'Search orders for "' + String(q).trim() + '"', icon: 'search', href: MDM.href('admin/#/orders?q=' + encodeURIComponent(String(q).trim())) }] : [];
+      items = plain.concat(orders, views, acts);
+      active = term ? 0 : -1;
+      render(term);
+    }
+    function render(term) {
+      list.replaceChildren();
+      let group = null;
+      items.forEach((it, i) => {
+        if (it.group !== group) { group = it.group; list.appendChild(el('div', { class: 'goto__group', role: 'presentation' }, group)); }
+        const opt = el('div', { class: 'goto__item', role: 'option', id: 'goto-opt-' + i, 'aria-selected': i === active ? 'true' : 'false', 'data-testid': 'goto-item', 'data-group': it.group,
+          on: { mousedown: e => { e.preventDefault(); active = i; choose(); }, mousemove: () => { if (active !== i) { active = i; mark(); } } } },
+          iconNode(it.icon || 'arrow-right', 16), el('span', { class: 'goto__main' }, it.label), it.meta ? el('span', { class: 'goto__meta' }, it.meta) : null);
+        list.appendChild(opt);
+      });
+      if (!items.length) list.appendChild(el('div', { class: 'goto__empty' }, 'Nothing to show'));
+      list.hidden = false; input.setAttribute('aria-expanded', 'true');
+      mark();
+    }
+    function mark() {
+      list.querySelectorAll('.goto__item').forEach((n, i) => n.setAttribute('aria-selected', i === active ? 'true' : 'false'));
+      if (active >= 0) { input.setAttribute('aria-activedescendant', 'goto-opt-' + active); const n = list.querySelector('#goto-opt-' + active); if (n && n.scrollIntoView) n.scrollIntoView({ block: 'nearest' }); }
+      else input.removeAttribute('aria-activedescendant');
+    }
+    function close() {
+      seq++; list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); active = -1;
+      topbar.classList.remove('is-searching');
+    }
+    function choose() {
+      if (active < 0 || !items[active]) return false;
+      const it = items[active];
+      close(); input.value = ''; input.blur();
+      if (it.run) it.run(); else if (it.href) location.href = it.href;
+      return true;
+    }
+    function focus() { topbar.classList.add('is-searching'); input.focus(); input.select(); build(input.value); }
+    input.addEventListener('focus', () => { clearTimeout(closeTimer); build(input.value); });
+    input.addEventListener('input', () => build(input.value));
+    input.addEventListener('blur', () => { closeTimer = setTimeout(close, 120); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!items.length) return;
+        e.preventDefault();
+        active = e.key === 'ArrowDown' ? (active + 1) % items.length : (active <= 0 ? items.length - 1 : active - 1);
+        mark();
+      } else if (e.key === 'Escape') { e.stopPropagation(); close(); input.blur(); }
+    });
+    document.addEventListener('keydown', e => {
+      const typing = e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable);
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); focus(); }
+      else if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !document.querySelector('dialog[open], .drawer.is-open')) { e.preventDefault(); focus(); }
+    });
+    return { choose, close, focus };
+  }
   function renderAdmin(root) {
     if (root.dataset.shellMounted) return;
     root.dataset.shellMounted = '1';
@@ -348,12 +454,19 @@
     admin.menu = el('button', { type: 'button', class: 'btn btn--ghost btn--icon topbar__menu', 'aria-label': 'Menu', 'aria-expanded': 'false', 'aria-controls': 'admin-sidebar',
       on: { click: () => setSidebarOpen(!admin.open) } }, iconNode('menu', 20));
     admin.title = el('span', { class: 'topbar__title' }, 'Overview');
-    const search = el('input', { class: 'input topbar__search-input', type: 'search', placeholder: 'Search orders, names or phones', 'aria-label': 'Search orders', 'data-testid': 'topbar-search' });
-    const searchForm = el('form', { class: 'topbar__search', role: 'search', on: { submit: e => { e.preventDefault(); const q = search.value.trim(); location.hash = '#/orders' + (q ? '?q=' + encodeURIComponent(q) : ''); search.blur(); } } },
-      iconNode('search', 16), search);
+    const search = el('input', { class: 'input topbar__search-input', type: 'search', placeholder: 'Search or go to…', 'aria-label': 'Search orders or go to a page', 'data-testid': 'topbar-search',
+      role: 'combobox', 'aria-autocomplete': 'list', 'aria-expanded': 'false', 'aria-controls': 'goto-list', autocomplete: 'off' });
+    const kbd = el('kbd', { class: 'topbar__kbd', 'aria-hidden': 'true' }, /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘K' : 'Ctrl K');
+    const searchForm = el('form', { class: 'topbar__search', role: 'search', on: { submit: e => {
+      e.preventDefault();
+      if (goto.choose()) return;
+      const q = search.value.trim(); location.hash = '#/orders' + (q ? '?q=' + encodeURIComponent(q) : ''); goto.close(); search.blur();
+    } } }, iconNode('search', 16), search, kbd);
     admin.riders = el('a', { class: 'topbar__live', href: MDM.href('admin/#/live'), 'data-testid': 'topbar-riders' }, el('span', { class: 'topbar__dot', 'aria-hidden': 'true' }), el('span', { class: 'topbar__live-text' }, 'Riders'));
     const newOrder = el('button', { type: 'button', class: 'btn btn--primary topbar__new', 'data-testid': 'topbar-new-order', on: { click: openNewOrder } }, iconNode('plus', 16), el('span', { class: 'topbar__new-label' }, 'New order'));
-    admin.topbar = el('div', { class: 'topbar' }, admin.menu, admin.title, searchForm, el('div', { class: 'topbar__actions' }, admin.riders, themeToggle(), newOrder));
+    const searchBtn = el('button', { type: 'button', class: 'btn btn--ghost btn--icon topbar__search-btn', 'aria-label': 'Search or go to', 'data-testid': 'topbar-search-open', on: { click: () => goto.focus() } }, iconNode('search', 18));
+    admin.topbar = el('div', { class: 'topbar' }, admin.menu, admin.title, searchForm, el('div', { class: 'topbar__actions' }, searchBtn, admin.riders, themeToggle(), newOrder));
+    const goto = gotoPalette(search, searchForm, admin.topbar);
     const mainWrap = el('div', { class: 'admin__main' }, admin.topbar, main);
     root.textContent = '';
     root.appendChild(admin.sidebar);

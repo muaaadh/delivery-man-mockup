@@ -31,7 +31,7 @@
     notesRead: q('[data-testid="driver-notes-read"]'), notesMore: q('[data-testid="driver-notes-more"]'), notesFoot: q('.driver-notes__foot'),
     cash: q('[data-testid="driver-cash"]'), cashTitle: q('[data-testid="driver-cash-title"]'), cashNote: q('[data-testid="driver-cash-note"]'),
     cashList: q('[data-testid="driver-cash-list"]'), cashPending: q('[data-testid="driver-cash-pending"]'), cashOwed: q('[data-testid="driver-cash-owed"]'),
-    signedIn: q('[data-testid="driver-signed-in"]'), switchBtn: q('[data-testid="driver-switch"]'),
+    signedIn: q('[data-testid="driver-signed-in"]'), switchBtn: q('[data-testid="driver-switch"]'), me: q('[data-testid="driver-me"]'),
     jobsSection: q('[data-testid="driver-jobs-section"]'), jobs: q('#driver-jobs'), summary: q('[data-testid="driver-route-summary"]'),
     mapSection: q('[data-testid="driver-map-section"]'), mapEl: q('#driver-map'), recenter: q('[data-testid="driver-recenter"]'),
   };
@@ -41,7 +41,7 @@
     route: { orders: [], stops: [], polyline: [], returns: [] }, upcoming: [], doneToday: [], zoneQueue: [], batches: {},
     shift: null, today: [], leaves: [], offDays: null, cashHeld: [], owed: [], notes: [], notesAll: false, noteIds: null, readMem: {},
     online: false, sim: null, gpsOn: false, gpsFix: null, nearId: null, focusOrder: null,
-    wakeLock: null, speed: null, renderSeq: 0,
+    wakeLock: null, speed: null, renderSeq: 0, moreOpen: new Set(), entered: false,
   };
   const map = { map: null, ready: null, route: null, stops: null, driver: null, posUnsub: null, fitted: false };
 
@@ -287,7 +287,13 @@
     // An extra collection stop has its own instructions; the order's collection note belongs to the first collection.
     const note = stop.instructions || (stop.collectionId ? '' : (isPickup ? o.collection && o.collection.instructions : o.delivery && o.delivery.instructions)) || '';
     const place = placeLine(stop);
-    return el('div', { class: ['job__stop', stop.status === 'done' && 'is-done', state.nearId === stop.id && 'is-near'], 'data-testid': testid, 'data-stop-id': stop.id, 'data-stop-status': stop.status },
+    // A finished stop shrinks to its label and address: the contact and notes matter only while it is still to do.
+    if (stop.status === 'done') {
+      return el('div', { class: 'job__stop is-done', 'data-testid': testid, 'data-stop-id': stop.id, 'data-stop-status': stop.status },
+        el('div', { class: 'job__label' }, title, el('span', { class: 'job__ok' }, icon('check', 14), ' Done ' + MDM.ui.fmtTime(stop.at))),
+        el('div', { class: 'job__address' }, addressText(o, stop)));
+    }
+    return el('div', { class: ['job__stop', state.nearId === stop.id && 'is-near'], 'data-testid': testid, 'data-stop-id': stop.id, 'data-stop-status': stop.status },
       el('div', { class: 'job__label' }, title, stop.status === 'done' ? el('span', { class: 'job__ok' }, icon('check', 14), ' Done ' + MDM.ui.fmtTime(stop.at)) : stop.status === 'failed' ? el('span', { class: 'job__bad' }, 'Problem reported') : state.nearId === stop.id ? el('span', { class: 'job__near' }, 'You are here') : null),
       el('div', { class: 'job__address' }, addressText(o, stop)),
       place ? el('div', { class: 'job__line' }, place) : null,
@@ -318,7 +324,7 @@
     const phone = (state.settings.contact || {}).phone;
     const links = phone ? MDM.ui.phone.links(phone) : null;
     return el('div', { class: 'alert alert--warn job__alert', role: 'status', 'data-testid': 'driver-waiting' }, icon('clock', 16),
-      el('div', { class: 'alert__body' }, el('strong', null, 'Waiting for the office. '), (reason ? reason + '. ' : '') + 'They will reschedule, reassign, return or contact the customer.',
+      el('div', { class: 'alert__body' }, el('strong', null, 'Waiting for the office. '), (reason ? reason + '. ' : '') + 'They decide what happens next.',
         links ? el('div', { class: 'job__alert-link' }, el('a', { href: links.tel }, 'Call the office')) : null));
   }
   // The office sent a failed delivery back to the sender: there is an open return stop, so no cash is collected on it.
@@ -371,7 +377,10 @@
       el('div', { class: 'job__label' }, 'Money recorded'),
       el('dl', { class: 'job__dl' }, rows.map(r => [el('dt', null, r[0]), el('dd', { 'data-charge-type': r[3].type, 'data-charge-stage': r[3].stage }, r[1])])));
   }
-  function jobCard(o) {
+  // jobCard(o, { hero }): the job to work on now is the hero, with everything open. The others keep their stops, method details and
+  // actions in view and fold the packages and order details into "Details" (the open state survives re-renders).
+  function jobCard(o, opts) {
+    const hero = !!(opts && opts.hero);
     const ph = phase(o);
     const pri = priorityOf(o);
     const stops = (o.route && o.route.stops) || [];
@@ -386,33 +395,38 @@
     if ((o.packages || []).some(p => p.fragile)) tags.push(el('span', { class: 'tag' }, 'Fragile'));
     const meta = [MDM.requestTypeLabel(o.requestType), o.customer && o.customer.name].filter(Boolean).join(' · ');
     const target = (ph.stop || cur || showDrop || showPick);
-    const primary = ph.label ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block', 'data-testid': 'driver-action', 'data-action': ph.key, on: { click: e => act(e.currentTarget, o, ph) } }, ph.label) : null;
+    const primary = ph.label ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary', 'data-testid': 'driver-action', 'data-action': ph.key, on: { click: e => act(e.currentTarget, o, ph) } }, ph.label) : null;
     const canFail = ACTIVE.indexOf(o.status) >= 0 && cur;
-    return el('article', { class: ['card', 'job', pri.rank < 9 && 'is-priority', state.focusOrder === o.id && 'is-focus'], 'data-testid': 'driver-job', 'data-order-id': o.id, 'data-code': o.code, 'data-status': o.status },
+    const detailsBody = el('div', { class: 'card__body job__body' }, packagesBlock(o), dl(detailRows(o)), chargesBlock(o));
+    let more = detailsBody;
+    if (!hero) {
+      more = el('details', { class: 'job__more', open: state.moreOpen.has(o.id) || null },
+        el('summary', { class: 'job__more-summary', 'data-testid': 'driver-details' }, el('span', null, 'Details'), el('span', { class: 'job__more-meta' }, packagesLine(o)), el('span', { class: 'job__more-chevron', 'aria-hidden': 'true' }, icon('chevron-down', 18))),
+        detailsBody);
+      more.addEventListener('toggle', () => { if (more.open) state.moreOpen.add(o.id); else state.moreOpen.delete(o.id); });
+    }
+    return el('article', { class: ['card', 'job', hero && 'job--hero', pri.rank < 9 && 'is-priority', state.focusOrder === o.id && 'is-focus'], 'data-testid': 'driver-job', 'data-order-id': o.id, 'data-code': o.code, 'data-status': o.status },
       el('div', { class: 'card__body job__top' },
         el('div', { class: 'job__head' }, el('h3', { class: 'mono mono--code job__code' }, o.code), html(MDM.badgeFor(o.status))),
         tags.length ? el('div', { class: 'job__tags' }, tags) : null,
-        el('div', { class: 'job__meta' }, meta),
+        meta ? el('div', { class: 'job__meta' }, meta) : null,
         stepsNode(o)),
-      el('div', { class: 'card__body job__body' },
-        pickups.length > 1 ? el('div', { class: 'job__multi' }, pickups.every(s => s.status === 'done') ? 'All ' + pickups.length + ' collections done, showing the last' : 'Collection ' + (pickups.indexOf(showPick) + 1) + ' of ' + pickups.length) : null,
+      el('div', { class: 'card__body job__body job__stops' },
+        pickups.length > 1 ? el('div', { class: 'job__multi' }, pickups.every(s => s.status === 'done') ? 'All ' + pickups.length + ' collections done' : 'Collection ' + (pickups.indexOf(showPick) + 1) + ' of ' + pickups.length) : null,
         showPick ? stopBlock(o, showPick, 'Collect from', 'driver-pickup') : null,
         drops.length > 1 ? el('div', { class: 'job__multi' }, 'Delivery ' + (drops.indexOf(showDrop) + 1) + ' of ' + drops.length) : null,
         showDrop ? stopBlock(o, showDrop, showDrop.type === 'return' ? 'Return to' : 'Deliver to', 'driver-drop') : null),
-      methodBlock(o),
-      el('div', { class: 'card__body job__body' },
-        packagesBlock(o),
-        dl(detailRows(o)),
-        chargesBlock(o)),
       el('div', { class: 'card__body job__actions' },
         o.status === 'failed' ? officeAlert(o) : null,
-        codDue(o) ? MDM.ui.notice('warn', 'Collect ' + money(o.cod.amount) + ' in cash from the receiver and enter it on proof of delivery.', { testid: 'driver-cod', title: 'Cash to collect: ' + money(o.cod.amount) }) : null,
-        returning(o) && o.cod && o.cod.amount > 0 && o.cod.status === 'pending' ? el('p', { class: 'job__line', 'data-testid': 'driver-return-cash' }, 'No cash to collect: the package goes back to the sender, so the ' + money(o.cod.amount) + ' cash on delivery is not collected.') : null,
+        codDue(o) ? MDM.ui.notice('warn', 'Enter it on proof of delivery.', { testid: 'driver-cod', title: 'Collect ' + money(o.cod.amount) + ' in cash' }) : null,
+        returning(o) && o.cod && o.cod.amount > 0 && o.cod.status === 'pending' ? el('p', { class: 'job__line', 'data-testid': 'driver-return-cash' }, 'No cash to collect: it goes back to the sender.') : null,
         primary,
         el('div', { class: 'job__links' },
           target ? el('a', { class: 'btn btn--secondary', href: directionsHref(target), target: '_blank', rel: 'noopener', 'data-testid': 'driver-directions' }, icon('navigation', 16), 'Directions') : null,
           el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), 'data-testid': 'driver-label' }, icon('printer', 16), 'Label'),
-          canFail ? el('button', { type: 'button', class: 'btn btn--ghost job__problem', 'data-testid': 'driver-problem', on: { click: e => onFailed(e.currentTarget, o, cur) } }, icon('flag', 16), 'Report a problem') : null)));
+          canFail ? el('button', { type: 'button', class: 'btn btn--ghost job__problem', 'data-testid': 'driver-problem', on: { click: e => onFailed(e.currentTarget, o, cur) } }, icon('flag', 16), 'Report a problem') : null)),
+      methodBlock(o),
+      more);
   }
   function compactRow(o, aside, testid) {
     const pri = priorityOf(o);
@@ -443,7 +457,7 @@
       el('div', { class: 'card__body job__top' },
         el('div', { class: 'job__head' }, el('h3', { class: 'mono mono--code job__code' }, o.code), html(MDM.badgeFor(o.status))),
         el('div', { class: 'job__meta' }, meta),
-        el('div', { class: 'job__returnalert' }, MDM.ui.notice('danger', was + 'Do not deliver it. Bring the package back to the sender.' + (reason ? ' Reason: ' + reason + '.' : ''),
+        el('div', { class: 'job__returnalert' }, MDM.ui.notice('danger', was + 'Do not deliver it. Bring it back to the sender.' + (reason ? ' Reason: ' + reason + '.' : ''),
           { title: 'Cancelled by ' + who + (at ? ' at ' + MDM.ui.fmtTime(at) : ''), testid: 'driver-return-alert' }))),
       el('div', { class: 'card__body job__body' },
         el('div', { class: 'job__stop', 'data-testid': 'driver-return-to' },
@@ -454,7 +468,7 @@
         el('div', { class: 'job__pkgs job__pkgs--return' },
           el('div', { class: 'job__label' }, 'Package', el('span', { class: 'job__count' }, packagesLine(o))),
           el('ul', { class: 'job__pkglist' }, (o.packages || []).map(p => el('li', null, el('span', { class: 'job__pkgsize' }, sizeName(p.size)), el('span', { class: 'job__pkgtext' }, p.description || 'No description'))))),
-        o.cod && o.cod.amount > 0 ? el('p', { class: 'job__line', 'data-testid': 'driver-return-cash' }, 'No cash to collect: the ' + money(o.cod.amount) + ' cash on delivery is cancelled.') : null),
+        o.cod && o.cod.amount > 0 ? el('p', { class: 'job__line', 'data-testid': 'driver-return-cash' }, 'No cash to collect: the ' + money(o.cod.amount) + ' is cancelled.') : null),
       el('div', { class: 'card__body job__actions' },
         el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block', 'data-testid': 'driver-return-done', on: { click: e => onReturned(e.currentTarget, o) } }, 'Returned to sender'),
         el('div', { class: 'job__links' },
@@ -472,13 +486,17 @@
     const returns = state.route.returns || [];
     const parts = [];
     if (!active.length && !waiting.length && !returns.length && !state.upcoming.length) {
-      parts.push(el('div', { class: 'empty', 'data-testid': 'driver-empty' }, el('div', { class: 'empty__title' }, 'No jobs right now.'), el('div', { class: 'empty__hint' }, 'Jobs appear here as soon as the office dispatches an order to you.')));
+      parts.push(el('div', { class: 'empty driver-empty', 'data-testid': 'driver-empty' }, el('div', { class: 'empty__title' }, 'No jobs right now'), el('div', { class: 'empty__hint' }, 'New jobs appear here.')));
     }
-    if (returns.length) parts.push(group('Returns', 'Cancelled after you collected it. Bring each package back to the sender, then confirm.', el('div', { class: 'jobs-list' }, returns.map(returnCard)), 'driver-returns'));
-    if (active.length) parts.push(el('div', { class: ['jobs-list', returns.length && 'jobs-list--after'], 'data-testid': 'driver-active' }, active.map(jobCard)));
-    if (waiting.length) parts.push(group('Waiting for the office', 'You reported a problem. The office decides what happens next.', el('div', { class: 'jobs-list' }, waiting.map(jobCard)), 'driver-waiting-list'));
-    if (state.upcoming.length) parts.push(group('Upcoming', 'Assigned to you, waiting for dispatch.', el('ul', { class: 'card jobs-rows' }, sortJobs(state.upcoming).map(o => compactRow(o, 'Waiting for dispatch', 'driver-upcoming'))), 'driver-upcoming-list'));
-    if (state.zoneQueue.length) parts.push(group('In your zones', 'Bulk packages sorted at the hub for your zones, not assigned yet.', el('ul', { class: 'card jobs-rows' }, state.zoneQueue.map(o => compactRow(o, MDM.geo.zoneShort(o.delivery.zone), 'driver-zone-queue'))), 'driver-zone-list'));
+    if (returns.length) parts.push(group('Returns', 'Bring each package back to the sender.', el('div', { class: 'jobs-list' }, returns.map(returnCard)), 'driver-returns'));
+    // The first active job (priority first, then oldest) is the one to work on now; the rest follow under Next.
+    if (active.length) parts.push(el('div', { class: ['jobs-list', returns.length && 'jobs-list--after'], 'data-testid': 'driver-active' },
+      el('p', { class: 'jobs-label' }, el('span', { class: 'jobs-label__dot', 'aria-hidden': 'true' }), 'Now'), jobCard(active[0], { hero: true }),
+      active.length > 1 ? el('p', { class: 'jobs-label jobs-label--next' }, 'Next · ' + (active.length - 1)) : null,
+      active.slice(1).map(o => jobCard(o))));
+    if (waiting.length) parts.push(group('Waiting for the office', 'They decide what happens next.', el('div', { class: 'jobs-list' }, waiting.map(o => jobCard(o))), 'driver-waiting-list'));
+    if (state.upcoming.length) parts.push(group('Upcoming', null, el('ul', { class: 'card jobs-rows' }, sortJobs(state.upcoming).map(o => compactRow(o, 'Not dispatched yet', 'driver-upcoming'))), 'driver-upcoming-list'));
+    if (state.zoneQueue.length) parts.push(group('In your zones', 'At the hub, not assigned yet.', el('ul', { class: 'card jobs-rows' }, state.zoneQueue.map(o => compactRow(o, MDM.geo.zoneShort(o.delivery.zone), 'driver-zone-queue'))), 'driver-zone-list'));
     if (state.doneToday.length) parts.push(group('Done today', null, el('ul', { class: 'card jobs-rows' }, state.doneToday.map(o => compactRow(o, doneAside(o), 'driver-done-today'))), 'driver-done-list'));
     ui.jobs.replaceChildren(...parts);
     const open = state.route.stops.filter(isOpen).length;
@@ -502,16 +520,17 @@
     ui.duty.hidden = !d;
     ui.jobsSection.hidden = !d;
     ui.mapSection.hidden = !d;
+    ui.me.hidden = !d;
     if (!d) { ui.cash.hidden = true; ui.notes.hidden = true; return; }
     ui.name.textContent = d.name;
     const worked = minutesWorked();
-    ui.dutyStatus.textContent = state.shift ? 'On duty since ' + MDM.ui.fmtTime(state.shift.inAt) + ' · ' + hm(worked) + ' today' : (worked ? 'Off duty · ' + hm(worked) + ' worked today' : 'Off duty. Punch in to start your shift.');
+    ui.dutyStatus.textContent = state.shift ? 'On duty since ' + MDM.ui.fmtTime(state.shift.inAt) + ' · ' + hm(worked) : (worked ? 'Off duty · ' + hm(worked) + ' today' : 'Off duty');
     ui.dutyStatus.classList.toggle('is-on', !!state.shift);
     ui.punch.textContent = state.shift ? 'Punch out' : 'Punch in';
     ui.punch.className = 'btn btn--lg ' + (state.shift ? 'btn--secondary' : 'btn--primary');
     ui.punch.disabled = !state.staff;
     const vehicle = ({ bike: 'Bike', pickup: 'Pickup truck', car: 'Car', van: 'Van' }[d.vehicle] || '') + (d.vehicleNote ? (d.vehicle ? ', ' : '') + d.vehicleNote : '');
-    ui.zones.textContent = [d.zones && d.zones.length ? 'Zones: ' + d.zones.map(z => MDM.geo.zoneLabel(z)).join(', ') : '', vehicle ? 'Vehicle: ' + vehicle : ''].filter(Boolean).join(' · ');
+    ui.zones.textContent = [d.zones && d.zones.length ? d.zones.map(z => MDM.geo.zoneShort(z)).join(', ') : '', vehicle].filter(Boolean).join(' · ');
     ui.signedIn.textContent = 'Signed in as ' + d.name;
     renderOffDays();
     renderLeave();
@@ -551,7 +570,7 @@
         el('div', { class: 'list__meta' }, MDM.ui.fmtDate(l.from + 'T00:00', { time: false }) + (l.to !== l.from ? ' to ' + MDM.ui.fmtDate(l.to + 'T00:00', { time: false }) : '') + ' · ' + plural(l.days, 'day') + (l.reason ? ' · ' + l.reason : '')),
         l.remarks ? el('div', { class: 'list__meta' }, 'Office: ' + l.remarks) : null),
       el('div', { class: 'list__aside' }, html(MDM.ui.badge(LEAVE_KIND[l.status] || 'neutral', l.status === 'pending' ? 'Pending' : l.status === 'approved' ? 'Approved' : 'Not approved')))));
-    ui.leave.replaceChildren(rows.length ? el('ul', { class: 'driver-leave' }, rows) : el('p', { class: 'driver-duty__line' }, 'No leave requests yet.'));
+    ui.leave.replaceChildren(rows.length ? el('ul', { class: 'driver-leave' }, rows) : el('p', { class: 'driver-duty__line' }, 'No requests yet.'));
     syncLeaveForm();
   }
   // The leave form is built once and lives inside the collapsible section, so a re-render never wipes what the driver typed.
@@ -565,7 +584,7 @@
     f.days = el('span', { class: 'driver-leave__days', role: 'status', 'data-testid': 'driver-leave-days' });
     f.error = el('div', { class: 'driver-leave__error', role: 'alert', 'data-testid': 'driver-leave-error' });
     f.submit = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'driver-leave-submit' }, 'Send request');
-    f.typeField = MDM.ui.field({ name: 'type', label: 'Type', control: f.type, hint: 'The office approves or declines it, and you see the answer below.' });
+    f.typeField = MDM.ui.field({ name: 'type', label: 'Type', control: f.type, hint: 'The office approves or declines it.' });
     f.form = el('form', { class: 'form driver-leave__form', novalidate: true, 'data-testid': 'driver-leave-form' },
       f.typeField,
       el('div', { class: 'grid-2 grid-2--keep' }, MDM.ui.field({ name: 'from', label: 'From', control: f.from }), MDM.ui.field({ name: 'to', label: 'To', control: f.to })),
@@ -593,7 +612,7 @@
     const asked = pendingOffDays();
     if (hint) hint.textContent = f.type.value === 'off_day' && state.offDays
       ? 'You have ' + plural(state.offDays.balance, 'accumulated off day') + ' to use' + (asked ? ' (' + asked + ' already requested, waiting for the office)' : '') + '.'
-      : 'The office approves or declines it, and you see the answer below.';
+      : 'The office approves or declines it.';
     f.submit.disabled = !state.staff;
   }
   function resetLeaveForm() {
@@ -639,7 +658,7 @@
     if (ui.cash.hidden) return;
     const total = held.reduce((n, o) => n + (Number(o.cod.collectedAmount) || 0), 0);
     ui.cashTitle.textContent = 'Cash with you: ' + money(total) + (held.length ? ' (' + MDM.ui.plural(held.length, 'order') + ')' : '');
-    ui.cashNote.textContent = held.length ? 'Cash on delivery you collected. Hand it to the office; they record the handover and pay the business.' : 'Cash you collect on delivery shows here until you hand it to the office.';
+    ui.cashNote.textContent = held.length ? 'Hand it to the office.' : 'Cash you collect shows here.';
     ui.cashList.hidden = !held.length;
     ui.cashList.replaceChildren(...held.map(o => {
       const c = o.cod, diff = c.variance || ((Number(c.collectedAmount) || 0) - (Number(c.amount) || 0));
@@ -771,7 +790,13 @@
     if (state.sim) return 'Online · sharing location (demo route)';
     return 'Online · location off';
   }
-  function renderStatus() { const t = statusText(); if (ui.status.textContent !== t) ui.status.textContent = t; }
+  function renderStatus() {
+    const t = statusText();
+    if (ui.status.textContent !== t) ui.status.textContent = t;
+    const on = !!(state.driver && state.online);
+    ui.status.classList.toggle('is-online', on);
+    ui.status.classList.toggle('is-live', on && !!(state.sim || state.gpsOn));
+  }
   function hideGpsAlert() { ui.gpsAlert.hidden = true; ui.gpsAlert.replaceChildren(); }
   function showGpsError(err) {
     const code = err && err.code;
@@ -952,16 +977,16 @@
     }
     // No customer photo (updates 17/10/2026): the office sets this order's price from the proof of collection. An extra collection
     // stop has no package of its own yet (it is packed with the rest), so it only needs a photo of what was collected.
-    const photoHint = stop.collectionId && !stop.shop ? 'A clear photo of what you collected. It is packed with the rest of the order.'
-      : MDM.priceAfterCollection(o) ? 'No customer photo: the office sets the price from this photo.' : 'A clear photo of the package. The office uses it to confirm the price.';
+    const photoHint = stop.collectionId && !stop.shop ? 'What you collected, packed with the rest.'
+      : MDM.priceAfterCollection(o) ? 'The office prices the order from this photo.' : 'The office uses it to confirm the price.';
     fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: photoHint, requiredMessage: 'Take a photo of the package' });
     pkgs.forEach((p, i) => {
       const n = pkgs.length > 1 ? ' ' + (i + 1) : '';
       fields.push({ name: 'size_' + i, label: 'Package' + n + ' category', type: 'segmented', required: true, value: p.size, options: Object.keys(MDM.pricing.SIZES).map(k => ({ value: k, label: MDM.pricing.SIZES[k] })),
-        hint: i === pkgs.length - 1 ? 'Change it if the package does not fit the category that was booked. No measurements needed.' : null });
+        hint: i === pkgs.length - 1 ? 'Change it if it does not fit. No measuring.' : null });
     });
     fields.push({ name: 'naalu', label: 'Naalu paid at collection (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
-      hint: 'Only if you paid the boat crew or porters to collect this package. It is recorded against the collection.' });
+      hint: 'Only if you paid a crew or porters.' });
     fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Dhoni crew, North Harbour' });
     fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2 });
     const p = MDM.ui.dialog({ title: stop.shop ? 'Shopping done' : 'Collected', message: o.code + ' · ' + addressText(o, stop), fields,
@@ -989,12 +1014,12 @@
   async function onDelivered(btn, o, stop) {
     const isReturn = stop.type === 'return';
     const cod = !isReturn && codDue(o) ? o.cod.amount : 0;
-    const nameField = { name: 'recipientName', label: isReturn ? 'Received by' : 'Recipient name', type: 'text', required: true, autocomplete: 'off', value: !isReturn && stop.contact && stop.contact.name ? stop.contact.name : '', hint: 'Who took the package. Not needed when left as instructed.', requiredMessage: 'Enter who received it' };
+    const nameField = { name: 'recipientName', label: isReturn ? 'Received by' : 'Recipient name', type: 'text', required: true, autocomplete: 'off', value: !isReturn && stop.contact && stop.contact.name ? stop.contact.name : '', hint: 'Not needed when left as instructed.', requiredMessage: 'Enter who received it' };
     const fields = [
       { name: 'handedTo', label: 'Handed to', type: 'segmented', required: true, value: 'recipient', options: MDM.HANDED_TO },
       nameField,
       { name: 'confirmed', label: 'The recipient confirmed they received it', type: 'checkbox', value: false },
-      { name: 'photo', label: 'Proof of delivery', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed when nobody confirms in person.' },
+      { name: 'photo', label: 'Proof of delivery', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed if nobody confirms in person.' },
     ];
     if (cod) fields.push({ name: 'cashCollected', label: 'Cash collected (MVR)', type: 'number', required: true, min: 0, step: 1, placeholder: String(cod), validate: wholeMvr('cashCollected'),
       hint: 'Amount to collect: ' + money(cod), requiredMessage: 'Enter the cash you collected (amount to collect: ' + money(cod) + '). Enter 0 if the receiver did not pay.' });
@@ -1002,12 +1027,12 @@
     const cargo = !isReturn && (o.delivery || {}).method === 'cargo';
     if (cargo) {
       fields.push({ name: 'cargoCharge', label: 'Maldivian Cargo charges (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('cargoCharge'),
-        hint: 'From the Maldivian Cargo bill. It is added to the customer\'s delivery charges.' });
+        hint: 'From their bill. Added to the customer\'s charges.' });
       fields.push({ name: 'cargoBill', label: 'Maldivian Cargo bill', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed when you enter the charges.' });
       fields.push({ name: 'cargoNote', label: 'Cargo note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Bill MC-204517' });
     }
     fields.push({ name: 'naalu', label: 'Naalu paid at delivery (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
-      hint: 'Only if you paid the boat crew or porters to hand it over. It is recorded against the delivery.' });
+      hint: 'Only if you paid a crew or porters.' });
     fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Speedboat crew' });
     if (!isReturn) {
       fields.push({ name: 'packing', label: 'Packing charge (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('packing'), hint: 'Added to the customer\'s bill.' });
@@ -1103,7 +1128,7 @@
   }
   // Failed collection or delivery (client requirements §14): reason, remarks, optional photo; the office decides what happens next.
   async function onFailed(btn, o, stop) {
-    const v = await MDM.ui.dialog({ title: stop.type === 'pickup' ? 'Collection problem' : 'Delivery problem', message: 'The job goes to the office, who will reschedule, reassign, return or contact the customer.',
+    const v = await MDM.ui.dialog({ title: stop.type === 'pickup' ? 'Collection problem' : 'Delivery problem', message: 'The office decides what happens next.',
       fields: [
         { name: 'failReason', label: 'Reason', type: 'select', required: true, placeholder: 'Choose a reason', options: MDM.FAIL_REASONS, requiredMessage: 'Choose a reason' },
         { name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 3, hint: 'What you tried, for example called twice' },
@@ -1124,7 +1149,7 @@
     if ((id || null) === state.driverId) return;
     stopSim(); stopGps(); hideGpsAlert(); letSleep();
     state.driverId = id || null; state.driver = null; state.online = false; state.nearId = null;
-    state.noteIds = null; state.notesAll = false;
+    state.noteIds = null; state.notesAll = false; state.entered = false; state.moreOpen.clear();
     map.fitted = false;
     ui.leaveSection.open = false;
     resetLeaveForm();
@@ -1178,6 +1203,8 @@
     state.online = !!driver && driver.status !== 'offline';
     if (state.online !== wasOnline) { writeSession(); if (state.online) keepAwake(); else { letSleep(); stopSim(); stopGps(); } }
     renderDuty(); renderControls(); renderStatus(); renderJobs();
+    // The console eases in once per driver; live re-renders after that swap content in place.
+    if (driver && !state.entered) { state.entered = true; MDM.motion.enter(q('.driver'), { selector: ':scope > section:not([hidden])', max: 6 }); }
     await syncMap();
   }
   let queued = false;

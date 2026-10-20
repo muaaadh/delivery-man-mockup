@@ -82,14 +82,14 @@
     const cod = o.cod && o.cod.amount > 0 && o.cod.status === 'pending' && ['delivered', 'returned', 'cancelled'].indexOf(o.status) < 0 ? o.cod : null;
     slot.replaceChildren(el('div', { class: 'page-head' }, el('h1', null, 'Invoice')), el('div', { class: 'empty', 'data-testid': 'invoice-business-only' },
       el('p', { class: 'empty__title' }, 'Delivery arranged by ' + name),
-      el('p', { class: 'empty__hint' }, 'This delivery is billed to ' + name + ', so there is no invoice for you here.' + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash when the package arrives.' : '')),
+      el('p', { class: 'empty__hint' }, 'It is billed to ' + name + ', so there is no invoice here.' + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash on delivery.' : '')),
       el('a', { class: 'btn btn--secondary', href: MDM.href('track/?code=' + encodeURIComponent(o.code)) }, 'Track ' + o.code)));
   }
   function notFound() {
     document.title = 'Invoice · ' + BRAND;
     slot.replaceChildren(el('div', { class: 'page-head' }, el('h1', null, 'Invoice')), el('div', { class: 'empty', 'data-testid': 'invoice-missing' },
-      el('p', { class: 'empty__title' }, 'No invoice for this link.'),
-      el('p', { class: 'empty__hint' }, 'Check the link in your message, or track the order with its code.'),
+      el('p', { class: 'empty__title' }, 'No invoice for this link'),
+      el('p', { class: 'empty__hint' }, 'Check the link in your message.'),
       el('a', { class: 'btn btn--secondary btn--sm', href: MDM.href('track/') }, 'Track an order')));
   }
   function line(desc, sub, amount, fee, key) {
@@ -113,7 +113,7 @@
     const dueDays = Number(settings.invoiceDueDays) || 14;
     document.title = 'Invoice ' + number + ' · ' + BRAND;
 
-    const printBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'invoice-print', on: { click: () => window.print() } }, html(MDM.icon('printer', 16)), 'Print or save as PDF');
+    const printBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'invoice-print', on: { click: () => window.print() } }, html(MDM.icon('printer', 16)), 'Print or save PDF');
     const trackBtn = el('a', { class: 'btn btn--ghost', href: MDM.href('track/?code=' + encodeURIComponent(o.code)) }, 'Track ' + o.code);
     const payBtn = (p.status === 'requested' || (p.status === 'pending' && confirmed)) && p.method !== 'invoice' && o.status !== 'cancelled'
       ? el('a', { class: 'btn btn--brand', href: MDM.href('checkout/?order=' + encodeURIComponent(o.id)), 'data-testid': 'invoice-pay' }, 'Pay ' + MDM.pricing.format(o.totals.total)) : null;
@@ -123,8 +123,8 @@
       el('div', { class: 'invoice-brand__meta' }, BRAND + ' · Greater Malé', el('br'), [MDM.ui.phone.format(contact.phone || ''), contact.email].filter(Boolean).join(' · ')));
 
     const details = el('div', { class: 'rate-table' },
-      row('Invoice number', number, { mono: true }),
-      row('Order', o.code, { mono: true }),
+      row('Invoice number', el('span', { class: 'mono mono--code' }, number)),
+      row('Order', el('span', { class: 'mono mono--code' }, o.code)),
       row('Issued', fmtDate(issued)),
       row('Due', p.status === 'paid' ? 'Paid ' + fmtDate(p.verifiedAt || p.paidAt) : fmtDate(new Date(new Date(issued).getTime() + dueDays * 86400000).toISOString())),
       row('Status', html(MDM.payBadge(p.status))));
@@ -156,14 +156,14 @@
       : el('section', { class: 'invoice-block', 'aria-labelledby': 'inv-pay' },
         el('h2', { id: 'inv-pay' }, p.status === 'paid' ? 'Paid by bank transfer' : 'Pay by bank transfer'),
         el('div', { class: 'rate-table', 'data-testid': 'invoice-banks' }, banks.map(b => row(b.name, el('span', null, el('span', { class: 'mono' }, b.accountNo), el('small', null, b.accountName))))),
-        el('p', { class: 'small muted', style: { marginTop: '8px' } }, 'Use ', el('span', { class: 'mono' }, o.code), ' as the transfer reference.'));
+        el('p', { class: 'small muted', style: { marginTop: '8px' } }, 'Use ', el('span', { class: 'mono mono--code' }, o.code), ' as the transfer reference.'));
 
     slot.replaceChildren(
       el('div', { class: 'page-head page-head--stack' }, el('h1', { tabindex: '-1' }, 'Invoice ' + number),
         el('div', { class: 'page-head__actions invoice-actions no-print' }, payBtn, printBtn, trackBtn)),
       brand,
       el('div', { class: 'stack-8' },
-        !confirmed ? MDM.ui.notice('warn', MDM.priceAfterCollection(o) ? 'This is an estimate. Our team confirms the final price after collection, from the driver\'s photo.' : 'This is an estimate. Our team confirms the final price before collection.') : null,
+        !confirmed ? MDM.ui.notice('warn', MDM.priceAfterCollection(o) ? 'Estimate. We confirm the final price after collection.' : 'Estimate. We confirm the final price before collection.') : null,
         el('div', { class: 'invoice-parties' },
           el('section', null, el('h2', null, 'Invoice'), details),
           el('section', null, el('h2', null, 'Billed to'), billTo)),

@@ -1,5 +1,5 @@
-// My orders (client requirements §17, §18; web app updates §2.1, §3): the signed-in customer's order history with number, date,
-// collection and delivery (with the delivery method), packages, price, payment status and delivery status; "Order again" on every
+// My orders (client requirements §17, §18; web app updates §2.1, §3): the signed-in customer's order history, one row per order with
+// number, date, collection and delivery (with the delivery method), packages, price, payment and delivery status; "Order again" on every
 // order and for the customer's most frequent request type and route; an order drawer with the status history (time and who), price,
 // payment and actions (track, pay, invoice, order again, request cancellation); the messages we sent; and the address book (add, edit,
 // remove labelled addresses through MDM.store.saveAddress / removeAddress).
@@ -11,8 +11,11 @@
   const CHANNEL = { sms: 'SMS', whatsapp: 'WhatsApp', viber: 'Viber', email: 'Email' };
   // Orders the request form can rebuild: everything except e-store purchases and business orders.
   const NO_REORDER = ['store', 'bulk', 'business'];
-  let view, me = null, phoneKey = null;
-  const state = { tab: 'orders', filter: 'all', openId: null };
+  let view, head = null, headKey = '', body = null, me = null, phoneKey = null;
+  // enter: the tab panel eases in once when it is first shown (page load, tab switch, filter change), never on live data re-renders.
+  const state = { tab: 'orders', filter: 'all', openId: null, enter: true, allMessages: false };
+  const MESSAGES_SHOWN = 12;   // newest first; the rest behind "Show all"
+  const newestFirst = (a, b) => (String(b.at) > String(a.at) ? 1 : String(b.at) < String(a.at) ? -1 : 0);
 
   const fmt = n => MDM.pricing.format(n);
   const who = by => { const n = String(MDM.byName(by) || ''); return n.charAt(0).toUpperCase() + n.slice(1); };
@@ -67,7 +70,7 @@
   const moreStops = o => { const n = (o.extraCollections || []).length; return n ? '+ ' + n + ' more ' + (n === 1 ? 'stop' : 'stops') : ''; };
   function reorderLink(o) {
     const stop = e => e.stopPropagation();   // the row itself opens the drawer on click and Enter
-    return el('a', { class: 'btn btn--secondary btn--sm', href: reorderHref(o), 'data-testid': 'account-reorder', 'data-order': o.id, on: { click: stop, keydown: stop } }, 'Order again',
+    return el('a', { class: 'btn btn--secondary btn--sm account-row__again', href: reorderHref(o), 'data-testid': 'account-reorder', 'data-order': o.id, on: { click: stop, keydown: stop } }, 'Order again',
       el('span', { class: 'sr-only' }, ' ' + o.code));
   }
 
@@ -79,35 +82,36 @@
     const g = frequentRoute(orders.filter(canReorder));
     if (!g) return null;
     const o = g.latest;
-    return el('section', { class: 'card account-again', 'aria-labelledby': 'acc-again', 'data-testid': 'account-reorder-frequent', 'data-count': String(g.count) },
-      el('div', { class: 'card__body account-again__body' },
-        el('div', { class: 'account-again__main' },
-          el('h2', { id: 'acc-again', class: 'account-h3' }, 'Your most frequent order'),
-          el('p', { class: 'account-again__route' }, routeText(o)),
-          el('p', { class: 'small muted' }, frequentMeta(g))),
-        el('a', { class: 'btn btn--brand', href: reorderHref(o), 'data-testid': 'account-reorder-frequent-link', 'data-order': o.id }, 'Order again')));
+    return el('section', { class: 'account-again', 'aria-labelledby': 'acc-again', 'data-testid': 'account-reorder-frequent', 'data-count': String(g.count) },
+      el('span', { class: 'account-again__icon', 'aria-hidden': 'true' }, html(MDM.icon('refresh', 20))),
+      el('div', { class: 'account-again__main' },
+        el('h2', { id: 'acc-again', class: 'account-again__title' }, 'Your most frequent order'),
+        el('p', { class: 'account-again__route' }, routeText(o)),
+        el('p', { class: 'account-again__meta' }, frequentMeta(g))),
+      el('a', { class: 'btn btn--brand account-again__btn', href: reorderHref(o), 'data-testid': 'account-reorder-frequent-link', 'data-order': o.id }, 'Order again'));
   }
 
-  // ---- Orders table (stacks into cards below 720px) ----------------------------------------------------------------------
-  function ordersTable(orders) {
-    const rows = orders.map(o => el('tr', { class: 'is-clickable', 'data-testid': 'account-order', 'data-status': o.status, 'data-order': o.id, tabindex: '0', on: {
-      click: () => openOrder(o.id), keydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOrder(o.id); } } } },
-      el('td', { class: 'table__primary', 'data-label': 'Order' }, el('span', null, el('span', { class: 'mono' }, o.code),
-        el('span', { class: 'table__sub' }, MDM.requestTypeLabel(o.requestType)),
-        el('span', { class: 'table__sub', 'data-testid': 'account-date' }, MDM.ui.fmtDate(o.createdAt)))),
-      el('td', { 'data-label': 'Collection' }, el('span', null, el('span', { class: 'table__address', title: place(o.collection) }, place(o.collection)),
-        moreStops(o) ? el('span', { class: 'table__sub', 'data-testid': 'account-more-stops' }, moreStops(o)) : null)),
-      el('td', { 'data-label': 'Delivery' }, el('span', null, el('span', { class: 'table__address', title: deliveryPlace(o) }, deliveryPlace(o)),
-        el('span', { class: 'table__sub', 'data-testid': 'account-method' }, MDM.deliveryMethodLabel(methodOf(o))))),
-      el('td', { 'data-label': 'Packages' }, pkgSummary(o)),
-      el('td', { class: 'num mono', 'data-label': 'Price' }, priceText(o)),
-      el('td', { class: 'account-status', 'data-label': 'Status' }, el('span', { class: 'account-badges' }, html(MDM.badgeFor(o.status, { customer: true })), html(MDM.payBadge(o.payment.status)))),
-      el('td', { class: 'account-actions-cell' }, canReorder(o) ? reorderLink(o) : null)));
-    const heads = ['Order', 'Collection', 'Delivery', 'Packages', 'Price', 'Status'];
-    return el('div', { class: 'table-wrap account-table' }, el('table', { class: 'table table--stack', 'data-testid': 'account-orders' },
-      el('thead', null, el('tr', null, heads.map(h => el('th', { scope: 'col', class: h === 'Price' ? 'num' : null }, h)),
-        el('th', { scope: 'col' }, el('span', { class: 'sr-only' }, 'Order again')))),
-      el('tbody', null, rows)));
+  // ---- Orders: one scannable row per order (code and status, the route, what and when; price, payment and Order again) ----------
+  function ordersList(orders) {
+    const rows = orders.map(o => el('li', { class: 'account-row', 'data-testid': 'account-order', 'data-status': o.status, 'data-order': o.id, tabindex: '0', on: {
+      click: () => openOrder(o.id), keydown: e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openOrder(o.id); } } } },
+      el('div', { class: 'account-row__main' },
+        el('div', { class: 'account-row__top' }, el('span', { class: 'account-row__code mono mono--code' }, o.code), html(MDM.badgeFor(o.status, { customer: true }))),
+        el('div', { class: 'account-row__route' },
+          el('span', { class: 'account-row__place', title: place(o.collection) }, place(o.collection)),
+          el('span', { class: 'account-row__arrow', 'aria-label': 'to' }, html(MDM.icon('arrow-right', 14))),
+          el('span', { class: 'account-row__place', title: deliveryPlace(o) }, deliveryPlace(o))),
+        el('div', { class: 'account-row__meta' },
+          el('span', null, MDM.requestTypeLabel(o.requestType)),
+          el('span', { 'data-testid': 'account-method' }, MDM.deliveryMethodLabel(methodOf(o))),
+          moreStops(o) ? el('span', { 'data-testid': 'account-more-stops' }, moreStops(o)) : null,
+          el('span', null, pkgSummary(o)),
+          el('span', { 'data-testid': 'account-date' }, MDM.ui.fmtDate(o.createdAt)))),
+      el('div', { class: 'account-row__aside' },
+        el('span', { class: 'account-row__price mono' }, priceText(o)),
+        html(MDM.payBadge(o.payment.status))),
+      el('div', { class: 'account-row__action' }, canReorder(o) ? reorderLink(o) : null)));
+    return el('ul', { class: 'account-list', 'data-testid': 'account-orders', 'aria-label': 'Your orders' }, rows);
   }
 
   // ---- Order drawer -------------------------------------------------------------------------------------------------------
@@ -163,7 +167,7 @@
       presets.map(l => el('label', { class: 'segmented__option', 'data-testid': 'address-label-' + slug(l) },
         el('input', { class: 'sr-only', type: 'radio', name: 'adr-label', value: l, checked: l === preset, 'data-testid': 'address-label-' + slug(l) + '-input' }), el('span', null, l))));
     const custom = el('input', { class: 'input', id: 'adr-custom', type: 'text', maxlength: '40', autocomplete: 'off', value: customText, placeholder: "Mum's home, gym, school", 'data-testid': 'address-custom-label' });
-    const customField = MDM.ui.field({ name: 'custom', label: 'Name this address', optional: true, control: custom, hint: 'Leave it empty to save it as Other.' });
+    const customField = MDM.ui.field({ name: 'custom', label: 'Name this address', optional: true, control: custom, hint: 'Empty saves it as Other' });
     customField.hidden = preset !== 'Other';
     labelGroup.addEventListener('change', e => { if (e.target.name !== 'adr-label') return; preset = e.target.value; customField.hidden = preset !== 'Other'; });
     const address = el('input', { class: 'input', id: 'adr-address', type: 'text', autocomplete: 'street-address', value: a ? a.address : '', placeholder: 'House or building, street', 'data-testid': 'address-address' });
@@ -188,7 +192,7 @@
       MDM.ui.field({ name: 'label', label: 'Label', control: labelGroup }),
       customField, fAddress, fZone,
       MDM.ui.field({ name: 'landmark', label: 'Landmark', optional: true, control: landmark }),
-      MDM.ui.field({ name: 'meetAt', label: 'Handover point', control: meetAt, hint: 'Where the driver meets you at this address.' }),
+      MDM.ui.field({ name: 'meetAt', label: 'Handover point', control: meetAt }),
       MDM.ui.field({ name: 'contactName', label: 'Receiver at this address', optional: true, control: contactName }),
       fContactPhone,
       formError);
@@ -234,9 +238,8 @@
   function addressesPanel(customer) {
     const list = ((customer && customer.addresses) || []).filter(a => a && a.address);
     const addBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'address-add', on: { click: () => openAddressForm(customer, null) } }, html(MDM.icon('plus', 16)), 'Add an address');
-    const head = el('div', { class: 'account-address-head' },
-      el('div', null, el('h2', { class: 'account-h3' }, 'Saved addresses'), el('p', { class: 'small muted' }, 'Choose one when you place an order, or add a new address there.')), addBtn);
-    if (!list.length) return el('div', { class: 'stack-4' }, head, el('div', { class: 'empty', 'data-testid': 'account-addresses-empty' }, el('div', { class: 'empty__title' }, 'No saved addresses.'), el('div', { class: 'empty__hint' }, 'Add your home, office or family addresses so ordering takes a few taps.')));
+    const head = el('div', { class: 'account-address-head' }, el('h2', { class: 'account-h3' }, 'Saved addresses'), addBtn);
+    if (!list.length) return el('div', { class: 'stack-4' }, head, el('div', { class: 'empty', 'data-testid': 'account-addresses-empty' }, el('div', { class: 'empty__title' }, 'No saved addresses'), el('div', { class: 'empty__hint' }, 'Add home, office or family to order in a few taps.')));
     return el('div', { class: 'stack-4' }, head,
       el('ul', { class: 'list account-addresses', 'data-testid': 'account-addresses' }, list.map(a => el('li', { class: 'list__item', 'data-testid': 'account-address', 'data-id': a.id || '' },
         el('div', { class: 'list__main' },
@@ -253,22 +256,37 @@
   function ordersPanel(orders) {
     const counts = { all: orders.length, active: orders.filter(o => !isDone(o)).length, pay: orders.filter(canPay).length, done: orders.filter(isDone).length };
     const list = orders.filter(o => state.filter === 'all' || (state.filter === 'active' && !isDone(o)) || (state.filter === 'pay' && canPay(o)) || (state.filter === 'done' && isDone(o)));
-    const chips = el('div', { class: 'filters__chips', role: 'group', 'aria-label': 'Show' }, FILTERS.map(f => el('button', { type: 'button', class: 'chip', 'aria-pressed': state.filter === f.key ? 'true' : 'false', 'data-testid': 'account-filter-' + f.key,
-      on: { click: () => { state.filter = f.key; render(); } } }, f.label + ' ' + counts[f.key])));
+    const chips = el('div', { class: 'filters__chips account-filters', role: 'group', 'aria-label': 'Show' }, FILTERS.map(f => el('button', { type: 'button', class: 'chip', 'aria-pressed': state.filter === f.key ? 'true' : 'false', 'data-testid': 'account-filter-' + f.key,
+      on: { click: () => { state.filter = f.key; state.enter = 'list'; render(); } } }, f.label, el('span', { class: 'count' }, String(counts[f.key])))));
     const toPay = orders.filter(canPay);
-    return el('div', { class: 'stack-4' },
+    const empty = orders.length
+      ? el('div', { class: 'empty account-empty' }, el('div', { class: 'empty__title' }, 'Nothing here'))
+      : el('div', { class: 'empty account-empty' }, el('div', { class: 'empty__title' }, 'No orders yet'), el('div', { class: 'empty__hint' }, 'Your deliveries show up here.'), el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, 'Request a delivery'));
+    return el('div', { class: 'account-orders' },
       toPay.length ? MDM.ui.notice('warn', toPay.length === 1 ? toPay[0].code + ' is ready to pay: ' + fmt(toPay[0].totals.total) + '.' : toPay.length + ' orders are ready to pay.', { action: el('a', { class: 'alert__action', href: MDM.href('checkout/?order=' + encodeURIComponent(toPay[0].id)), 'data-testid': 'account-pay-first' }, 'Pay now') }) : null,
       frequentCard(orders),
-      chips,
-      list.length ? ordersTable(list) : el('div', { class: 'empty' }, el('div', { class: 'empty__title' }, orders.length ? 'Nothing here.' : 'No orders with this number yet.'), el('div', { class: 'empty__hint' }, 'Your deliveries appear here once you place a request.')));
+      orders.length ? chips : null,
+      el('div', { class: 'account-list-slot' }, list.length ? ordersList(list) : empty));
   }
   function messagesPanel(notes) {
-    if (!notes.length) return el('div', { class: 'empty' }, el('div', { class: 'empty__title' }, 'No messages yet.'), el('div', { class: 'empty__hint' }, 'We message you when the price is confirmed, a driver is assigned, your package is collected and delivered.'));
-    return el('div', { class: 'list account-messages', 'data-testid': 'account-messages' }, notes.map(n => el('div', { class: 'list__item', 'data-testid': 'account-message' },
-      el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, n.title + ' · ', el('span', { class: 'mono' }, n.code)), el('div', { class: 'list__meta' }, n.message)),
-      el('div', { class: 'list__aside small muted' }, MDM.ui.timeAgo(n.at), el('br'), CHANNEL[n.channel] || n.channel))));
+    if (!notes.length) return el('div', { class: 'empty account-empty' }, el('div', { class: 'empty__title' }, 'No messages yet'), el('div', { class: 'empty__hint' }, 'Price, driver and delivery updates appear here.'));
+    const shown = state.allMessages ? notes : notes.slice(0, MESSAGES_SHOWN);
+    return el('div', null,
+      el('ul', { class: 'list account-messages', 'data-testid': 'account-messages' }, shown.map(n => el('li', { class: 'list__item', 'data-testid': 'account-message' },
+        el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, n.title, ' ', el('span', { class: 'account-messages__code mono mono--code' }, n.code)), el('div', { class: 'list__meta' }, n.message)),
+        el('div', { class: 'list__aside' }, MDM.ui.timeAgo(n.at), el('br'), CHANNEL[n.channel] || n.channel)))),
+      shown.length < notes.length ? el('button', { type: 'button', class: 'btn btn--secondary account-more', 'data-testid': 'account-messages-more', on: { click: () => { state.allMessages = true; render(); } } }, 'Show all ' + notes.length) : null);
   }
 
+  // The head is built once (and again only when the name, number or channel changes), so a live data update re-renders the tabs and
+  // the panel without replaying the title's entrance.
+  function buildHead(name, customer) {
+    return el('div', { class: 'page-head account-head' },
+      el('h1', null, name || 'My orders'),
+      el('p', { class: 'page-head__desc' }, MDM.ui.phone.format(phoneKey) + (customer && customer.notify ? ' · Updates by ' + (CHANNEL[customer.notify] || customer.notify) : '')),
+      customer && customer.termsAcceptedAt ? el('p', { class: 'account-terms', 'data-testid': 'account-terms' }, 'You confirmed what we carry on ' + MDM.ui.fmtDate(customer.termsAcceptedAt, { dateOnly: true }) + '.') : null,
+      el('div', { class: 'page-head__actions' }, el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, 'New request'), el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'account-signout', on: { click: signOut } }, 'Sign out')));
+  }
   async function render() {
     me = loadMe();
     if (!me) { location.replace(MDM.href('login/?as=customer&next=account/')); return; }
@@ -280,18 +298,23 @@
     // Staff notifications (audience driver / operations / business) are operational messages, not the customer's.
     const mineNotes = notes.filter(n => !n.audience);
     const nAddresses = customer ? (customer.addresses || []).length : 0;
-    const tabs = el('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Account' }, TABS.map(t => el('button', { type: 'button', class: 'tab', role: 'tab', id: 'acc-tab-' + t.key, 'aria-selected': state.tab === t.key ? 'true' : 'false', 'aria-controls': 'acc-panel', 'data-testid': 'account-tab-' + t.key,
-      on: { click: () => { state.tab = t.key; render().then(() => { const b = document.getElementById('acc-tab-' + t.key); if (b) b.focus(); }); } } },
+    const tabs = el('div', { class: 'tabs account-tabs', role: 'tablist', 'aria-label': 'Account' }, TABS.map(t => el('button', { type: 'button', class: 'tab', role: 'tab', id: 'acc-tab-' + t.key, 'aria-selected': state.tab === t.key ? 'true' : 'false', 'aria-controls': 'acc-panel', 'data-testid': 'account-tab-' + t.key,
+      on: { click: () => { if (state.tab === t.key) return; state.tab = t.key; state.enter = true; render().then(() => { const b = document.getElementById('acc-tab-' + t.key); if (b) b.focus(); }); } } },
       t.label, t.key === 'messages' && mineNotes.length ? el('span', { class: 'count' }, String(mineNotes.length)) : null,
       t.key === 'addresses' && nAddresses ? el('span', { class: 'count' }, String(nAddresses)) : null)));
     const panel = el('div', { id: 'acc-panel', role: 'tabpanel', 'aria-labelledby': 'acc-tab-' + state.tab, class: 'account-panel' },
-      state.tab === 'orders' ? ordersPanel(orders) : state.tab === 'messages' ? messagesPanel(mineNotes.slice().reverse()) : addressesPanel(customer));
-    view.replaceChildren(
-      el('div', { class: 'page-head' }, el('div', { class: 'account-id' },
-        el('div', null, el('h1', null, name || 'My orders'), el('p', { class: 'page-head__desc' }, MDM.ui.phone.format(phoneKey) + (customer && customer.notify ? ' · Updates by ' + (CHANNEL[customer.notify] || customer.notify) : '')),
-          customer && customer.termsAcceptedAt ? el('p', { class: 'small muted', 'data-testid': 'account-terms' }, 'You confirmed what we carry on ' + MDM.ui.fmtDate(customer.termsAcceptedAt, { dateOnly: true }) + '.') : null),
-        el('div', { class: 'row row--wrap' }, el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, 'New request'), el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'account-signout', on: { click: signOut } }, 'Sign out')))),
-      tabs, panel);
+      state.tab === 'orders' ? ordersPanel(orders) : state.tab === 'messages' ? messagesPanel(mineNotes.slice().sort(newestFirst)) : addressesPanel(customer));
+    const key = [name, phoneKey, customer && customer.notify, customer && customer.termsAcceptedAt].join('|');
+    if (!head || key !== headKey) { const h = buildHead(name, customer); if (head) head.replaceWith(h); head = h; headKey = key; }
+    if (!body) { body = el('div', { class: 'account-body' }); view.replaceChildren(head, body); }
+    body.replaceChildren(tabs, panel);
+    if (state.enter && MDM.motion) {
+      // A tab shows its blocks rising in; a filter change only the list.
+      const list = panel.querySelector('.account-list, .account-empty');
+      if (state.enter === 'list' && list) MDM.motion.enter(list, { max: 8 });
+      else MDM.motion.enter(panel.querySelector('.account-messages') || panel.firstElementChild, { max: 8 });
+    }
+    state.enter = false;
     if (state.openId && MDM.ui.drawer.isOpen()) openOrder(state.openId);
   }
 

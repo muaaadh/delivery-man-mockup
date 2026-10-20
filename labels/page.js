@@ -228,7 +228,7 @@
       el('a', { class: 'brand', href: MDM.href(''), 'aria-label': 'Mr. Delivery Man, home' }, html(MDM.logo())),
       el('div', { class: 'labels-toolbar__text' },
         el('h1', null, data.title),
-        el('p', { class: 'small muted', 'data-testid': 'labels-summary' }, (labels.length ? MDM.ui.plural(labels.length, 'label') + ' · 100 × 150 mm, one per page' + (Object.keys(zones).length > 1 ? ' · sorted by zone: ' + Object.keys(zones).map(z => MDM.geo.zoneShort(z) + ': ' + zones[z]).join(', ') : '') : 'Nothing to print') +
+        el('p', { class: 'small muted', 'data-testid': 'labels-summary' }, (labels.length ? MDM.ui.plural(labels.length, 'label') + ' · 100 × 150 mm' + (Object.keys(zones).length > 1 ? ' · by zone: ' + Object.keys(zones).map(z => MDM.geo.zoneShort(z) + ' ' + zones[z]).join(', ') : '') : 'Nothing to print') +
           (data.skipped ? ' · ' + MDM.ui.plural(data.skipped, 'cancelled order') + ' left out' : ''))),
       el('div', { class: 'labels-toolbar__actions' },
         el('a', { class: 'btn btn--secondary', href: back }, 'Back'),
@@ -236,7 +236,7 @@
     if (!labels.length) {
       sheet.replaceChildren(el('div', { class: 'labels-empty card' }, el('div', { class: 'card__body' }, el('div', { class: 'empty' },
         el('div', { class: 'empty__title' }, 'No packages found'),
-        el('div', { class: 'empty__hint' }, 'Open labels from an order, a bulk order or the business portal. The link may be for an order that was removed by a demo reset.')))));
+        el('div', { class: 'empty__hint' }, 'Open labels from an order or the business portal.')))));
       return;
     }
     sheet.replaceChildren(...labels);

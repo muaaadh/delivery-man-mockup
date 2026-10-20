@@ -2,7 +2,7 @@
 // signed in, the business portal (client requirements §2 business, §8, §10, §11, §18; web app updates 11/10/2026 §1.3, §3, §5).
 // Session: localStorage mdm:business = { accountId, name, phone, at }, written here (phone + one-time code) or by the sign-in page.
 // Portal tabs live in the hash (#overview, #new, #bulk, #excel, #orders, #cod, #points, #priority, #invoices, #labels) so each one can
-// be linked to; #orders?batch=<id> opens one bulk order. Orders: MDM.store.createOrder (single), createBatch (bulk rows and Excel),
+// be linked to; #orders?batch=<id> opens one bulk order. They are grouped under five destinations (Home, Send, Orders, Money, Account). Orders: MDM.store.createOrder (single), createBatch (bulk rows and Excel),
 // businessCancel (one order, also inside a bulk order), updateBoat, requestPriority; collection points: saveCollectionPoint.
 // Row parsing, validation and the Excel template live in business/kit.js (MDM.bizKit).
 (function (MDM) { 'use strict';
@@ -13,10 +13,21 @@
   const OPEN = ['requested', 'confirmed', 'assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery', 'failed'];
   const DONE = ['delivered', 'returned', 'cancelled'];
   const TABS = [
-    { key: 'overview', label: 'Overview' }, { key: 'new', label: 'New order' }, { key: 'bulk', label: 'Bulk order' }, { key: 'excel', label: 'Excel import' },
-    { key: 'orders', label: 'Orders' }, { key: 'cod', label: 'Cash on delivery' }, { key: 'points', label: 'Collection points' },
+    { key: 'overview', label: 'Home' }, { key: 'new', label: 'One order' }, { key: 'bulk', label: 'Bulk' }, { key: 'excel', label: 'Excel' },
+    { key: 'orders', label: 'All orders' }, { key: 'cod', label: 'Cash on delivery' }, { key: 'points', label: 'Account' },
     { key: 'priority', label: 'Priority' }, { key: 'invoices', label: 'Invoices' }, { key: 'labels', label: 'Labels' },
   ];
+  // Five destinations; a destination with more than one tab shows them as a segmented control. Every tab keeps its own hash and its
+  // biz-tab-<key> testid (on the destination itself when it has one tab, on the segment otherwise).
+  const GROUPS = [
+    { key: 'home', label: 'Home', icon: 'home', tabs: ['overview'] },
+    { key: 'send', label: 'Send', icon: 'send', tabs: ['new', 'bulk', 'excel'] },
+    { key: 'orders', label: 'Orders', icon: 'list', tabs: ['orders', 'priority', 'labels'] },
+    { key: 'money', label: 'Money', icon: 'wallet', tabs: ['cod', 'invoices'] },
+    { key: 'account', label: 'Account', icon: 'building', tabs: ['points'] },
+  ];
+  const groupOf = tab => GROUPS.find(g => g.tabs.indexOf(tab) >= 0) || GROUPS[0];
+  const tabLabel = key => (TABS.find(t => t.key === key) || {}).label || key;
   const PICKUP_WINDOWS = [
     { value: 'morning', label: 'Morning 09:00 to 12:00' }, { value: 'afternoon', label: 'Afternoon 13:00 to 17:00' }, { value: 'evening', label: 'Evening 18:00 to 22:00' },
   ];
@@ -63,7 +74,6 @@
       el('div', { class: 'section-head' }, el('h2', { id }, title), desc ? el('p', { class: 'section-head__desc' }, desc) : null, action ? el('div', { class: 'section-head__action' }, action) : null),
       body);
   }
-  const card = (title, aside, ...body) => el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, title), aside || null), ...body);
   const empty = (title, hint) => el('div', { class: 'empty' }, el('div', { class: 'empty__title' }, title), hint ? el('div', { class: 'empty__hint' }, hint) : null);
   const zoneOptions = () => MDM.geo.zoneOptions();
   const pickupZones = () => MDM.geo.zoneOptions().filter(o => BUSINESS_ISLANDS.indexOf(MDM.geo.island(o.value)) >= 0);
@@ -155,26 +165,36 @@
     const tiers = MDM.pricing.businessTiers(s);
     return el('div', null,
       el('div', { class: 'rate-table', 'data-slot': 'rates', 'data-testid': 'business-tiers' },
-        row('Package size categories', null, { head: true }),
+        row('Package size', null, { head: true }),
         tiers.map(t => row(t.label, 'from ' + money(t.rate), { sub: t.hint + ' (' + MDM.pricing.sizeLabel(t.size) + ')', mono: true })),
-        row('Your fixed rate', 'Agreed per size', { sub: 'We look at a photo of your typical package and agree a fixed rate for each size you send. Malé and Hulhumalé Phase 1 & 2.' }),
-        row('Other deliveries', 'Standard rates', { sub: ['bag', 'box', 'xl'].map(k => MDM.pricing.sizeLabel(k) + ' ' + MDM.pricing.rangeLabel(k, s)).join(' · ') }),
-        row('Delivery methods', 'Home, boat, cargo, airport', { sub: 'Cargo deliveries add the Maldivian Cargo fee of ' + money(rates.cargo) + ' and airport deliveries the airport fee of ' + money(rates.airport) }),
-        row('Cash on delivery', 'Available', { sub: 'The driver collects the cash from your customer and we pay it to you' }),
-        row('Bulk orders', 'Excel or form', { sub: 'Upload an Excel file or type the rows; each package gets its own tracking code and label' }),
-        row('Priority and express', 'On request', { sub: 'Ask for a deadline on any open order; our team approves it' }),
-        row('Billing', 'Monthly', { sub: 'One invoice for every package delivered that month', valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') })),
-      el('p', { class: 'business-note' }, 'Prices in Maldivian Rufiyaa. The "from" rates are where most accounts start; your agreed rates show in your portal.'));
+        row('Cargo delivery', '+ ' + money(rates.cargo), { mono: true, sub: 'Maldivian Cargo fee' }),
+        row('Airport delivery', '+ ' + money(rates.airport), { mono: true, sub: 'Airport fee' }),
+        row('Billing', 'Monthly', { valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') })),
+      el('p', { class: 'business-note' }, 'Your agreed rates show in your portal.'));
+  }
+  // What a business account gets, as six short tiles.
+  const FEATURES = [
+    ['package', 'Fixed rate per size', 'Agreed once, from a photo.'],
+    ['upload', 'Bulk from Excel', 'The day\'s orders in one upload.'],
+    ['banknote', 'Cash on delivery', 'We collect it and pay you.'],
+    ['ship', 'Boat, cargo, airport', 'Islands and resorts too.'],
+    ['printer', 'Labels and tracking', 'A code and a label per package.'],
+    ['receipt', 'One monthly invoice', 'Nothing to pay per order.'],
+  ];
+  function featuresBlock() {
+    return el('ul', { class: 'biz-features', 'data-reveal-group': '' }, FEATURES.map(f => el('li', { class: 'biz-feature', 'data-reveal': '' },
+      el('span', { class: 'biz-feature__icon', 'aria-hidden': 'true' }, html(MDM.icon(f[0], 20))),
+      el('h3', { class: 'biz-feature__title' }, f[1]), el('p', { class: 'biz-feature__text' }, f[2]))));
   }
   function stepsBlock(s) {
     const reply = (s.ops || {}).businessReplyText || 'within 1 working day';
     const items = [
-      ['Request an account', 'Fill in the form below with a photo of a typical package. We call you ' + reply + ' to confirm the details.'],
-      ['Agree your rates', 'Our team uses the photo to set a fixed rate for each package size you send: small, medium or large.'],
-      ['Send orders your way', 'Book one delivery at a time, or upload the day\'s orders from Excel. We collect from your saved collection points.'],
-      ['Track, collect cash, get invoiced', 'Every package has a tracking code and a label. Cash on delivery comes back to you, and delivered packages go on one monthly invoice.'],
+      ['Request an account', 'Send a photo of a typical package.'],
+      ['Agree your rates', 'We call you ' + reply + '.'],
+      ['Send orders', 'One at a time, or a whole sheet.'],
+      ['Get paid and invoiced', 'Cash comes back to you; one invoice a month.'],
     ];
-    return el('ol', { class: 'steps', 'data-slot': 'steps' }, items.map((it, i) => el('li', { class: 'steps__item' },
+    return el('ol', { class: 'steps', 'data-slot': 'steps', 'data-reveal-group': '' }, items.map((it, i) => el('li', { class: 'steps__item', 'data-reveal': '' },
       el('div', { class: 'steps__head' }, el('span', { class: 'steps__num mono' }, String(i + 1)), el('h3', { class: 'steps__title' }, it[0])),
       el('p', { class: 'steps__text' }, it[1]))));
   }
@@ -182,7 +202,8 @@
   function signinCard() {
     const st = state.signin;
     const body = el('div', { class: 'card__body' });
-    const box = el('div', { class: 'card biz-signin', 'data-testid': 'biz-signin' }, el('div', { class: 'card__header' }, el('h2', null, 'Business sign-in'), el('span', { class: 'small muted' }, 'For approved accounts')), body);
+    const box = el('section', { class: 'card biz-signin', id: 'biz-signin', 'data-testid': 'biz-signin', 'aria-labelledby': 'biz-signin-h' }, body);
+    const title = el('h2', { class: 'biz-signin__title', id: 'biz-signin-h' }, 'Have an account? Sign in');
     if (st.step === 2) {
       const code = input({ inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '4', placeholder: '4 digits', 'data-testid': 'biz-signin-code' });
       const form = el('form', { class: 'form', novalidate: true, on: { submit: async e => {
@@ -195,28 +216,27 @@
         if (!location.hash) history.replaceState(null, '', '#overview');
         await render();
       } } },
-        MDM.ui.notice('info', 'We sent a code to ' + MDM.ui.phone.format(st.phone) + '. In this demo any 4 digits work.'),
-        field('code', 'Code', code),
+        field('code', 'Code sent to ' + MDM.ui.phone.format(st.phone), code, { hint: 'Any 4 digits work in the demo' }),
         el('div', { class: 'form-actions' },
           el('button', { type: 'button', class: 'btn btn--ghost', on: { click: () => { st.step = 1; renderPublicSignin(); } } }, 'Use another number'),
           el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-signin-submit' }, 'Sign in')));
-      body.appendChild(form);
+      body.append(title, form);
       setTimeout(() => code.focus(), 0);
       return box;
     }
     const phone = input({ type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', value: st.phone, 'data-testid': 'biz-signin-phone' });
-    const form = el('form', { class: 'form', novalidate: true, on: { submit: async e => {
+    const form = el('form', { class: 'form biz-signin__form', novalidate: true, on: { submit: async e => {
       e.preventDefault();
-      if (!MDM.ui.phone.valid(phone.value)) { setError(phone, 'Enter the 7-digit mobile number on your business account'); phone.focus(); return; }
+      if (!MDM.ui.phone.valid(phone.value)) { setError(phone, 'Enter the 7-digit mobile number on your account'); phone.focus(); return; }
       const n = MDM.ui.phone.normalize(phone.value);
       const acc = (await MDM.store.list('business_accounts')).find(a => a.phone === n);
-      if (!acc) { setError(phone, 'We have no business account for this number. Request one below.'); phone.focus(); return; }
+      if (!acc) { setError(phone, 'No business account uses this number. Request one below.'); phone.focus(); return; }
       if (acc.status !== 'approved') { setError(phone, 'This account is not active yet. We will call you.'); return; }
       st.phone = phone.value; st.step = 2; renderPublicSignin();
     } } },
-      field('phone', 'Account mobile number', phone, { hint: 'We send a one-time code to this number. Demo accounts: 780 1122 (Kandu Books), 763 3221 (Fonu Online Store)' }),
-      el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-signin-continue' }, 'Send code')));
-    body.appendChild(form);
+      field('phone', 'Account mobile number', phone, { hint: 'Demo: 780 1122 or 763 3221' }),
+      el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-signin-continue' }, 'Send code'));
+    body.append(title, form);
     return box;
   }
   function renderPublicSignin() { const old = app.querySelector('[data-testid="biz-signin"]'); if (old) old.replaceWith(signinCard()); }
@@ -249,9 +269,9 @@
           el('div', { class: 'dropzone__file' }, el('div', { class: 'dropzone__name' }, st.file.name || 'Package photo'), el('div', { class: 'dropzone__size' }, MDM.ui.formatBytes(st.img.size) + ' · ' + st.img.width + ' × ' + st.img.height)),
           el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-photo-change', on: { click: () => fileInput.click() } }, 'Change photo')));
       } else {
-        body.replaceChildren(el('div', { class: 'dropzone__title' }, 'Add a photo of a typical package'),
-          el('div', { class: 'dropzone__hint' }, 'The kind of package you send most. Put something next to it for scale, like a phone or an A4 sheet. JPG or PNG.'),
-          el('span', { class: 'dropzone__drag dropzone__hint' }, 'You can also drop the photo here.'), chooseBtn);
+        body.replaceChildren(el('div', { class: 'dropzone__title' }, 'Photo of the package you send most'),
+          el('div', { class: 'dropzone__hint' }, 'Put a phone next to it for scale.'),
+          el('span', { class: 'dropzone__drag dropzone__hint' }, 'Or drop the photo here.'), chooseBtn);
       }
     }
     async function take(file) {
@@ -277,8 +297,8 @@
     const failure = failBox();
     const photo = photoPicker(() => { failure.hidden = true; });
     const tiers = MDM.pricing.businessTiers(s);
-    const sizeSeg = segmented('typicalSize', tiers.map(t => ({ value: t.value, label: t.label, hint: t.hint + ' · from ' + money(t.rate) })), '', 'business-size');
-    const photoField = MDM.ui.field({ name: 'packagePhoto', label: 'Photo of a typical package', control: el('fieldset', { class: 'biz-photo-group' }, photo.el), hint: 'Required. Our team uses it to set your fixed rate for each package size.' });
+    const sizeSeg = segmented('typicalSize', tiers.map(t => ({ value: t.value, label: t.label, hint: MDM.pricing.sizeLabel(t.size) + ' · from ' + money(t.rate) })), '', 'business-size');
+    const photoField = MDM.ui.field({ name: 'packagePhoto', label: 'Photo', control: el('fieldset', { class: 'biz-photo-group' }, photo.el) });
     photo.input.name = 'packagePhoto';
     photo.input.setAttribute('aria-label', 'Photo of a typical package');
     const termsBox = el('input', { type: 'checkbox', id: 'biz-terms', name: 'terms', 'aria-describedby': 'biz-terms-text', 'data-testid': 'business-terms' });
@@ -293,16 +313,15 @@
       el('div', { class: 'grid-2' },
         field('phone', 'Mobile', input({ type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', 'data-testid': 'business-phone' })),
         field('landline', 'Landline', input({ type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '3XX XXXX' }), { optional: true })),
-      field('email', 'Email', input({ type: 'email', inputmode: 'email', autocomplete: 'email', placeholder: 'name@company.mv', 'data-testid': 'business-email' }), { hint: 'Invoices are sent here' }),
+      field('email', 'Email for invoices', input({ type: 'email', inputmode: 'email', autocomplete: 'email', placeholder: 'name@company.mv', 'data-testid': 'business-email' })),
       el('div', { class: 'grid-2' }, field('zone', 'Island', select(pickupZones(), 'Choose an island')), field('pickupWindow', 'Pickup window', select(PICKUP_WINDOWS, 'Choose a window'))),
-      field('pickupAddress', 'Pickup address', input({ autocomplete: 'street-address', placeholder: 'M. Kaneerumaage, 2nd floor, Majeedhee Magu', 'data-testid': 'business-address' }), { hint: 'House or building name, floor and road' }),
-      field('volume', 'Packages per week', select(VOLUMES, 'Choose a range'), { hint: 'A rough number is fine' }),
+      field('pickupAddress', 'Pickup address', input({ autocomplete: 'street-address', placeholder: 'M. Kaneerumaage, 2nd floor, Majeedhee Magu', 'data-testid': 'business-address' })),
+      field('volume', 'Packages per week', select(VOLUMES, 'Choose a range')),
       el('div', { class: 'biz-typical stack-4', 'data-testid': 'business-typical' },
-        el('h3', null, 'Your typical package'),
-        el('p', { class: 'small muted' }, 'Business deliveries have a fixed rate for each package size. Send us a picture of the package you send most and tell us which size you think it is; we confirm the sizes and agree the rates on the call.'),
+        el('div', null, el('h3', null, 'Your typical package'), el('p', { class: 'small muted' }, 'We set your rates from this photo.')),
         photoField,
-        MDM.ui.field({ name: 'typicalSize', label: 'Which size is it, in your view?', control: sizeSeg })),
-      field('notes', 'Notes', el('textarea', { class: 'textarea', rows: 3 }), { optional: true, hint: 'Opening hours, fragile items or anything the driver should know' }),
+        MDM.ui.field({ name: 'typicalSize', label: 'Which size is it?', control: sizeSeg })),
+      field('notes', 'Notes', el('textarea', { class: 'textarea', rows: 3 }), { optional: true, hint: 'Opening hours or anything the driver should know' }),
       termsField,
       duplicate, failure, el('div', { class: 'form-actions' }, submit));
     f.elements.zone.setAttribute('data-testid', 'business-zone');
@@ -344,26 +363,38 @@
   function receivedCard(s) {
     const r = state.received, reply = (s.ops || {}).businessReplyText || 'within 1 working day';
     const t = MDM.pricing.businessTiers(s).find(x => x.value === r.typicalSize);
-    return el('div', { class: 'card business-received', 'data-testid': 'business-received' },
-      el('div', { class: 'card__header' }, el('h2', { tabindex: '-1' }, 'Request received')),
+    return el('div', { class: 'card biz-done business-received', 'data-testid': 'business-received' },
       el('div', { class: 'card__body stack-4' },
-        el('p', null, 'Thanks, ', el('strong', null, r.name), '. We will call ', el('span', { class: 'mono nowrap' }, MDM.ui.phone.format(r.phone)), ' ' + reply + '.'),
+        el('div', { class: 'biz-done__mark', 'aria-hidden': 'true' }, html(MDM.icon('check', 26))),
+        el('div', { class: 'stack-1' }, el('h2', { tabindex: '-1' }, 'Request received'),
+          el('p', { class: 'muted' }, 'Thanks, ', el('strong', null, r.name), '. We will call ', el('span', { class: 'mono nowrap' }, MDM.ui.phone.format(r.phone)), ' ' + reply + '.')),
         r.photo ? el('div', { class: 'row row--start biz-received-photo' }, el('img', { class: 'thumb', src: r.photo, alt: 'Your typical package' }),
-          el('p', { class: 'small muted' }, 'Your typical package' + (t ? ': ' + t.label.toLowerCase() + ' in your view' : '') + '. Our team looks at the photo to set your fixed rate for each package size.')) : null,
-        el('p', { class: 'small muted' }, 'Nothing to pay now. The rates and the pickup window are confirmed on the call.'),
-        el('a', { class: 'btn btn--secondary', href: MDM.href('') }, 'Back to home')));
+          el('p', { class: 'small muted' }, 'Your typical package' + (t ? ': ' + t.label.toLowerCase() : '') + '. Nothing to pay now.')) : null,
+        el('div', null, el('a', { class: 'btn btn--secondary', href: MDM.href('') }, 'Back to home'))));
   }
   function renderPublic(s) {
     document.title = 'For businesses · Mr. Delivery Man';
     const request = state.received ? receivedCard(s) : requestForm(s);
-    app.replaceChildren(el('div', { class: 'container container--narrow' },
-      el('div', { class: 'page-head' }, el('h1', null, 'Delivery for businesses'),
-        el('p', { class: 'page-head__desc' }, 'Daily pickups from your shop or godown, a fixed rate for each package size, bulk orders from Excel, cash on delivery and one invoice a month.')),
+    // "Request an account" (and links to business/#apply, e.g. from the sign-in page) bring the form into view.
+    const toForm = smooth => {
+      const t = app.querySelector('#apply'); if (!t) return;
+      t.scrollIntoView({ behavior: smooth && !(MDM.motion && MDM.motion.reduced) ? 'smooth' : 'auto', block: 'start' });
+      const first = smooth && t.querySelector('input:not(.sr-only), button'); if (first) setTimeout(() => first.focus({ preventScroll: true }), 400);
+    };
+    const applyBtn = el('a', { class: 'btn btn--brand btn--lg', href: '#apply', 'data-testid': 'business-apply', on: { click: e => { e.preventDefault(); toForm(true); } } }, 'Request an account');
+    app.replaceChildren(el('div', { class: 'container container--narrow biz-public' },
+      el('div', { class: 'page-head page-head--stack' }, el('h1', null, 'Delivery for businesses'),
+        el('p', { class: 'page-head__desc' }, 'Fixed rates, daily pickups and one monthly invoice.'),
+        el('div', { class: 'page-head__actions' }, applyBtn)),
       signinCard(),
-      section('Sizes and rates', null, ratesBlock(s)),
+      el('section', { class: 'section', 'aria-label': 'What you get' }, featuresBlock()),
+      section('Rates', null, ratesBlock(s)),
       section('How it works', null, stepsBlock(s)),
-      section('Request an account', 'Tell us about your business and send a photo of a typical package. We call you to set up the account, your rates and the pickup routine.', request)));
+      el('section', { class: 'section biz-request', id: 'apply', 'aria-labelledby': 'biz-request-account' },
+        el('div', { class: 'section-head' }, el('h2', { id: 'biz-request-account' }, 'Request an account'), el('p', { class: 'section-head__desc' }, 'We call you to agree your rates.')),
+        request)));
     if (state.received) { const h = app.querySelector('.business-received h2'); if (h) h.focus(); }
+    else if (location.hash === '#apply') toForm(false);
   }
 
   // =========================================================================================================================
@@ -371,35 +402,55 @@
   // =========================================================================================================================
   function hashParts() { const h = (location.hash || '').replace(/^#\/?/, ''); const i = h.indexOf('?'); return { key: i >= 0 ? h.slice(0, i) : h, params: new URLSearchParams(i >= 0 ? h.slice(i + 1) : '') }; }
   function tabFromHash() { const k = hashParts().key; return TABS.some(t => t.key === k) ? k : 'overview'; }
-  function go(tab) { if (location.hash !== '#' + tab) location.hash = tab; else renderTab(); }
-  let panel = null, tabsEl = null, headDesc = null;
+  function go(tab) { if (location.hash !== '#' + tab) location.hash = tab; else renderTab({ enter: true }); }
+  let panel = null, navEl = null, subEl = null, headDesc = null, shownHash = null;
+  const headRates = acc => ratesLine(acc) + ' per package';
 
   function renderPortal() {
     const acc = state.acc;
     document.title = acc.name + ' · Business · Mr. Delivery Man';
-    tabsEl = el('nav', { class: 'tabs biz-tabs', 'aria-label': 'Business portal' }, TABS.map(t => el('a', { class: 'tab', href: '#' + t.key, 'data-tab': t.key, 'data-testid': 'biz-tab-' + t.key }, t.label)));
+    navEl = el('nav', { class: 'biz-nav', 'aria-label': 'Business portal' }, GROUPS.map(g => el('a', { class: 'biz-nav__item', href: '#' + g.tabs[0], 'data-group': g.key,
+      'data-testid': g.tabs.length === 1 ? 'biz-tab-' + g.tabs[0] : 'biz-nav-' + g.key }, html(MDM.icon(g.icon, 18)), el('span', null, g.label))));
+    subEl = el('nav', { class: 'biz-sub', 'aria-label': 'Sections', hidden: true });
     panel = el('div', { class: 'biz-panel', 'data-testid': 'biz-panel' });
-    headDesc = el('p', { class: 'page-head__desc', 'data-testid': 'biz-head-rates' }, 'Business account · ' + ratesLine(acc) + ' per package · invoiced monthly');
+    headDesc = el('p', { class: 'page-head__desc', 'data-testid': 'biz-head-rates' }, headRates(acc));
+    shownHash = null;
     app.replaceChildren(el('div', { class: 'container' },
       el('div', { class: 'page-head biz-head' },
         el('h1', null, acc.name), headDesc,
         el('div', { class: 'page-head__actions' },
           el('button', { type: 'button', class: 'btn btn--brand', 'data-testid': 'biz-head-new', on: { click: () => go('new') } }, html(MDM.icon('plus', 16)), 'New order'),
-          el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-signout', on: { click: () => { clearSession(); state.acc = null; history.replaceState(null, '', location.pathname); render(); } } }, 'Sign out'))),
-      tabsEl, panel));
-    renderTab();
+          el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'biz-signout', on: { click: () => { clearSession(); state.acc = null; history.replaceState(null, '', location.pathname); render(); } } }, 'Sign out'))),
+      navEl, subEl, panel));
+    renderTab({ enter: true });
+  }
+  // The destination's own tabs as a segmented row (hidden for a destination with one tab).
+  function renderSub(g) {
+    subEl.hidden = g.tabs.length < 2;
+    if (subEl.hidden) { subEl.replaceChildren(); subEl.dataset.group = ''; return; }
+    if (subEl.dataset.group !== g.key) {
+      subEl.dataset.group = g.key;
+      subEl.replaceChildren(...g.tabs.map(k => el('a', { class: 'biz-sub__item', href: '#' + k, 'data-tab': k, 'data-testid': 'biz-tab-' + k }, tabLabel(k))));
+    }
+    subEl.querySelectorAll('[data-tab]').forEach(a => { if (a.dataset.tab === state.tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   }
   let renderSeq = 0;
-  async function renderTab() {
+  // renderTab({ enter }) draws the tab in the hash. A new hash (or enter: true) eases the view in; live refreshes swap it in place.
+  async function renderTab(opts) {
     if (!panel) return;
     state.tab = tabFromHash();
     const seq = ++renderSeq;
-    tabsEl.querySelectorAll('[data-tab]').forEach(a => { if (a.dataset.tab === state.tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    const entering = !!(opts && opts.enter) || shownHash !== location.hash;
+    const g = groupOf(state.tab);
+    navEl.querySelectorAll('[data-group]').forEach(a => { if (a.dataset.group === g.key) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    renderSub(g);
     const fn = { overview: tabOverview, new: tabNew, bulk: tabBulk, excel: tabExcel, orders: tabOrders, cod: tabCod, points: tabPoints, priority: tabPriority, invoices: tabInvoices, labels: tabLabels }[state.tab];
-    const node = await fn();
+    const node = await fn({ entering });
     if (seq !== renderSeq) return;   // a newer render started while this one was loading
-    if (headDesc && state.acc) headDesc.textContent = 'Business account · ' + ratesLine(state.acc) + ' per package · invoiced monthly';
+    if (headDesc && state.acc) headDesc.textContent = headRates(state.acc);
     panel.replaceChildren(node);
+    shownHash = location.hash;
+    if (entering) MDM.motion.enter(node, { max: 8 });
   }
   // Store changes refresh the read-only tabs; tabs with a form in progress keep their inputs.
   const LIVE_TABS = ['overview', 'orders', 'cod', 'points', 'invoices', 'labels'];
@@ -408,8 +459,9 @@
     if (LIVE_TABS.indexOf(state.tab) >= 0) renderTab(); else if (state.tab === 'priority') refreshPriorityList();
   }, 150);
 
-  // ---- Overview -------------------------------------------------------------------------------------------------------------
-  function kpi(label, value, note, testid) { return el('div', { class: 'kpi', 'data-testid': testid || null }, el('div', { class: 'kpi__label' }, label), el('div', { class: 'kpi__value' }, value), note ? el('div', { class: 'kpi__note' }, note) : null); }
+  // ---- Home -------------------------------------------------------------------------------------------------------------------
+  // The numbers count up only when the view is first shown (countup), not on the live refreshes that follow.
+  function kpi(label, value, note, testid, countup) { return el('div', { class: 'kpi', 'data-testid': testid || null }, el('div', { class: 'kpi__label' }, label), el('div', { class: 'kpi__value', 'data-countup': countup || null }, value), note ? el('div', { class: 'kpi__note' }, note) : null); }
   function batchProgress(b) {
     const st = MDM.store._batchStatus(b);
     const pct = st.total ? Math.round((st.delivered / st.total) * 100) : 0;
@@ -424,14 +476,14 @@
   function batchRow(b) {
     const p = batchProgress(b);
     const parts = [plural(p.st.total, 'package'), p.st.delivered + ' delivered'];
-    if (p.st.out) parts.push(p.st.out + ' out for delivery');
+    if (p.st.out) parts.push(p.st.out + ' out');
     if (p.st.collected) parts.push(p.st.collected + ' at the hub');
     if (p.st.failed) parts.push(p.st.failed + ' failed');
     if (p.st.cancelled) parts.push(p.st.cancelled + ' cancelled');
     return el('div', { class: 'list__item biz-batch', 'data-testid': 'biz-batch-' + b.code },
       el('div', { class: 'list__main' },
         el('div', { class: 'list__title' }, el('span', { class: 'mono--code' }, b.code), ' ', batchBadge(p.st)),
-        el('div', { class: 'list__meta' }, fmtDate(b.createdAt) + ' · ' + parts.join(' · ') + (b.notes ? ' · ' + b.notes : '')),
+        el('div', { class: 'list__meta' }, [fmtDate(b.createdAt)].concat(parts, b.notes ? [b.notes] : []).join(' · ')),
         p.bar),
       el('div', { class: 'list__aside biz-actions' },
         el('a', { class: 'btn btn--secondary btn--sm', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-batch-labels' }, html(MDM.icon('printer', 16)), 'Labels'),
@@ -445,55 +497,51 @@
         el('div', { class: 'list__meta' }, methodLines(o)[0] + ' · ' + tierText(o) + ' · ' + MDM.ui.timeAgo(o.createdAt))),
       el('div', { class: 'list__aside' }, html(MDM.badgeFor(o.status))));
   }
+  // A card with a title and an optional link or button on the right; body is a node or an array of nodes.
+  function panelCard(title, action, body, attrs) {
+    return el('section', Object.assign({ class: 'card' }, attrs || {}), el('div', { class: 'card__header' }, el('h2', null, title), action || null), body);
+  }
+  const headLink = (text, href, testid) => el('a', { class: 'biz-link', href, 'data-testid': testid || null }, text, html(MDM.icon('chevron-right', 16)));
   async function ratesCard(acc) {
-    const tiers = tiersOf(acc), s = state.settings, rates = s.rates || {};
+    const tiers = tiersOf(acc), rates = state.settings.rates || {};
     const photo = acc.packagePhotoId ? await MDM.store.get('files', acc.packagePhotoId) : null;
-    return el('div', { class: 'card', 'data-testid': 'biz-rates' },
-      el('div', { class: 'card__header' }, el('h2', null, 'Your rates'), el('span', { class: 'small muted' }, 'Fixed rate per package')),
-      el('div', { class: 'card__body stack-4' },
-        el('div', { class: 'rate-table' }, tiers.map(t => MDM.ui.rateRow(t.label, money(t.rate), { sub: t.hint + ' (' + MDM.pricing.sizeLabel(t.size) + ')', mono: true }))),
-        photo && photo.dataUrl ? el('div', { class: 'row row--start biz-photo-note' }, el('img', { class: 'thumb', src: photo.dataUrl, alt: 'Your typical package' }),
-          el('p', { class: 'small muted' }, acc.assessment ? 'Our assessment of your typical package: ' + acc.assessment + '.' : 'Rates agreed from the photo of your typical package.')) : null,
-        el('p', { class: 'small muted' }, 'Cargo deliveries add the Maldivian Cargo fee of ' + money(rates.cargo) + ' and airport deliveries the airport fee of ' + money(rates.airport) + '. To add a size or change a rate, call us.')));
+    return panelCard('Your rates', null, [
+      el('div', { class: 'rate-table' }, tiers.map(t => MDM.ui.rateRow(t.label, money(t.rate), { sub: MDM.pricing.sizeLabel(t.size), mono: true }))),
+      el('div', { class: 'card__body stack-3 biz-rates__foot' },
+        photo && photo.dataUrl || acc.assessment ? el('div', { class: 'row row--start biz-photo-note' }, photo && photo.dataUrl ? el('img', { class: 'thumb', src: photo.dataUrl, alt: 'Your typical package' }) : null,
+          el('p', { class: 'small muted' }, acc.assessment ? acc.assessment : 'Agreed from your package photo.')) : null,
+        el('p', { class: 'small muted' }, 'Cargo + ' + money(rates.cargo) + ' · Airport + ' + money(rates.airport)))], { 'data-testid': 'biz-rates' });
   }
-  function pointsSummaryCard(acc) {
-    const pts = acc.collectionPoints || [];
-    return el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Collection points'), el('a', { class: 'btn btn--ghost btn--sm', href: '#points' }, 'Manage')),
-      pts.length ? el('div', { class: 'list biz-plist' }, pts.map(p => el('div', { class: 'list__item' },
-        el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, p.label, ' ', p.isDefault ? html(MDM.ui.badge('info', 'Default')) : null),
-          el('div', { class: 'list__meta' }, p.address + ' · ' + MDM.geo.zoneShort(p.zone) + (p.preferredTime ? ' · collect around ' + p.preferredTime : '')))))) : empty('No collection points yet', 'Add your shop, godown or warehouse under Collection points.'));
-  }
-  async function tabOverview() {
+  async function tabOverview(opts) {
     const d = await load();
-    const acc = state.acc;
+    const acc = state.acc, cu = !!(opts && opts.entering);
     const month = MDM.ui.monthKey();
     const open = d.orders.filter(o => OPEN.indexOf(o.status) >= 0);
     const delivered = d.orders.filter(o => o.status === 'delivered' && MDM.ui.monthKey(deliveredAt(o)) === month);
     const amount = delivered.reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0);
-    const pri = d.orders.filter(o => o.priority && o.priority.status === 'requested');
     const failed = d.orders.filter(o => o.status === 'failed');
     const returning = d.orders.filter(o => o.status === 'cancelled' && o.cancellation && o.cancellation.returnStatus === 'pending');
     const codPending = d.orders.filter(o => codStatus(o) === 'pending');
     const codHeld = d.orders.filter(o => codStatus(o) === 'collected' || codStatus(o) === 'with_office');
-    const recent = d.orders.slice(0, 6);
-    const batches = d.batches.slice(0, 4);
-    return el('div', { class: 'stack-6' },
-      el('div', { class: 'kpi-row' },
-        kpi('Open orders', String(open.length), open.filter(o => o.status === 'out_for_delivery').length + ' out for delivery now', 'biz-kpi-open'),
-        kpi('Delivered this month', String(delivered.length), plural(delivered.reduce((n, o) => n + (o.packages || []).length, 0), 'package')),
-        kpi('This month so far', money(amount), 'Invoiced at the end of the month', 'biz-kpi-amount'),
-        kpi('Cash to collect', money(codPending.reduce((n, o) => n + o.cod.amount, 0)), money(codHeld.reduce((n, o) => n + (o.cod.collectedAmount || 0), 0)) + ' collected, not paid to you yet', 'biz-kpi-cod'),
-        kpi('Priority requests', String(pri.length), pri.length ? 'Waiting for our team' : 'None waiting')),
-      failed.length ? MDM.ui.notice('warn', el('div', null, plural(failed.length, 'delivery', 'deliveries') + ' could not be completed. We will contact you, or call us. ',
-        failed.map((o, i) => [i ? ', ' : '', el('a', { href: trackHref(o) }, o.code)])), { title: 'Needs attention' }) : null,
-      returning.length ? MDM.ui.notice('info', el('div', null, 'The driver is bringing ' + plural(returning.length, 'cancelled package') + ' back to you: ',
-        returning.map((o, i) => [i ? ', ' : '', el('a', { href: trackHref(o) }, o.code)]), '.'), { title: 'Returning to you', testid: 'biz-returning' }) : null,
-      el('div', { class: 'grid-2 biz-overview' }, await ratesCard(acc), pointsSummaryCard(acc)),
-      el('div', { class: 'grid-2 biz-overview' },
-        el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Bulk orders'), el('button', { type: 'button', class: 'btn btn--ghost btn--sm', on: { click: () => go('bulk') } }, 'New bulk order')),
-          batches.length ? el('div', { class: 'list' }, batches.map(batchRow)) : empty('No bulk orders yet', 'Upload the day\'s deliveries from Excel or type them under Bulk order.')),
-        el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Recent orders'), el('button', { type: 'button', class: 'btn btn--ghost btn--sm', on: { click: () => go('orders') } }, 'All orders')),
-          recent.length ? el('div', { class: 'list' }, recent.map(orderRow)) : empty('No orders yet', 'Book your first delivery under New order.'))));
+    const held = codHeld.reduce((n, o) => n + (o.cod.collectedAmount || 0), 0);
+    const recent = d.orders.slice(0, 5);
+    const batches = d.batches.slice(0, 3);
+    const codes = list => list.map((o, i) => [i ? ', ' : '', el('a', { href: trackHref(o) }, o.code)]);
+    return el('div', { class: 'stack-6 biz-home' },
+      failed.length ? MDM.ui.notice('warn', el('div', null, codes(failed), ' could not be delivered. We will call you.'), { title: 'Needs attention' }) : null,
+      returning.length ? MDM.ui.notice('info', el('div', null, 'Cancelled, coming back to you: ', codes(returning), '.'), { title: 'Returning to you', testid: 'biz-returning' }) : null,
+      el('div', { class: 'kpi-row biz-kpis' },
+        kpi('Open orders', String(open.length), open.filter(o => o.status === 'out_for_delivery').length + ' out now', 'biz-kpi-open', cu),
+        kpi('Delivered this month', String(delivered.length), plural(delivered.reduce((n, o) => n + (o.packages || []).length, 0), 'package'), null, cu),
+        kpi('This month', money(amount), 'Invoiced monthly', 'biz-kpi-amount', cu),
+        kpi('Cash to collect', money(codPending.reduce((n, o) => n + o.cod.amount, 0)), held ? money(held) + ' on its way to you' : null, 'biz-kpi-cod', cu)),
+      el('div', { class: 'biz-home__grid' },
+        el('div', { class: 'stack-6' },
+          panelCard('Recent orders', recent.length ? headLink('All orders', '#orders') : null,
+            recent.length ? el('div', { class: 'list' }, recent.map(orderRow))
+              : el('div', { class: 'empty' }, el('div', { class: 'empty__title' }, 'No orders yet'), el('a', { class: 'btn btn--secondary', href: '#new' }, 'Book a delivery'))),
+          batches.length ? panelCard('Bulk orders', headLink('New bulk order', '#bulk'), el('div', { class: 'list' }, batches.map(batchRow))) : null),
+        el('div', { class: 'stack-6' }, await ratesCard(acc))));
   }
 
   // ---- Collection (shared by New order, Bulk order and Excel import) --------------------------------------------------------------
@@ -527,13 +575,13 @@
     }
     pointSel.addEventListener('change', () => { sync(true); if (opts.onChange) opts.onChange(); });
     sync(true);
-    const pointField = field('cPoint', 'Collect from', pointSel, { hint: pts.length ? null : 'Save your shop or godown under Collection points to pick it here next time.' });
+    const pointField = field('cPoint', 'Collect from', pointSel, { hint: pts.length ? null : 'Save points under Account to pick them here.' });
     pointField.insertBefore(summary, pointField.querySelector('.field__error'));
     const node = el('div', { class: 'stack-4' },
       pointField, once,
       el('div', { class: 'grid-2' },
-        field('cTime', 'Preferred collection time', time, { optional: true, hint: 'We plan the pickup around this time' }),
-        field('cNote', 'Collection instructions', note, { optional: true })));
+        field('cTime', 'Preferred time', time, { optional: true }),
+        field('cNote', 'Pickup note', note, { optional: true })));
     return {
       el: node,
       zone: () => { const p = point(); return p ? p.zone : cZone.value; },
@@ -560,7 +608,7 @@
       field('deliverDate', 'Delivery date', input({ type: 'date' })), field('deliverTime', 'Delivery time', input({ type: 'time', value: '14:00' })));
     const seg = segmented('level', MDM.SERVICE_LEVELS.map(l => ({ value: l.value, label: l.label, hint: l.value === 'normal' ? 'Same day' : l.value === 'express' ? 'Confirmed by us' : 'Pick a date' })), 'normal', 'biz-level');
     seg.addEventListener('change', () => { adv.hidden = form.elements.level.value !== 'advance'; });
-    return [MDM.ui.field({ label: 'Service', control: seg, hint: 'Express is subject to availability; our team confirms it. Advance orders are collected on the date you choose.' }), adv];
+    return [MDM.ui.field({ label: 'Service', control: seg }), adv];
   }
   function scheduleValue(v) {
     if (v.level === 'advance') return { type: 'advance', collectDate: v.collectDate, collectTime: v.collectTime, deliverDate: v.deliverDate || v.collectDate, deliverTime: v.deliverTime };
@@ -586,27 +634,27 @@
         MDM.ui.field({ name: 'bVessel', label: 'Vessel', control: segmented('bVessel', MDM.VESSEL_TYPES.map(v => ({ value: v.value, label: v.label })), 'speedboat', 'biz-b-vessel') }),
         el('div', { class: 'grid-2' }, field('bName', 'Boat, ferry or speedboat name', input({ placeholder: 'Thulusdhoo Express', 'data-testid': 'biz-b-name' })), field('bJetty', 'Harbour or jetty', select(K.jettyOptions(), null, 'male_jetties'))),
         el('div', { class: 'grid-2' }, field('bDate', 'Departure date', input({ type: 'date', value: MDM.ui.dayKey(), 'data-testid': 'biz-b-date' })), field('bTime', 'Departure time', input({ type: 'time', 'data-testid': 'biz-b-time' }))),
-        el('p', { class: 'small muted' }, 'The driver hands the package to the vessel at the jetty. The label prints the island, the vessel, the departure and the receiver\'s contact; you can update the boat later if it changes.')),
+        el('p', { class: 'small muted' }, 'You can change the boat later.')),
       cargo: el('div', { class: 'stack-4', 'data-method': 'cargo', hidden: true },
         field('kIsland', 'Destination island', input({ placeholder: 'Kulhudhuffushi, Haa Dhaalu', 'data-testid': 'biz-k-island' })),
-        MDM.ui.notice('info', 'We hand the package in at the cargo counter at the main bus terminal. The Maldivian Cargo fee of ' + money(rates.cargo) + ' is added to this order as its own line.')),
+        el('p', { class: 'small muted' }, 'Handed in at the cargo counter, main bus terminal. Fee ' + money(rates.cargo) + '.')),
       airport: el('div', { class: 'stack-4', 'data-method': 'airport', hidden: true },
         el('div', { class: 'grid-2' }, field('aPoint', 'Collection point at the airport', select(K.airportOptions(), null, 'resort_counters')), field('aCounter', 'Resort counter or person', input({ placeholder: 'Lagoon Point Resort counter', 'data-testid': 'biz-a-counter' }), { optional: true })),
         field('aResort', 'Resort or destination', input({ placeholder: 'Lagoon Point Resort, Baa Atoll', 'data-testid': 'biz-a-resort' })),
         el('div', { class: 'grid-2' }, field('aSpeedboat', 'Resort speedboat', input({ placeholder: 'Lagoon Express 3' }), { optional: true }), field('aTime', 'Speedboat departure', input({ type: 'time' }), { optional: true })),
-        el('p', { class: 'small muted' }, 'The airport fee of ' + money(rates.airport) + ' applies. Put anything the resort host needs in the instructions.')),
+        el('p', { class: 'small muted' }, 'Airport fee ' + money(rates.airport) + '.')),
     };
     const node = el('div', { class: 'stack-4' },
       MDM.ui.field({ name: 'method', label: 'Delivery method', control: methodSeg }),
-      el('div', { class: 'grid-2' }, field('dName', 'Receiver name', input({ autocomplete: 'off', 'data-testid': 'biz-d-name' })), field('dPhone', 'Receiver contact number', input({ type: 'tel', inputmode: 'numeric', placeholder: '7XX XXXX', 'data-testid': 'biz-d-phone' }))),
+      el('div', { class: 'grid-2' }, field('dName', 'Receiver name', input({ autocomplete: 'off', 'data-testid': 'biz-d-name' })), field('dPhone', 'Receiver number', input({ type: 'tel', inputmode: 'numeric', placeholder: '7XX XXXX', 'data-testid': 'biz-d-phone' }))),
       panels.home, panels.boat, panels.cargo, panels.airport,
-      field('dNote', 'Delivery instructions', input({ placeholder: 'Call before arriving', 'data-testid': 'biz-d-note' }), { optional: true }));
+      field('dNote', 'Delivery note', input({ placeholder: 'Call before arriving', 'data-testid': 'biz-d-note' }), { optional: true }));
     const noteField = node.querySelector('[data-field="dNote"] > label');
     const method = () => form.elements.method ? form.elements.method.value : 'home';
     methodSeg.addEventListener('change', () => {
       const m = method();
       Object.keys(panels).forEach(k => { panels[k].hidden = k !== m; });
-      if (noteField) noteField.firstChild.textContent = m === 'airport' ? 'Instructions for the airport or resort handover' : 'Delivery instructions';
+      if (noteField) noteField.firstChild.textContent = m === 'airport' ? 'Handover note' : 'Delivery note';
       if (onMethod) onMethod(m);
     });
     const val = n => form.elements[n] ? String(form.elements[n].value || '').trim() : '';
@@ -641,31 +689,35 @@
     state.settings = s || {};
     if (state.done.order) return newOrderDone(state.done.order);
     const tiers = tiersOf(acc);
-    const form = el('form', { class: 'biz-form', novalidate: true, 'data-testid': 'biz-new-form' });
+    const form = el('form', { class: 'biz-form biz-split', novalidate: true, 'data-testid': 'biz-new-form' });
     const priceBox = el('div', { class: 'summary biz-price', 'data-testid': 'biz-new-price' });
     const failure = failBox();
-    const submit = el('button', { type: 'submit', class: 'btn btn--primary btn--lg', 'data-testid': 'biz-new-submit' }, 'Book delivery');
+    const submit = el('button', { type: 'submit', class: 'btn btn--primary btn--lg btn--block', 'data-testid': 'biz-new-submit' }, 'Book delivery');
     const collection = collectionBlock(acc);
-    const tierSeg = segmented('tier', tiers.map(t => ({ value: t.value, label: t.label + ' · ' + money(t.rate), hint: t.hint })), (tiers[0] || {}).value, 'biz-tier');
+    const tierSeg = segmented('tier', tiers.map(t => ({ value: t.value, label: t.label + ' · ' + money(t.rate), hint: MDM.pricing.sizeLabel(t.size) })), (tiers[0] || {}).value, 'biz-tier');
     const qty = input({ type: 'number', inputmode: 'numeric', min: '1', max: '20', step: '1', value: '1', 'data-testid': 'biz-qty' });
     const vehicle = el('label', { class: 'checkbox', hidden: true, 'data-testid': 'biz-vehicle' }, el('input', { type: 'checkbox', name: 'extraVehicle' }),
-      el('span', null, 'Send an extra vehicle'), el('span', { class: 'checkbox__hint' }, 'More than one box or XL package. We confirm the vehicle charge before collection.'));
+      el('span', null, 'Send an extra vehicle'), el('span', { class: 'checkbox__hint' }, 'We confirm the charge before pickup.'));
     const cod = input({ inputmode: 'decimal', placeholder: '0', 'data-testid': 'biz-cod' });
     const dblock = deliveryBlock(form, s, () => updatePrice());
+    const step = (title, ...body) => el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, title)), el('div', { class: 'card__body stack-4' }, ...body));
     form.append(
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Collection')), el('div', { class: 'card__body' }, collection.el)),
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Package')), el('div', { class: 'card__body stack-4' },
-        MDM.ui.field({ name: 'tier', label: 'Package size', control: tierSeg, hint: 'Your agreed sizes and rates. To add a size, call us.' }),
-        el('div', { class: 'grid-2' }, field('qty', 'Number of packages', qty, { hint: 'Same size, same receiver' }), field('description', 'What is it', input({ placeholder: 'Sneakers, size 42', 'data-testid': 'biz-description' }), { optional: true })),
-        vehicle,
-        el('div', { class: 'grid-2' }, field('reference', 'Your reference', input({ placeholder: 'Invoice or order number', 'data-testid': 'biz-reference' }), { optional: true }), el('div')),
-        el('label', { class: 'checkbox' }, el('input', { type: 'checkbox', name: 'fragile' }), el('span', null, 'Fragile, handle with care')),
-        scheduleBlock(form))),
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Delivery')), el('div', { class: 'card__body' }, dblock.el)),
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Cash on delivery')), el('div', { class: 'card__body stack-4' },
-        el('div', { class: 'grid-2' }, field('cod', 'Cash to collect from the receiver (MVR)', cod, { optional: true, hint: 'Leave empty if the order is paid. The driver collects it and we pay it to you.' }), el('div')))),
-      priceBox, failure,
-      el('div', { class: 'form-actions' }, el('span', { class: 'small muted' }, 'Added to your monthly invoice. Nothing to pay now.'), submit));
+      el('div', { class: 'biz-split__main stack-6' },
+        step('Pickup', collection.el),
+        step('Package',
+          MDM.ui.field({ name: 'tier', label: 'Size', control: tierSeg }),
+          el('div', { class: 'grid-2' }, field('qty', 'Packages', qty, { hint: 'Same size, same receiver' }), field('description', 'What is it', input({ placeholder: 'Sneakers, size 42', 'data-testid': 'biz-description' }), { optional: true })),
+          vehicle,
+          el('div', { class: 'grid-2 biz-ref' }, field('reference', 'Your reference', input({ placeholder: 'Invoice or order number', 'data-testid': 'biz-reference' }), { optional: true }),
+            el('label', { class: 'checkbox' }, el('input', { type: 'checkbox', name: 'fragile' }), el('span', null, 'Fragile'))),
+          scheduleBlock(form)),
+        step('Delivery', dblock.el,
+          el('div', { class: 'grid-2' }, field('cod', 'Cash to collect (MVR)', cod, { optional: true, hint: 'Leave empty if already paid' }), el('div')))),
+      el('div', { class: 'biz-split__side' },
+        el('div', { class: 'biz-sum stack-4' },
+          el('h2', { class: 'biz-sum__title' }, 'Summary'),
+          priceBox, failure, submit,
+          el('p', { class: 'small muted biz-sum__note' }, 'Invoiced monthly. Nothing to pay now.'))));
     form.elements.dZone.setAttribute('data-testid', 'biz-d-zone');
     form.elements.bJetty.setAttribute('data-testid', 'biz-b-jetty');
     form.elements.aPoint.setAttribute('data-testid', 'biz-a-point');
@@ -694,12 +746,12 @@
       const q = MDM.pricing.quote({ service: 'business', packages: pk }, s);
       const codAmt = K.parseMoney(cod.value);
       priceBox.replaceChildren(...[
-        el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, (n > 1 ? n + ' × ' : '') + t.label, el('small', null, 'Your rate ' + money(t.rate) + ' per package')), el('span', { class: 'summary__amount' }, money(q.totals.packages))),
+        el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, (n > 1 ? n + ' × ' : '') + t.label, el('small', null, money(t.rate) + ' each')), el('span', { class: 'summary__amount' }, money(q.totals.packages))),
         q.feeLines.map(f => el('div', { class: 'summary__line summary__line--fee', 'data-fee': f.key }, el('span', { class: 'summary__desc' }, f.label, f.reason && f.key !== 'cargo' ? el('small', null, f.reason) : null), el('span', { class: 'summary__amount' }, money(f.amount)))),
         el('div', { class: 'summary__line summary__total' }, el('span', { class: 'summary__desc' }, 'Total'), el('span', { class: 'summary__amount', 'data-testid': 'biz-new-total' }, money(q.totals.total))),
-        form.elements.extraVehicle.checked ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Extra vehicle: we confirm the charge before collection.')) : null,
-        codAmt > 0 ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': 'biz-new-cod' }, el('span', { class: 'summary__desc' }, 'Cash to collect from the receiver', el('small', null, 'Paid to you after delivery, not part of the price')), el('span', { class: 'summary__amount' }, money(codAmt))) : null,
-        v0().level === 'express' ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Express handling is confirmed by our team, any extra charge is shown before collection.')) : null].flat().filter(Boolean));
+        form.elements.extraVehicle.checked ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Extra vehicle: charge confirmed before pickup.')) : null,
+        codAmt > 0 ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': 'biz-new-cod' }, el('span', { class: 'summary__desc' }, 'Cash to collect', el('small', null, 'Paid to you after delivery')), el('span', { class: 'summary__amount' }, money(codAmt))) : null,
+        v0().level === 'express' ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Express: we confirm any extra charge first.')) : null].flat().filter(Boolean));
     }
     const v0 = () => ({ level: form.elements.level ? form.elements.level.value : 'normal' });
     form.addEventListener('input', updatePrice); form.addEventListener('change', updatePrice); updatePrice();
@@ -731,34 +783,34 @@
           status: extraVehicle ? 'requested' : 'confirmed',
         });
         state.done.order = order;
-        renderTab();
+        renderTab({ enter: true });
         MDM.ui.toast('Delivery booked: ' + order.code, 'ok');
       } catch (err) { showFail(failure, null, (err && err.message) || 'We could not book this delivery. Please try again.'); }
       finally { if (document.contains(submit)) MDM.ui.setLoading(submit, false); }
     });
-    return el('div', { class: 'biz-two' }, form, el('aside', { class: 'biz-aside' }, el('div', { class: 'card' }, el('div', { class: 'card__body stack-3 small' },
-      el('h3', null, 'Many packages today?'), el('p', { class: 'muted' }, 'Use Bulk order to type the rows, or Excel import to upload your sheet. Every row becomes its own trackable delivery with a label.'),
-      el('div', { class: 'row row--wrap' },
-        el('button', { type: 'button', class: 'btn btn--secondary btn--sm', on: { click: () => go('bulk') } }, 'Bulk order'),
-        el('button', { type: 'button', class: 'btn btn--secondary btn--sm', on: { click: () => go('excel') } }, 'Excel import'))))));
+    return form;
+  }
+  // A booking confirmation: a check mark, the title (focused), one line, the details and the next actions.
+  function doneCard(testid, title, line, details, actions) {
+    const h = el('h2', { tabindex: '-1' }, title);
+    setTimeout(() => h.focus({ preventScroll: true }), 0);
+    return el('div', { class: 'card biz-done', 'data-testid': testid },
+      el('div', { class: 'card__body stack-4' },
+        el('div', { class: 'biz-done__mark', 'aria-hidden': 'true' }, html(MDM.icon('check', 26))),
+        el('div', { class: 'stack-1' }, h, el('p', { class: 'muted' }, line)),
+        details, el('div', { class: 'row row--wrap biz-done__actions' }, actions)));
   }
   function newOrderDone(o) {
-    const title = el('h2', { tabindex: '-1' }, 'Delivery booked');
-    setTimeout(() => title.focus(), 0);
     const m = methodLines(o);
-    return el('div', { class: 'card biz-done', 'data-testid': 'biz-new-done' },
-      el('div', { class: 'card__header' }, title, html(MDM.badgeFor(o.status))),
-      el('div', { class: 'card__body stack-4' },
-        el('p', null, 'Order ', el('strong', { class: 'mono--code' }, o.code), ' to ', el('strong', null, o.delivery.recipientName), '. ',
-          o.status === 'requested' ? 'We confirm the price before collection.' : 'Priced at ' + money(o.totals.total) + ', added to your monthly invoice.'),
-        el('div', { class: 'rate-table' },
-          MDM.ui.rateRow('Package', tierText(o)),
-          MDM.ui.rateRow('Delivery', m[0], { sub: m[1] }),
-          o.cod ? MDM.ui.rateRow('Cash to collect', money(o.cod.amount), { mono: true }) : null),
-        el('div', { class: 'row row--wrap' },
-          el('a', { class: 'btn btn--primary', href: labelsHref('order=' + encodeURIComponent(o.id)), 'data-testid': 'biz-done-label' }, html(MDM.icon('printer', 16)), 'Print ' + plural((o.packages || []).length, 'label')),
-          el('a', { class: 'btn btn--secondary', href: trackHref(o) }, 'Track'),
-          el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'biz-new-another', on: { click: () => { state.done.order = null; renderTab(); } } }, 'Book another'))));
+    return doneCard('biz-new-done', 'Delivery booked',
+      [el('span', { class: 'mono--code' }, o.code), ' to ' + o.delivery.recipientName + ' · ', o.status === 'requested' ? 'we confirm the price first.' : money(o.totals.total) + ', invoiced monthly.'],
+      el('div', { class: 'rate-table' },
+        MDM.ui.rateRow('Package', tierText(o)),
+        MDM.ui.rateRow('Delivery', m[0], { sub: m[1] }),
+        o.cod ? MDM.ui.rateRow('Cash to collect', money(o.cod.amount), { mono: true }) : null),
+      [el('a', { class: 'btn btn--primary', href: labelsHref('order=' + encodeURIComponent(o.id)), 'data-testid': 'biz-done-label' }, html(MDM.icon('printer', 16)), 'Print ' + plural((o.packages || []).length, 'label')),
+        el('a', { class: 'btn btn--secondary', href: trackHref(o) }, 'Track'),
+        el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'biz-new-another', on: { click: () => { state.done.order = null; renderTab({ enter: true }); } } }, 'Book another')]);
   }
 
   // ---- Row controls (bulk rows editor and Excel review) ---------------------------------------------------------------------------
@@ -801,30 +853,25 @@
     if (!q) return 'Choose a size';
     return money(q.rate) + (q.fees ? ' + ' + q.feeLines.map(f => feeName(f) + ' ' + money(f.amount)).join(' + ') : '');
   }
-  // rowsSummary(rows, ctx) → summary lines: packages, total at the agreed rates, cash to collect, delivery methods.
+  // rowsSummary(rows, ctx) → summary lines: packages, total at the agreed rates, delivery methods, cash to collect.
   function rowsSummary(rows, ctx, testid) {
     let total = 0, cod = 0, unpriced = 0; const methods = {};
     rows.forEach(r => { const q = K.quoteRow(r, state.acc, state.settings, ctx.pickupZone()); if (q) total += q.total; else unpriced++; cod += K.parseMoney(r.cod) || 0; methods[r.method] = (methods[r.method] || 0) + 1; });
     return el('div', { class: 'summary', 'data-testid': testid },
-      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, plural(rows.length, 'package'), el('small', null, 'Each row becomes its own order with a tracking code and a label')), el('span', { class: 'summary__amount', 'data-testid': testid + '-total' }, money(total))),
-      unpriced ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': testid + '-unpriced' }, el('span', { class: 'summary__desc' }, plural(unpriced, 'package') + ' not in the total until ' + (unpriced === 1 ? 'its' : 'their') + ' size is chosen')) : null,
-      rows.length ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'By delivery method: ' + Object.keys(methods).map(m => MDM.deliveryMethodLabel(m) + ' ' + methods[m]).join(' · '))) : null,
-      el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Cash to collect', el('small', null, 'Collected by the drivers and paid to you')), el('span', { class: 'summary__amount', 'data-testid': testid + '-cod' }, money(cod))),
-      el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Priced at your agreed rate for each size, plus the Maldivian Cargo fee or the airport fee where it applies. Invoiced monthly.')));
+      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, plural(rows.length, 'package'), rows.length ? el('small', null, Object.keys(methods).map(m => MDM.deliveryMethodLabel(m) + ' ' + methods[m]).join(' · ')) : null), el('span', { class: 'summary__amount', 'data-testid': testid + '-total' }, money(total))),
+      unpriced ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': testid + '-unpriced' }, el('span', { class: 'summary__desc' }, plural(unpriced, 'package') + ' without a size, not in the total')) : null,
+      el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Cash to collect', el('small', null, 'Paid to you after delivery')), el('span', { class: 'summary__amount', 'data-testid': testid + '-cod' }, money(cod))),
+      el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Your agreed rates, plus cargo or airport fees. Invoiced monthly.')));
   }
   function bulkDone(b, back) {
-    const title = el('h2', { tabindex: '-1' }, 'Bulk order submitted');
-    setTimeout(() => title.focus(), 0);
     const n = (b.orderIds || []).length;
     const c = b.collection || {};
-    return el('div', { class: 'card biz-done', 'data-testid': 'biz-bulk-done' },
-      el('div', { class: 'card__header' }, title, el('span', { class: 'mono--code' }, b.code)),
-      el('div', { class: 'card__body stack-4' },
-        el('p', null, plural(n, 'package') + ' confirmed at your agreed rates. We collect from ' + (c.label ? c.label + ', ' : '') + c.address + (c.preferredTime ? ' around ' + c.preferredTime : '') + ', sort them and send each one with the driver for its area, jetty or counter.'),
-        el('div', { class: 'row row--wrap' },
-          el('a', { class: 'btn btn--primary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-bulk-labels' }, html(MDM.icon('printer', 16)), 'Print ' + plural(n, 'label')),
-          el('a', { class: 'btn btn--secondary', href: batchHref(b), on: { click: () => { state.done.batch = null; state.done.excel = null; } } }, 'See the packages'),
-          el('button', { type: 'button', class: 'btn btn--ghost', on: { click: () => { back(); renderTab(); } } }, 'New bulk order'))));
+    return doneCard('biz-bulk-done', 'Bulk order submitted',
+      [el('span', { class: 'mono--code' }, b.code), ' · ' + plural(n, 'package') + ' · pickup from ' + (c.label || c.address) + (c.preferredTime ? ' around ' + c.preferredTime : '') + '.'],
+      null,
+      [el('a', { class: 'btn btn--primary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-bulk-labels' }, html(MDM.icon('printer', 16)), 'Print ' + plural(n, 'label')),
+        el('a', { class: 'btn btn--secondary', href: batchHref(b), on: { click: () => { state.done.batch = null; state.done.excel = null; } } }, 'See packages'),
+        el('button', { type: 'button', class: 'btn btn--ghost', on: { click: () => { back(); renderTab({ enter: true }); } } }, 'New bulk order')]);
   }
 
   // ---- Bulk order: rows editor (§5.1 to §5.3, §5.6) ---------------------------------------------------------------------------------
@@ -836,11 +883,11 @@
     const tiers = tiersOf(acc);
     const ctx = { tiers, allTiers: allTiers() };
     if (!bulk.rows.length) bulk.rows = [K.blankRow(tiers), K.blankRow(tiers)];
-    const form = el('form', { class: 'biz-form', novalidate: true, 'data-testid': 'biz-bulk-form' });
+    const form = el('form', { class: 'biz-form biz-split', novalidate: true, 'data-testid': 'biz-bulk-form' });
     const rowsEl = el('div', { class: 'bulk-items', 'data-testid': 'biz-bulk-rows' });
     const summaryHost = el('div');
     const failure = failBox();
-    const submit = el('button', { type: 'submit', class: 'btn btn--primary btn--lg', 'data-testid': 'biz-bulk-submit' }, 'Submit bulk order');
+    const submit = el('button', { type: 'submit', class: 'btn btn--primary btn--lg btn--block', 'data-testid': 'biz-bulk-submit' }, 'Submit bulk order');
     const collection = collectionBlock(acc, { onceLabel: 'Another address (this bulk order only)', onChange: () => { drawSummary(); bulk.rows.forEach(updateRowHead); } });
     ctx.pickupZone = () => collection.zone();
     const errorsOf = r => K.validateRow(r, ctx);
@@ -879,18 +926,17 @@
     function drawRows() { rowsEl.replaceChildren(...bulk.rows.map(itemNode)); drawSummary(); }
     function drawSummary() { summaryHost.replaceChildren(rowsSummary(bulk.rows.filter(K.filled), ctx, 'biz-bulk-summary')); }
     const level = segmented('level', [{ value: 'normal', label: 'Normal' }, { value: 'express', label: 'Express' }], 'normal', 'biz-bulk-level');
+    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-bulk-add', on: { click: () => { bulk.rows.push(K.blankRow(tiers)); drawRows(); const last = rowsEl.querySelector('.bulk-item:last-child input'); if (last) last.focus(); } } }, html(MDM.icon('plus', 16)), 'Add package');
     form.append(
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Collection'), el('span', { class: 'small muted' }, 'One pickup for the whole bulk order')),
-        el('div', { class: 'card__body stack-4' }, collection.el,
-          el('div', { class: 'grid-2' }, MDM.ui.field({ label: 'Service', control: level }), field('notes', 'Notes for our team', input({ placeholder: 'Term 3 textbook orders' }), { optional: true })))),
-      el('div', { class: 'card biz-excel-hint' }, el('div', { class: 'card__body row row--between row--wrap' },
-        el('p', { class: 'small muted' }, 'Orders already in Excel? Upload the sheet instead of typing: we check every row before anything is booked.'),
-        el('a', { class: 'btn btn--secondary btn--sm', href: '#excel', 'data-testid': 'biz-bulk-to-excel' }, html(MDM.icon('upload', 16)), 'Excel import'))),
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Packages'),
-        el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-bulk-add', on: { click: () => { bulk.rows.push(K.blankRow(tiers)); drawRows(); const last = rowsEl.querySelector('.bulk-item:last-child input'); if (last) last.focus(); } } }, html(MDM.icon('plus', 16)), 'Add package')),
-        el('div', { class: 'card__body' }, rowsEl)),
-      summaryHost, failure,
-      el('div', { class: 'form-actions' }, el('span', { class: 'small muted' }, 'We collect, sort and hand each package to the driver for its area, jetty or counter.'), submit));
+      el('div', { class: 'biz-split__main stack-6' },
+        el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Pickup')),
+          el('div', { class: 'card__body stack-4' }, collection.el,
+            el('div', { class: 'grid-2' }, MDM.ui.field({ label: 'Service', control: level }), field('notes', 'Note for our team', input({ placeholder: 'Term 3 textbook orders' }), { optional: true })))),
+        el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Packages'),
+          el('a', { class: 'biz-link', href: '#excel', 'data-testid': 'biz-bulk-to-excel' }, html(MDM.icon('upload', 16)), 'Use Excel')),
+          el('div', { class: 'card__body stack-4' }, rowsEl, addBtn))),
+      el('div', { class: 'biz-split__side' },
+        el('div', { class: 'biz-sum stack-4' }, el('h2', { class: 'biz-sum__title' }, 'Summary'), summaryHost, failure, submit)));
     drawRows();
     form.addEventListener('submit', async e => {
       e.preventDefault(); failure.hidden = true;
@@ -918,7 +964,7 @@
           collection: collection.value(), rows: rows.map(K.toBatchRow) });
         bulk.rows = []; bulk.tried = false;
         state.done.batch = batch;
-        renderTab();
+        renderTab({ enter: true });
         MDM.ui.toast('Bulk order ' + batch.code + ' submitted', 'ok');
       } catch (err) { showFail(failure, null, (err && err.message) || 'We could not submit this bulk order.'); }
       finally { if (document.contains(submit)) MDM.ui.setLoading(submit, false); }
@@ -944,14 +990,14 @@
     const collection = collectionBlock(acc, { onceLabel: 'Another address (this bulk order only)', onChange: () => drawReview() });
     ctx.pickupZone = () => collection.zone();
     const fileInput = el('input', { type: 'file', accept: '.xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv', class: 'sr-only', tabindex: '-1', 'data-testid': 'biz-excel-file' });
-    const pasteText = el('textarea', { class: 'textarea', rows: 4, placeholder: 'Copy the rows from Excel, including the header row, and paste them here', 'data-testid': 'biz-csv-text' });
-    const templateBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-excel-template' }, html(MDM.icon('download', 16)), 'Download the Excel template');
+    const pasteText = el('textarea', { class: 'textarea', rows: 4, placeholder: 'Paste rows here, with the header row', 'data-testid': 'biz-csv-text' });
+    const templateBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-excel-template' }, html(MDM.icon('download', 16)), 'Download template');
     const uploadBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'biz-excel-upload', on: { click: () => fileInput.click() } }, html(MDM.icon('upload', 16)), 'Upload Excel');
     function say(kind, text) { msg.replaceChildren(text ? MDM.ui.notice(kind, text) : ''); }
     templateBtn.addEventListener('click', async () => {
       MDM.ui.setLoading(templateBtn, true);
-      try { await K.downloadTemplate(acc, s); say('ok', 'Template downloaded: mr-delivery-man-bulk-orders.xlsx. Fill one row per package, then upload it here.'); }
-      catch (err) { say('danger', 'The Excel tools could not load. Check the connection and try again, or type the orders under Bulk order.'); }
+      try { await K.downloadTemplate(acc, s); say('ok', 'Template downloaded. Fill one row per package, then upload it.'); }
+      catch (err) { say('danger', 'The Excel tools could not load. Check the connection, or type the orders under Bulk.'); }
       finally { MDM.ui.setLoading(templateBtn, false); }
     });
     // Nothing is booked here: the rows only go into the review. A second file asks whether to replace the rows already in the review or
@@ -1006,8 +1052,8 @@
       await importGrid(grid, f.name, /\.(xlsx|xls|xlsm)$/i.test(f.name) ? 'excel' : 'csv');
     });
     const dropzone = el('div', { class: 'dropzone biz-excel-drop' }, el('div', { class: 'dropzone__title' }, 'Upload your orders'),
-      el('div', { class: 'dropzone__hint' }, 'Excel (.xlsx, .xls) or .csv with one row per package. Columns: ' + K.COLUMNS.slice(0, 7).map(c => c.label.toLowerCase()).join(', ') + ', plus the boat, cargo and airport details, cash to collect and special instructions.'),
-      el('span', { class: 'dropzone__drag dropzone__hint' }, 'You can also drop the file here.'),
+      el('div', { class: 'dropzone__hint' }, 'Excel or CSV, one row per package.'),
+      el('span', { class: 'dropzone__drag dropzone__hint' }, 'Or drop the file here.'),
       el('div', { class: 'row row--wrap biz-excel-actions' }, uploadBtn, templateBtn), fileInput);
     dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('is-over'); });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('is-over'));
@@ -1142,12 +1188,12 @@
       reviewHost.replaceChildren(el('div', { class: 'card' },
         el('div', { class: 'card__header bz-review-head' }, el('h2', { tabindex: '-1' }, 'Review the orders'), el('div', { class: 'row row--wrap', 'data-counts': '' })),
         el('div', { class: 'card__body stack-3' },
-          el('p', { class: 'small muted' }, 'From ' + (excel.file || 'your file') + '. Nothing is booked until you submit. Fix a highlighted cell by editing it here, or remove the row and send it later.'),
+          el('p', { class: 'small muted' }, 'From ' + (excel.file || 'your file') + '. Nothing is booked until you submit.'),
           el('ul', { class: 'bz-problems small', 'data-problems': '', 'data-testid': 'biz-excel-problems', hidden: true }),
           sizeFixer(rows),
           el('ul', { class: 'bz-problems bz-problems--warn small', 'data-dupes': '', 'data-testid': 'biz-excel-dupes', 'aria-label': 'Possible duplicates', hidden: true }),
           el('div', { class: 'row row--between row--wrap' }, onlyBad,
-            el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'biz-excel-clear', on: { click: async () => { if (await MDM.ui.confirm({ title: 'Clear the imported rows?', message: 'Every row in this review is removed. Nothing has been booked yet.', okLabel: 'Clear rows', danger: true })) { excel.rows = []; excel.file = ''; drawReview(); say('', ''); } } } }, 'Clear all rows'))),
+            el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'biz-excel-clear', on: { click: async () => { if (await MDM.ui.confirm({ title: 'Clear the imported rows?', message: 'Nothing has been booked yet.', okLabel: 'Clear rows', danger: true })) { excel.rows = []; excel.file = ''; drawReview(); say('', ''); } } } }, 'Clear rows'))),
         el('div', { class: 'table-wrap bz-review-wrap' }, table)),
         el('div', { 'data-sum': '' }));
       refreshTotals();
@@ -1155,16 +1201,16 @@
     }
     const level = segmented('level', [{ value: 'normal', label: 'Normal' }, { value: 'express', label: 'Express' }], 'normal', 'biz-excel-level');
     form.append(
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, '1. Collection'), el('span', { class: 'small muted' }, 'One pickup for every order in the file')),
+      el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Pickup')),
         el('div', { class: 'card__body stack-4' }, collection.el,
-          el('div', { class: 'grid-2' }, MDM.ui.field({ label: 'Service', control: level }), field('notes', 'Notes for our team', input({ placeholder: 'Evening drop' }), { optional: true })))),
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, '2. Your Excel file')),
+          el('div', { class: 'grid-2' }, MDM.ui.field({ label: 'Service', control: level }), field('notes', 'Note for our team', input({ placeholder: 'Evening drop' }), { optional: true })))),
+      el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Your file')),
         el('div', { class: 'card__body stack-4' },
-          el('p', { class: 'small muted' }, 'Start from the template: it has the exact columns, two example rows to replace, and a second sheet listing the sizes, areas, delivery methods and jetties we accept. Nothing is booked until you review the rows and submit.'),
+          el('p', { class: 'small muted' }, 'Start from the template for the right columns.'),
           dropzone, msg,
-          el('details', { class: 'biz-paste' }, el('summary', null, html(MDM.icon('chevron-right', 16)), 'Or paste rows copied from Excel'),
+          el('details', { class: 'biz-paste' }, el('summary', null, html(MDM.icon('chevron-right', 16)), 'Or paste rows from Excel'),
             el('div', { class: 'stack-3 biz-paste__body' }, MDM.ui.field({ name: 'paste', label: 'Rows with the header row', control: pasteText }),
-              el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-csv-add', on: { click: () => { const g = K.parseDelimited(pasteText.value); if (!g.length) { say('warn', 'Paste the rows first, including the header row.'); return; } importGrid(g, 'the pasted rows', 'csv').then(ok => { if (ok) pasteText.value = ''; }); } } }, 'Check pasted rows'))))),
+              el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-csv-add', on: { click: () => { const g = K.parseDelimited(pasteText.value); if (!g.length) { say('warn', 'Paste the rows first, including the header row.'); return; } importGrid(g, 'the pasted rows', 'csv').then(ok => { if (ok) pasteText.value = ''; }); } } }, 'Check rows'))))),
       reviewHost, failure,
       el('div', { class: 'form-actions' }, gate, submit));
     drawReview();
@@ -1180,7 +1226,7 @@
           collection: collection.value(), rows: excel.rows.map(K.toBatchRow) });
         excel.rows = []; excel.file = ''; excel.onlyBad = false;
         state.done.excel = batch;
-        renderTab();
+        renderTab({ enter: true });
         MDM.ui.toast('Bulk order ' + batch.code + ' submitted with ' + plural((batch.orderIds || []).length, 'order'), 'ok');
       } catch (err) { showFail(failure, null, (err && err.message) || 'We could not submit these orders.'); }
       finally { if (document.contains(submit)) MDM.ui.setLoading(submit, false); }
@@ -1208,13 +1254,13 @@
     const others = batch ? ' The other orders in ' + batch.code + ' are not affected.' : '';
     // Same rule as store.businessCancel: a failed delivery is still with us once its pickup was done.
     const withUs = ['collected', 'out_for_delivery'].indexOf(o.status) >= 0 || (o.status === 'failed' && ((o.route && o.route.stops) || []).some(x => x.type === 'pickup' && x.status === 'done'));
-    if (!withUs) return 'We have not collected this package yet, so the order is simply cancelled. Nothing else to do.' + cod + others;
-    if (o.status === 'out_for_delivery') return 'This package is out for delivery. We tell the driver not to deliver it and to bring it back to you. You will see "Returning to you", then "Returned".' + cod + others;
-    return 'We already have this package. The order is cancelled and the package comes back to you. You will see "Returning to you", then "Returned".' + cod + others;
+    if (!withUs) return 'Not collected yet, so it is simply cancelled.' + cod + others;
+    if (o.status === 'out_for_delivery') return 'It is out for delivery: the driver will bring it back to you.' + cod + others;
+    return 'We already have it: the driver will bring it back to you.' + cod + others;
   }
   async function cancelOrder(o, batch) {
     const vals = await MDM.ui.dialog({
-      title: 'Cancel ' + o.code + '?', message: cancelOutcome(o, batch), okLabel: 'Cancel this order', cancelLabel: 'Keep the order', danger: true,
+      title: 'Cancel ' + o.code + '?', message: cancelOutcome(o, batch), okLabel: 'Cancel order', cancelLabel: 'Keep order', danger: true,
       fields: [{ name: 'reason', label: 'Reason', type: 'textarea', rows: 2, required: true, requiredMessage: 'Tell us why the order is cancelled', placeholder: 'Their customer cancelled the order' }],
     });
     if (!vals) return;
@@ -1228,7 +1274,7 @@
   async function updateBoat(o) {
     const b = (o.delivery || {}).boat || {};
     const vals = await MDM.ui.dialog({
-      title: 'Update boat details for ' + o.code, message: 'Use this when the boat, ferry or speedboat changes, or the driver missed it and sends the package on the next one. The driver and our office are told.',
+      title: 'Change boat for ' + o.code, message: 'The driver and our office are told.',
       okLabel: 'Save boat details',
       fields: [
         { name: 'reason', label: 'What changed', type: 'select', required: true, requiredMessage: 'Choose what changed', placeholder: 'Choose a reason', options: MDM.BOAT_CHANGE_REASONS.map(r => ({ value: r.value, label: r.label })) },
@@ -1251,7 +1297,7 @@
   }
   function ordersTable(rows, batchById, testid) {
     return el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack biz-orders', 'data-testid': testid || 'biz-orders-table' },
-      el('thead', null, el('tr', null, ['Order', 'Receiver', 'Package', 'Delivery', 'Cash on delivery', 'Status', ''].map(h => el('th', { scope: 'col' }, h)))),
+      el('thead', null, el('tr', null, ['Order', 'Receiver', 'Package', 'Delivery', 'Cash', 'Status', ''].map(h => el('th', { scope: 'col' }, h)))),
       el('tbody', null, rows.map(o => {
         const r = recipientOf(o), pkg = (o.packages || [])[0] || {}, b = o.batchId ? batchById[o.batchId] : null, m = methodLines(o), cs = codStatus(o);
         const hist = ((o.delivery || {}).boat || {}).history || [];
@@ -1263,12 +1309,12 @@
             o.fees && (o.fees.cargo || o.fees.airport) ? el('span', { class: 'table__sub' }, 'Total ' + money(o.totals.total) + ' with the ' + (o.fees.cargo ? 'Maldivian Cargo' : 'airport') + ' fee') : null)),
           el('td', { 'data-label': 'Delivery' }, el('div', null, el('span', { 'data-method': (o.delivery || {}).method || 'home' }, m[0]), el('span', { class: 'table__sub biz-delivery-sub' }, m[1]),
             hist.length ? el('span', { class: 'table__sub' }, 'Boat updated ' + plural(hist.length, 'time') + ', last: ' + ((MDM.BOAT_CHANGE_REASONS.find(x => x.value === hist[hist.length - 1].reason) || {}).label || 'changed').toLowerCase()) : null)),
-          el('td', { 'data-label': 'Cash on delivery' }, cs ? el('div', { class: 'biz-cod' }, el('span', { class: 'mono' }, money(o.cod.amount)), codBadge(cs)) : el('span', { class: 'subtle' }, 'None')),
+          el('td', { 'data-label': 'Cash' }, cs ? el('div', { class: 'biz-cod' }, el('span', { class: 'mono' }, money(o.cod.amount)), codBadge(cs)) : el('span', { class: 'subtle' }, 'None')),
           el('td', { 'data-label': 'Status' }, el('div', null, el('div', { class: 'biz-status' }, html(MDM.badgeFor(o.status)), returnTag(o), priorityTag(o)),
             cancelNote(o) ? el('span', { class: 'table__sub biz-cancel-note', 'data-testid': 'cancel-note' }, cancelNote(o)) : null)),
           el('td', { class: 'biz-row-actions' }, el('div', { class: 'biz-actions biz-actions--stack' },
-            canCancel(o) ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm biz-cancel', 'data-testid': 'biz-cancel-' + o.code, on: { click: () => cancelOrder(o, b) } }, 'Cancel this order') : null,
-            canUpdateBoat(o) ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-boat-' + o.code, on: { click: () => updateBoat(o) } }, html(MDM.icon('ship', 16)), 'Update boat details') : null,
+            canCancel(o) ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm biz-cancel', 'aria-label': 'Cancel ' + o.code, 'data-testid': 'biz-cancel-' + o.code, on: { click: () => cancelOrder(o, b) } }, 'Cancel order') : null,
+            canUpdateBoat(o) ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-boat-' + o.code, on: { click: () => updateBoat(o) } }, html(MDM.icon('ship', 16)), 'Change boat') : null,
             OPEN.indexOf(o.status) >= 0 && !(o.priority && ['requested', 'approved'].indexOf(o.priority.status) >= 0) ? el('a', { class: 'btn btn--ghost btn--sm', href: '#priority?order=' + encodeURIComponent(o.id), 'aria-label': 'Ask for priority on ' + o.code }, 'Priority') : null,
             DONE.indexOf(o.status) < 0 ? el('a', { class: 'btn btn--ghost btn--sm', href: labelsHref('order=' + encodeURIComponent(o.id)), 'aria-label': 'Label for ' + o.code }, html(MDM.icon('printer', 16)), 'Label') : null)));
       }))));
@@ -1288,16 +1334,16 @@
       if (q) { const r = recipientOf(o); const hay = K.norm([o.code, r.name, r.phone, (o.delivery || {}).address, (o.details || {}).reference, (o.packages || []).map(p => p.description).join(' '), methodLines(o).join(' ')].join(' ')); if (hay.indexOf(q) < 0) return false; }
       return true;
     });
-    const search = el('input', { class: 'input', type: 'search', placeholder: 'Code, receiver, reference, boat', value: f.q, 'aria-label': 'Search orders', 'data-testid': 'biz-orders-search' });
+    const search = el('input', { class: 'input', type: 'search', placeholder: 'Search orders', value: f.q, 'aria-label': 'Search orders', 'data-testid': 'biz-orders-search' });
     search.addEventListener('input', MDM.ui.debounce(() => { f.q = search.value; redraw(); }, 200));
     const sel = (opts, key, label, testid) => { const s = el('select', { class: 'select', 'aria-label': label, 'data-testid': testid, on: { change: e => { f[key] = e.target.value; redraw(); } } }, opts.map(o => el('option', { value: o.value }, o.label))); s.value = f[key]; return s; };
     const batchOpts = [{ value: '', label: 'All orders' }, { value: 'single', label: 'Single orders' }].concat(d.batches.map(b => ({ value: b.id, label: 'Bulk ' + b.code })));
-    const table = rows.length ? ordersTable(rows, batchById) : empty('No orders match', 'Change the filters or search for another code.');
+    const table = rows.length ? ordersTable(rows, batchById) : empty('No orders match', 'Try other filters.');
     const wrap = el('div', { class: 'stack-6' },
-      d.batches.length ? el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Bulk orders'), el('span', { class: 'small muted' }, 'Open one to see and manage every package in it')), el('div', { class: 'list' }, d.batches.map(batchRow))) : null,
+      d.batches.length ? panelCard('Bulk orders', null, el('div', { class: 'list' }, d.batches.map(batchRow))) : null,
       el('div', { class: 'stack-4' },
-        el('div', { class: 'filters' }, search, sel(STATUS_FILTERS, 'status', 'Status', 'biz-orders-status'), sel(RANGES, 'range', 'Date', 'biz-orders-range'), sel(batchOpts, 'batch', 'Batch', 'biz-orders-batch')),
-        el('p', { class: 'small muted', role: 'status' }, plural(rows.length, 'order') + (rows.length ? ' · ' + money(rows.filter(o => o.status !== 'cancelled').reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0)) + (rows.some(o => o.status === 'cancelled') ? ' without the cancelled ones' : '') : '')),
+        el('div', { class: 'filters biz-filters' }, search, sel(STATUS_FILTERS, 'status', 'Status', 'biz-orders-status'), sel(RANGES, 'range', 'Date', 'biz-orders-range'), sel(batchOpts, 'batch', 'Batch', 'biz-orders-batch')),
+        el('p', { class: 'small muted', role: 'status' }, plural(rows.length, 'order') + (rows.length ? ' · ' + money(rows.filter(o => o.status !== 'cancelled').reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0)) + (rows.some(o => o.status === 'cancelled') ? ' (not counting cancelled)' : '') : '')),
         table));
     function redraw() { tabOrders().then(n => { const focusSearch = document.activeElement === search; panel.replaceChildren(n); if (focusSearch) { const s2 = panel.querySelector('[data-testid="biz-orders-search"]'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } } }); }
     return wrap;
@@ -1313,26 +1359,25 @@
     const parts = [p.st.delivered + ' delivered'];
     if (p.st.out) parts.push(p.st.out + ' out for delivery'); if (p.st.collected) parts.push(p.st.collected + ' at the hub'); if (p.st.cancelled) parts.push(p.st.cancelled + ' cancelled'); if (p.st.failed) parts.push(p.st.failed + ' failed');
     return el('div', { class: 'stack-6', 'data-testid': 'biz-batch-detail' },
-      el('div', null, el('a', { class: 'btn btn--ghost btn--sm', href: '#orders', 'data-testid': 'biz-batch-back' }, html(MDM.icon('arrow-left', 16)), 'All orders')),
+      el('div', null, el('a', { class: 'biz-link biz-link--back', href: '#orders', 'data-testid': 'biz-batch-back' }, html(MDM.icon('chevron-left', 16)), 'All orders')),
       el('div', { class: 'card' },
         el('div', { class: 'card__header' }, el('h2', null, 'Bulk order ', el('span', { class: 'mono--code' }, b.code)), batchBadge(p.st)),
         el('div', { class: 'card__body stack-4' },
           el('div', { class: 'rate-table' },
-            MDM.ui.rateRow('Collection point', pt ? pt.label : (c.label || 'One-off address'), { sub: [c.address, MDM.geo.zoneShort(c.zone), c.contactName ? c.contactName + ' ' + MDM.ui.phone.format(c.contactPhone) : ''].filter(Boolean).join(' · ') }),
-            MDM.ui.rateRow('Preferred collection time', b.preferredTime || c.preferredTime || 'Any time'),
+            MDM.ui.rateRow('Pickup', pt ? pt.label : (c.label || 'One-off address'), { sub: [c.address, MDM.geo.zoneShort(c.zone), c.contactName ? c.contactName + ' ' + MDM.ui.phone.format(c.contactPhone) : ''].filter(Boolean).join(' · ') }),
+            MDM.ui.rateRow('Preferred time', b.preferredTime || c.preferredTime || 'Any time'),
             MDM.ui.rateRow('Packages', plural(p.st.total, 'package'), { sub: parts.join(' · '), valueSub: Object.keys(counts).map(k => MDM.deliveryMethodLabel(k) + ' ' + counts[k]).join(' · ') }),
             MDM.ui.rateRow('Amount', money(p.st.amount), { mono: true, sub: live.length < kids.length ? 'Excluding cancelled orders' : null }),
             MDM.ui.rateRow('Cash on delivery', money(codTotal), { mono: true, sub: 'Excluding cancelled orders', valueSub: money(codPending) + ' still to collect' }),
             MDM.ui.rateRow('Submitted', fmtDate(b.createdAt), { valueSub: b.source === 'excel' ? 'Excel import' : b.source === 'csv' ? 'Spreadsheet' : 'Typed in the portal' })),
           p.bar,
-          MDM.ui.notice('info', 'Cancel any single package below without touching the rest of this bulk order. Before collection it is simply cancelled; once we have it, the driver brings it back to you.'),
           live.length ? el('div', { class: 'row row--wrap' }, el('a', { class: 'btn btn--secondary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-batch-print' }, html(MDM.icon('printer', 16)), 'Print ' + plural(live.length, 'label')),
-            live.length < kids.length ? el('span', { class: 'small muted' }, 'Cancelled packages get no label.') : null) : null)),
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Packages in ' + b.code)), kids.length ? ordersTable(kids, batchById, 'biz-batch-table') : empty('No packages', '')));
+            live.length < kids.length ? el('span', { class: 'small muted' }, 'No labels for cancelled packages.') : null) : null)),
+      panelCard('Packages', null, kids.length ? ordersTable(kids, batchById, 'biz-batch-table') : empty('No packages', '')));
   }
 
   // ---- Cash on delivery (§5.6) ----------------------------------------------------------------------------------------------------
-  const COD_FILTERS = [{ value: 'all', label: 'All cash on delivery' }].concat(Object.keys(COD_LABELS).map(k => ({ value: k, label: COD_LABELS[k].label })));
+  const COD_FILTERS = [{ value: 'all', label: 'All statuses' }].concat(Object.keys(COD_LABELS).map(k => ({ value: k, label: COD_LABELS[k].label })));
   function codTotals(orders) {
     const t = { pending: 0, collected: 0, with_office: 0, remitted: 0, not_collected: 0, n: {} };
     orders.forEach(o => {
@@ -1355,17 +1400,16 @@
     const n = k => plural(t.n[k] || 0, 'order');
     return el('div', { class: 'stack-6', 'data-testid': 'biz-cod' },
       el('div', { class: 'kpi-row biz-cod-kpis' },
-        kpi('To collect', money(t.pending), n('pending') + ' with the receivers', 'biz-cod-pending'),
-        kpi('With drivers', money(t.collected), n('collected') + ', handed to our office next', 'biz-cod-collected'),
-        kpi('With the office', money(t.with_office), n('with_office') + ', paid to you next', 'biz-cod-office'),
+        kpi('To collect', money(t.pending), n('pending'), 'biz-cod-pending'),
+        kpi('With drivers', money(t.collected), n('collected'), 'biz-cod-collected'),
+        kpi('With our office', money(t.with_office), n('with_office'), 'biz-cod-office'),
         kpi('Paid to you', money(t.remitted), n('remitted'), 'biz-cod-remitted'),
-        kpi('Not collected', money(t.not_collected), n('not_collected') + ' cancelled or refused', 'biz-cod-not')),
-      MDM.ui.notice('info', 'You enter the cash to collect when you place an order. The driver records the cash received with the proof of delivery, hands it to our office, and we pay it to you with a reference.'),
+        kpi('Not collected', money(t.not_collected), n('not_collected'), 'biz-cod-not')),
       el('div', { class: 'stack-4' },
-        el('div', { class: 'filters' }, sel(COD_FILTERS, 'status', 'Cash status', 'biz-cod-status'), sel(RANGES, 'range', 'Order date', 'biz-cod-range')),
-        el('p', { class: 'small muted', role: 'status' }, plural(rows.length, 'order') + ' · ' + money(rows.reduce((s, o) => s + o.cod.amount, 0)) + ' cash on delivery in total'),
+        el('div', { class: 'filters biz-filters' }, sel(COD_FILTERS, 'status', 'Cash status', 'biz-cod-status'), sel(RANGES, 'range', 'Order date', 'biz-cod-range')),
+        el('p', { class: 'small muted', role: 'status' }, plural(rows.length, 'order') + ' · ' + money(rows.reduce((s, o) => s + o.cod.amount, 0)) + ' in total'),
         rows.length ? el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack biz-cod-table', 'data-testid': 'biz-cod-table' },
-          el('thead', null, el('tr', null, ['Order', 'Receiver', 'Amount', 'Status', 'Collected', 'Handed to our office', 'Paid to you'].map((h, i) => el('th', { scope: 'col', class: i === 2 ? 'num' : null }, h)))),
+          el('thead', null, el('tr', null, ['Order', 'Receiver', 'Amount', 'Status', 'Collected', 'At our office', 'Paid to you'].map((h, i) => el('th', { scope: 'col', class: i === 2 ? 'num' : null }, h)))),
           el('tbody', null, rows.map(o => {
             const c = o.cod, st = codStatus(o), b = o.batchId ? batchById[o.batchId] : null, r = recipientOf(o);
             const diff = c.collectedAmount != null ? c.collectedAmount - c.amount : 0;
@@ -1376,9 +1420,9 @@
               el('td', { class: 'num mono nowrap', 'data-label': 'Amount' }, money(c.amount)),
               el('td', { 'data-label': 'Status' }, codBadge(st)),
               el('td', { 'data-label': 'Collected' }, c.collectedAt ? el('div', null, el('span', { class: 'mono' }, money(c.collectedAmount || 0)), el('span', { class: 'table__sub' }, fmtDate(c.collectedAt) + (variance ? ' · ' + variance : ''))) : el('span', { class: 'subtle' }, st === 'not_collected' ? 'Not collected' : 'Not yet')),
-              el('td', { 'data-label': 'Handed to our office' }, c.handedAt ? fmtDate(c.handedAt) : el('span', { class: 'subtle' }, 'Not yet')),
+              el('td', { 'data-label': 'At our office' }, c.handedAt ? fmtDate(c.handedAt) : el('span', { class: 'subtle' }, 'Not yet')),
               el('td', { 'data-label': 'Paid to you' }, c.remittedAt ? el('div', null, fmtDate(c.remittedAt, { dateOnly: true }), el('span', { class: 'table__sub' }, c.remittanceRef ? 'Ref ' + c.remittanceRef : 'No reference')) : el('span', { class: 'subtle' }, 'Not yet')));
-          })))) : empty('No cash on delivery orders match', f.status === 'all' && f.range === 'all' ? 'Enter the cash to collect when you book an order.' : 'Change the filters.')));
+          })))) : empty('Nothing to show', f.status === 'all' && f.range === 'all' ? 'Add cash to collect when you book.' : 'Try other filters.')));
   }
 
   // ---- Collection points (§5.1) ----------------------------------------------------------------------------------------------------
@@ -1393,8 +1437,8 @@
         { name: 'landmark', label: 'Landmark', placeholder: 'Behind the stadium', value: p ? p.landmark : '' },
         { name: 'contactName', label: 'Contact person', required: true, requiredMessage: 'Enter the contact person', value: p ? p.contactName : acc.contactName || '' },
         { name: 'contactPhone', label: 'Contact number', type: 'tel', landline: true, required: true, requiredMessage: 'Enter the contact number', invalidMessage: 'Enter a 7-digit Maldives number', value: p ? p.contactPhone : acc.phone || '' },
-        { name: 'preferredTime', label: 'Preferred collection time', type: 'time', hint: 'We plan pickups from here around this time.', value: p ? p.preferredTime : '' },
-        { name: 'isDefault', label: 'Use as the default collection point', type: 'checkbox', value: p ? !!p.isDefault : !(acc.collectionPoints || []).length },
+        { name: 'preferredTime', label: 'Preferred pickup time', type: 'time', value: p ? p.preferredTime : '' },
+        { name: 'isDefault', label: 'Make this the default', type: 'checkbox', value: p ? !!p.isDefault : !(acc.collectionPoints || []).length },
       ],
     });
     if (!vals) return;
@@ -1406,25 +1450,28 @@
   }
   async function tabPoints() {
     await load();
-    const acc = state.acc, pts = acc.collectionPoints || [];
-    const addBtn = el('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-testid': 'biz-point-add', on: { click: () => editPoint(null) } }, html(MDM.icon('plus', 16)), 'Add a collection point');
-    return el('div', { class: 'stack-6' },
-      el('div', { class: 'card', 'data-testid': 'biz-points' },
-        el('div', { class: 'card__header' }, el('h2', null, 'Collection points'), addBtn),
+    const acc = state.acc, pts = acc.collectionPoints || [], s = state.settings;
+    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-point-add', on: { click: () => editPoint(null) } }, html(MDM.icon('plus', 16)), 'Add point');
+    return el('div', { class: 'biz-account' },
+      panelCard('Collection points', addBtn,
         pts.length ? el('div', { class: 'list biz-plist' }, pts.map(p => el('div', { class: 'list__item list__item--top biz-point', 'data-testid': 'biz-point-' + p.id },
           el('div', { class: 'list__main' },
             el('div', { class: 'list__title' }, p.label, ' ', p.isDefault ? html(MDM.ui.badge('info', 'Default')) : null),
             el('div', { class: 'list__meta' }, p.address + ' · ' + MDM.geo.zoneLabel(p.zone) + (p.landmark ? ' · ' + p.landmark : '')),
-            el('div', { class: 'list__meta' }, (p.contactName || '') + ' ' + MDM.ui.phone.format(p.contactPhone) + ' · ' + (p.preferredTime ? 'Collect around ' + p.preferredTime : 'No preferred time'))),
+            el('div', { class: 'list__meta' }, [((p.contactName || '') + ' ' + MDM.ui.phone.format(p.contactPhone)).trim(), p.preferredTime ? 'around ' + p.preferredTime : ''].filter(Boolean).join(' · '))),
           el('div', { class: 'list__aside biz-actions' },
             !p.isDefault ? el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'biz-point-default', on: { click: async () => { await MDM.store.saveCollectionPoint(acc.id, Object.assign({}, p, { isDefault: true })); MDM.ui.toast(p.label + ' is now the default', 'ok'); renderTab(); } } }, 'Make default') : null,
-            el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-point-edit', on: { click: () => editPoint(p) } }, html(MDM.icon('edit', 16)), 'Edit'),
-            el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'biz-point-remove', on: { click: async () => {
-              const ok = await MDM.ui.confirm({ title: 'Remove ' + p.label + '?', message: pts.length === 1 ? 'This is your only collection point. New orders will ask for a collection address until you add one.' : 'Orders already booked from here are not affected.' + (p.isDefault ? ' The next point becomes the default.' : ''), okLabel: 'Remove', danger: true });
+            el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-point-edit', 'aria-label': 'Edit ' + p.label, on: { click: () => editPoint(p) } }, html(MDM.icon('edit', 16)), 'Edit'),
+            el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'biz-point-remove', 'aria-label': 'Remove ' + p.label, on: { click: async () => {
+              const ok = await MDM.ui.confirm({ title: 'Remove ' + p.label + '?', message: pts.length === 1 ? 'New orders will ask for an address until you add a point.' : 'Booked orders are not affected.' + (p.isDefault ? ' The next point becomes the default.' : ''), okLabel: 'Remove', danger: true });
               if (!ok) return;
               await MDM.store.removeCollectionPoint(acc.id, p.id); MDM.ui.toast(p.label + ' removed', 'ok'); renderTab();
-            } } }, html(MDM.icon('trash', 16)), 'Remove'))))) : empty('No collection points yet', 'Add your shop, godown or warehouse. You pick one when you book an order or a bulk order.')),
-      el('p', { class: 'small muted' }, 'The default collection point is preselected on new orders and bulk orders. The preferred time is a suggestion for our team; you can change it on each bulk order.'));
+            } } }, html(MDM.icon('trash', 16)), 'Remove'))))) : empty('No collection points yet', 'Add your shop or godown.'), { 'data-testid': 'biz-points' }),
+      panelCard('Account', null, el('div', { class: 'rate-table' },
+        MDM.ui.rateRow('Contact', acc.contactName || acc.name, { valueSub: MDM.ui.phone.format(acc.phone) }),
+        acc.email ? MDM.ui.rateRow('Invoices to', acc.email) : null,
+        MDM.ui.rateRow('Billing', 'Monthly', { valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') }),
+        MDM.ui.rateRow('Priority requests', acc.priorityAllowed === false ? 'Off' : 'On')), { 'data-testid': 'biz-account' }));
   }
 
   // ---- Priority (requirements §11) ------------------------------------------------------------------------------------------
@@ -1451,13 +1498,13 @@
         el('div', { class: 'list__meta' }, 'Asked ' + fmtDate(r.at) + (r.deadline ? ' · Needed by ' + deadlineLabel(r.deadline) : '') + (r.instructions ? ' · ' + r.instructions : '')),
         r.remarks ? el('div', { class: 'list__meta' }, 'Our team: ' + r.remarks) : null,
         r.decision !== 'pending' && r.decision !== 'rejected' && o.priority && o.priority.level ? el('div', { class: 'list__meta' }, 'Marked ' + ((MDM.PRIORITY_LEVELS.find(x => x.value === o.priority.level) || {}).label || 'Priority')) : null),
-      el('div', { class: 'list__aside' }, decisionBadge(r))))) : empty('No priority requests yet', 'Ask for a deadline on any open order and our team approves it.'));
+      el('div', { class: 'list__aside' }, decisionBadge(r))))) : empty('No requests yet', 'Ask for a deadline on any open order.'));
   }
   async function tabPriority() {
     const acc = state.acc;
     const orders = (await MDM.store.list('orders', { where: { accountId: acc.id } })).filter(o => OPEN.indexOf(o.status) >= 0 && !(o.priority && o.priority.status === 'requested'));
     const form = el('form', { class: 'form', novalidate: true, 'data-testid': 'biz-priority-form' });
-    const submit = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-priority-submit' }, 'Send priority request');
+    const submit = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-priority-submit' }, 'Send request');
     const pre = hashParts().params.get('order');
     const orderSel = el('select', { class: 'select', 'data-testid': 'biz-priority-order' }, el('option', { value: '' }, orders.length ? 'Choose an open order' : 'No open orders'),
       orders.map(o => el('option', { value: o.id }, o.code + ' · ' + recipientOf(o).name + ' · ' + MDM.STATUS[o.status].label + (o.priority && o.priority.status === 'approved' ? ' · already priority' : ''))));
@@ -1467,8 +1514,8 @@
       field('reason', 'Reason', input({ placeholder: 'Exam papers must arrive before the 2 pm paper', 'data-testid': 'biz-priority-reason' })),
       el('div', { class: 'grid-2' }, field('deadline', 'Deadline', input({ type: 'datetime-local', 'data-testid': 'biz-priority-deadline' })), el('div')),
       field('instructions', 'Instructions', el('textarea', { class: 'textarea', rows: 2, placeholder: 'Hand to the exam office only, signature needed' }), { optional: true }),
-      el('div', { class: 'form-actions' }, el('span', { class: 'small muted' }, 'Our team approves or declines it; you see the decision here and on the tracking page.'), submit));
-    if (acc.priorityAllowed === false) form.prepend(MDM.ui.notice('warn', 'Priority requests are not enabled on this account. Call us to turn them on.'));
+      el('div', { class: 'form-actions' }, el('span', { class: 'small muted' }, 'Our team approves or declines it.'), submit));
+    if (acc.priorityAllowed === false) form.prepend(MDM.ui.notice('warn', 'Priority is off for this account. Call us to turn it on.'));
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const r = MDM.ui.validate(form, { order: v => v ? null : 'Choose the order', reason: v => v ? null : 'Tell us why it is urgent', deadline: v => !v ? 'Choose the deadline' : (new Date(v) < new Date() ? 'Choose a time in the future' : null) });
@@ -1483,8 +1530,8 @@
     });
     priorityList = el('div', { class: 'biz-plist', 'data-testid': 'biz-priority-list' });
     const out = el('div', { class: 'grid-2 biz-overview' },
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Request priority delivery')), el('div', { class: 'card__body' }, form)),
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Your requests')), priorityList));
+      panelCard('Ask for priority', null, el('div', { class: 'card__body' }, form)),
+      panelCard('Your requests', null, priorityList));
     await fillPriorityList(priorityList);
     return out;
   }
@@ -1500,10 +1547,9 @@
     const amount = delivered.reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0);
     const invoices = d.invoices.slice().sort((a, b) => a.month < b.month ? 1 : -1);
     return el('div', { class: 'stack-6' },
-      el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, monthLabel(month) + ' so far'), el('span', { class: 'small muted' }, 'Running total, invoiced at month end')),
-        el('div', { class: 'card__body' }, el('div', { class: 'rate-table' },
-          MDM.ui.rateRow('Packages delivered', String(pkgs)), MDM.ui.rateRow('Orders', String(delivered.length)), MDM.ui.rateRow('Amount', money(amount), { mono: true }),
-          MDM.ui.rateRow('Payment', 'Bank transfer', { valueSub: 'Due ' + plural(d.settings.invoiceDueDays || 14, 'day') + ' after the invoice' })))),
+      panelCard(monthLabel(month) + ' so far', null, el('div', { class: 'rate-table' },
+        MDM.ui.rateRow('Packages delivered', String(pkgs)), MDM.ui.rateRow('Orders', String(delivered.length)), MDM.ui.rateRow('Amount', money(amount), { mono: true }),
+        MDM.ui.rateRow('Payment', 'Bank transfer', { valueSub: 'Due in ' + plural(d.settings.invoiceDueDays || 14, 'day') }))),
       el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Invoices')),
         invoices.length ? el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'biz-invoices' },
           el('thead', null, el('tr', null, ['Invoice', 'Month', 'Status', 'Due', 'Total', ''].map((h, i) => el('th', { class: i === 4 ? 'num' : null }, h)))),
@@ -1514,7 +1560,7 @@
             el('td', { 'data-label': 'Due' }, fmtDate(inv.dueAt, { dateOnly: true })),
             el('td', { class: 'num mono', 'data-label': 'Total' }, MDM.pricing.format(inv.total, { cents: true })),
             el('td', null, el('a', { class: 'btn btn--secondary btn--sm', href: MDM.href('admin/invoice.html?id=' + encodeURIComponent(inv.id)), target: '_blank', rel: 'noopener', 'data-testid': 'biz-invoice-open' }, 'Open')))))))
-          : empty('No invoices yet', 'Your first invoice is issued at the end of the month.')));
+          : empty('No invoices yet', 'The first one comes at month end.')));
   }
 
   // ---- Labels (How it works §9) ------------------------------------------------------------------------------------------------
@@ -1526,14 +1572,14 @@
     const printBtn = el('a', { class: 'btn btn--primary', 'data-testid': 'biz-labels-print' });
     const sync = () => {
       const n = sel.size;
-      printBtn.textContent = n ? 'Print ' + plural(n, 'label') : 'Select orders to print';
+      printBtn.textContent = n ? 'Print ' + plural(n, 'label') : 'Select orders';
       if (n) { printBtn.href = labelsHref('orders=' + [...sel].map(encodeURIComponent).join(',')); printBtn.removeAttribute('aria-disabled'); }
       else { printBtn.removeAttribute('href'); printBtn.setAttribute('aria-disabled', 'true'); }
     };
     const all = el('input', { type: 'checkbox', 'aria-label': 'Select all', checked: open.length > 0 && open.every(o => sel.has(o.id)), on: { change: e => { open.forEach(o => { if (e.target.checked) sel.add(o.id); else sel.delete(o.id); }); panel.querySelectorAll('[data-pick]').forEach(c => { c.checked = e.target.checked; }); sync(); } } });
     sync();
     return el('div', { class: 'stack-6' },
-      d.batches.length ? el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'By bulk order'), el('span', { class: 'small muted' }, 'One label per package')),
+      d.batches.length ? el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'By bulk order')),
         el('div', { class: 'list' }, d.batches.map(b => {
           const n = d.orders.filter(o => o.batchId === b.id && o.status !== 'cancelled').length, x = (b.orderIds || []).length - n;
           return el('div', { class: 'list__item' },
@@ -1542,12 +1588,12 @@
         }))) : null,
       el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Open orders'), printBtn),
         open.length ? el('div', { class: 'list biz-pick' },
-          el('label', { class: 'checkbox biz-pick__all' }, all, el('span', null, 'Select all ' + plural(open.length, 'open order'))),
+          el('label', { class: 'checkbox biz-pick__all' }, all, el('span', null, 'Select all ' + open.length)),
           open.map(o => el('label', { class: 'checkbox biz-pick__item' },
             el('input', { type: 'checkbox', 'data-pick': o.id, checked: sel.has(o.id), on: { change: e => { if (e.target.checked) sel.add(o.id); else sel.delete(o.id); sync(); } } }),
             el('span', null, el('span', { class: 'mono--code' }, o.code), ' · ', recipientOf(o).name),
             el('span', { class: 'checkbox__hint' }, methodLines(o)[0] + ' · ' + tierText(o) + ' · ' + MDM.STATUS[o.status].label))))
-          : empty('No open orders', 'Labels for delivered orders are not needed.')));
+          : empty('No open orders')));
   }
 
   // =========================================================================================================================

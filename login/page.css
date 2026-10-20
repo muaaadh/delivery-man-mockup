@@ -1,21 +1,36 @@
-/* Sign-in page: one narrow column, a role picker above one small form. */
-body.page-login .login-form { max-width: 440px; margin-top: 24px; }
-body.page-login .login-form .field + .field { margin-top: 16px; }
-body.page-login .login-form > .alert + .field, body.page-login .login-form > .login-sub + .field { margin-top: 16px; }
-body.page-login .login-actions { margin-top: 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-body.page-login .login-sub { font-size: 18px; font-weight: 600; margin: 0 0 12px; }
-body.page-login .login-note { font-size: 14px; color: var(--text-2); margin: 0 0 16px; }
-body.page-login .login-terms { font-size: 13px; line-height: 1.4; color: var(--text-2); margin: 0 0 8px; }
-body.page-login .login-roles { border: 0; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-body.page-login .login-role { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 12px; border: 1px solid var(--border-control); border-radius: var(--radius-sm); background: var(--card); cursor: pointer; min-height: 88px; transition: border-color .15s ease, background-color .15s ease; }
-body.page-login .login-role:hover { border-color: var(--text-3); }
-body.page-login .login-role__icon { color: var(--text-2); display: inline-flex; margin-bottom: 6px; }
-body.page-login .login-role__label { font-weight: 600; font-size: 15px; color: var(--text); }
-body.page-login .login-role__hint { font-size: 12px; line-height: 1.35; color: var(--text-3); }
-body.page-login .login-role:has(> input:checked) { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
-body.page-login .login-role:has(> input:checked) .login-role__icon { color: var(--brand); }
-body.page-login .login-role:has(> input:focus-visible) { box-shadow: 0 0 0 2px var(--brand); }
-@media (max-width: 720px) {
-  body.page-login .login-roles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  body.page-login .login-role:last-child { grid-column: 1 / -1; min-height: 0; }
+/* Sign-in: one centred column. The customer's mobile-number form is the default; the other sign-ins are a quiet row of chips below. */
+body.page-login .login { max-width: 400px; margin: 0 auto; }
+body.page-login .login .page-head { display: block; text-align: center; padding-top: 72px; margin-bottom: 32px; }
+body.page-login .login .page-head__desc { margin-left: auto; margin-right: auto; }
+body.page-login .login-form .field + .field { margin-top: 18px; }
+body.page-login .login-form > .alert { margin-top: 16px; }
+body.page-login .login-form .input, body.page-login .login-form .select { height: 50px; padding: 0 16px; font-size: 17px; border-radius: 12px; }
+body.page-login .login-form .field > label { font-size: 14px; }
+
+/* Actions: a full-width primary pill, then a quiet secondary link or button under it. */
+body.page-login .login-actions { margin-top: 24px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+body.page-login .login-actions .btn--primary { width: 100%; height: 50px; font-size: 16px; font-weight: 600; }
+body.page-login .login-actions .btn--ghost { min-height: 44px; }
+body.page-login .login-link { display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; }
+
+/* Sign-up: the "what we carry" text sits in a quiet grey panel above the tick. */
+body.page-login .login-terms { font-size: 13px; line-height: 1.5; color: var(--text-2); margin: 0 0 12px; padding: 14px 16px; background: var(--surface); border-radius: var(--radius); }
+body.page-login .checkbox { min-height: 44px; align-items: center; }
+
+/* Other sign-ins: a hairline, a small title and one row of chips. */
+body.page-login .login-other { margin-top: 48px; padding-top: 28px; border-top: 1px solid var(--border); text-align: center; }
+body.page-login .login-other__title { font-size: 14px; font-weight: 500; color: var(--text-2); letter-spacing: 0; margin-bottom: 14px; }
+body.page-login .login-roles { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+body.page-login .login-roles .chip { height: 44px; padding: 0 14px; font-size: 14px; border-color: var(--border); background: transparent; cursor: pointer; transition: background-color .2s ease, border-color .2s ease, color .2s ease, transform .25s var(--ease-out); }
+body.page-login .login-roles .chip .icon { width: 16px; height: 16px; color: var(--text-3); transition: color .2s ease; }
+body.page-login .login-roles .chip:active { transform: scale(.97); }
+body.page-login .login-roles .chip:focus-visible { box-shadow: var(--focus); outline: none; }
+@media (hover: hover) {
+  body.page-login .login-roles .chip:hover { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
+  body.page-login .login-roles .chip:hover .icon { color: var(--brand); }
 }
+@media (max-width: 720px) {
+  body.page-login main .login .page-head { padding-top: 40px; margin-bottom: 28px; }
+  body.page-login .login-other { margin-top: 40px; }
+}
+@media (max-width: 480px) { body.page-login .login-roles .chip .icon { display: none; } }   /* four chips fit one row on a phone */

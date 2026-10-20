@@ -2,44 +2,48 @@
 body.page-staff .btn:not(.btn--sm), body.page-staff .input, body.page-staff .select, body.page-staff .checkbox { min-height: 44px; }
 body.page-staff main { padding-bottom: 64px; }
 .staff-signin { max-width: 520px; }
+
+/* Punch card: the clock and one big button */
+.staff-punchcard { border: 0; background: var(--surface); }
 .staff-punchcard__body { display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
-.staff-clock { font-size: 44px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; margin: 6px 0 4px; }
+@media (min-width: 720px) { .staff-punchcard__body { padding: 28px 32px; } }
+.staff-clock { font-size: 56px; font-weight: 600; letter-spacing: -.03em; line-height: 1.05; margin: 6px 0 6px; font-variant-numeric: tabular-nums; }
 .staff-since { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+.staff-punchcard.is-on .staff-since { color: var(--ok); }
+.staff-punchcard.is-on .staff-since::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--ok); vertical-align: 1px; }
 .staff-punchcard__action { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; text-align: right; }
 .staff-punch { min-width: 220px; }
+.staff-punchcard .btn--secondary { background: var(--card); }
+
+/* Numbers: soft tiles instead of a ruled box */
+body.page-staff .kpi-row { background: var(--surface); border: 0; border-radius: var(--radius-lg); }
+
 .staff-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.staff-grid .card__header { border-bottom: 0; padding-bottom: 4px; }
+.staff-grid .card__header h2 { font-size: 17px; }
 .staff-grid .card > .list > .list__item { padding-left: 16px; padding-right: 16px; }
 .staff-grid .card > .empty { padding-left: 16px; padding-right: 16px; }
 .staff-leave { align-items: flex-start; }
-@media (min-width: 720px) { .staff-grid .card > .list > .list__item, .staff-grid .card > .empty { padding-left: 20px; padding-right: 20px; } }
+@media (min-width: 720px) { .staff-grid .card > .list > .list__item, .staff-grid .card > .empty { padding-left: 24px; padding-right: 24px; } }
 @media (max-width: 960px) { .staff-grid { grid-template-columns: 1fr; } }
 @media (max-width: 720px) {
-  .staff-clock { font-size: 36px; }
+  .staff-clock { font-size: 44px; }
   .staff-punchcard__action { align-items: stretch; text-align: left; width: 100%; }
   .staff-punch { width: 100%; min-width: 0; }
 }
 .staff-att td { vertical-align: top; }
 
-/* Leave history: a card that folds open (native <details>, closed by default). */
-.staff-fold__summary { cursor: pointer; list-style: none; min-height: 52px; border-radius: var(--radius) var(--radius) 0 0; }
+/* Leave form and history: cards that fold open (native <details>, closed by default). */
+.staff-fold__summary { cursor: pointer; list-style: none; min-height: 56px; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 .staff-fold__summary::-webkit-details-marker { display: none; }
 .staff-fold__summary::marker { content: ''; }
 .staff-fold__summary:focus-visible { box-shadow: inset 0 0 0 2px var(--brand); }
-.staff-fold:not([open]) > .staff-fold__summary { border-bottom: 0; border-radius: var(--radius); }
+.staff-fold:not([open]) > .staff-fold__summary { padding-bottom: 16px; border-radius: var(--radius-lg); }
+@media (min-width: 720px) { .staff-fold:not([open]) > .staff-fold__summary { padding-bottom: 18px; } }
 .staff-fold__count { margin-left: auto; white-space: nowrap; }
-.staff-fold__chevron { display: inline-flex; color: var(--text-2); transition: transform .15s ease; }
+.staff-fold__chevron { display: inline-flex; color: var(--text-2); transition: transform .2s var(--ease-out); }
 .staff-fold[open] .staff-fold__chevron { transform: rotate(180deg); }
 @media (hover: hover) { .staff-fold__summary:hover { background: var(--surface); } }
 .staff-att__note { margin-top: 4px; }
 @media (max-width: 480px) { .staff-att th, .staff-att td { padding-left: 8px; padding-right: 8px; font-size: 14px; } }
-
-/* Same page-title band and entrance as the other public inner pages (css/base.css scopes those rules to their body classes). */
-body.page-staff main .page-head { padding-bottom: 32px; margin-bottom: 36px; background: var(--band); box-shadow: 0 0 0 100vmax var(--band); clip-path: inset(0 -100vmax); }
-body.page-staff main .page-head h1 { font-size: 36px; font-weight: 700; letter-spacing: -.025em; }
-body.page-staff main .page-head > * { animation: rise-in .8s var(--ease-out) both; }
-body.page-staff main .page-head > * + * { animation-delay: .08s; }
-@media (max-width: 720px) {
-  body.page-staff main .page-head { padding-bottom: 24px; margin-bottom: 28px; }
-  body.page-staff main .page-head h1 { font-size: 28px; }
-}
-@media (prefers-reduced-motion: reduce) { body.page-staff main .page-head > * { animation: none; } }
+body.page-staff main .page-head.is-settled > * { animation: none; }

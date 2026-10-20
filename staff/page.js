@@ -8,7 +8,7 @@
   const SESSION = 'mdm:staff';
   const ROLE = { admin: 'Admin', operator: 'Operator', office: 'Office staff', driver: 'Driver' };
   const app = document.querySelector('[data-slot="app"]');
-  const state = { me: null, settings: {}, tick: null, leavesOpen: false, formOpen: false, draft: null, stale: false };
+  const state = { me: null, settings: {}, tick: null, leavesOpen: false, formOpen: false, draft: null, stale: false, shownId: null };
   const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const typeLabel = v => (MDM.LEAVE_TYPES.find(t => t.value === v) || { label: v }).label;
   const pad = n => String(n).padStart(2, '0');
@@ -35,10 +35,10 @@
       writeSession(st); render();
     } } },
       MDM.ui.field({ name: 'who', label: 'Your name', control: Object.assign(who, { name: 'who' }) }),
-      MDM.ui.field({ name: 'pin', label: 'PIN', control: Object.assign(pin, { name: 'pin' }), hint: 'The PIN the office gave you. In this demo any 4 digits work.' }),
+      MDM.ui.field({ name: 'pin', label: 'PIN', control: Object.assign(pin, { name: 'pin' }), hint: 'Any 4 digits work in the demo' }),
       el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'staff-signin' }, 'Sign in')));
     app.replaceChildren(el('div', { class: 'container container--narrow' },
-      el('div', { class: 'page-head' }, el('h1', null, 'Staff portal'), el('p', { class: 'page-head__desc' }, 'Punch in and out, check your hours and request leave. For everyone on the Mr. Delivery Man team, drivers included.')),
+      el('div', { class: 'page-head' }, el('h1', null, 'Staff portal'), el('p', { class: 'page-head__desc' }, 'Punch in and out, hours and leave.')),
       el('div', { class: 'card staff-signin' }, el('div', { class: 'card__body' }, form))));
   }
 
@@ -85,14 +85,13 @@
     });
     const lv = leaveToday(d.leaves);
     const today = MDM.ui.fmtDate(new Date(), { dateOnly: true, year: false });
-    return el('div', { class: 'card staff-punchcard', 'data-testid': 'staff-punchcard' },
+    return el('div', { class: ['card', 'staff-punchcard', open && 'is-on'], 'data-testid': 'staff-punchcard' },
       el('div', { class: 'card__body staff-punchcard__body' },
         el('div', { class: 'staff-punchcard__time' },
           el('div', { class: 'small muted' }, new Date().toLocaleDateString('en-GB', { weekday: 'long' }) + ', ' + today),
           clock, since,
           el('div', { class: 'small muted' }, 'Shift ' + shiftOf(d.me, hr).start + ' to ' + shiftOf(d.me, hr).end + (open ? ' · ' + shiftStatus(open, hr) : ''))),
-        el('div', { class: 'staff-punchcard__action' }, btn,
-          el('div', { class: 'small muted' }, open ? 'Remember to punch out before you leave.' : 'Punch in when you start your shift.'))),
+        el('div', { class: 'staff-punchcard__action' }, btn)),
       lv ? el('div', { class: 'card__body' }, MDM.ui.notice('info', 'You are on approved ' + (MDM.LEAVE_TYPES.find(t => t.value === lv.type) || { label: 'leave' }).label.toLowerCase() + ' until ' + MDM.ui.fmtDate(lv.to, { dateOnly: true }) + '.')) : null);
   }
   function kpis(d) {
@@ -107,8 +106,8 @@
     const k = (label, value, note, testid) => el('div', { class: 'kpi', 'data-testid': testid || null }, el('div', { class: 'kpi__label' }, label), el('div', { class: 'kpi__value' }, value), note ? el('div', { class: 'kpi__note' }, note) : null);
     const od = d.offDays;
     return el('div', { class: 'kpi-row', 'data-testid': 'staff-kpis' },
-      k('Hours, last 7 days', short(week)), k('Days worked', String(days), 'Last 14 days'), k('Late arrivals', String(late), 'After ' + shiftOf(d.me, hr).start + ' + ' + (hr.graceMinutes || 0) + ' min'),
-      k('Annual leave left', String(bal.annual != null ? bal.annual : (hr.annualLeaveDays || 30) - used('annual')), 'days'), k('Sick leave left', String(bal.sick != null ? bal.sick : (hr.sickLeaveDays || 30) - used('sick')), 'days'),
+      k('Hours', short(week), 'Last 7 days'), k('Days worked', String(days), 'Last 14 days'), k('Late', String(late), 'Last 14 days'),
+      k('Annual leave', String(bal.annual != null ? bal.annual : (hr.annualLeaveDays || 30) - used('annual')), 'days left'), k('Sick leave', String(bal.sick != null ? bal.sick : (hr.sickLeaveDays || 30) - used('sick')), 'days left'),
       od ? k('Accumulated off days', String(od.balance), offDayNote(od, pendingOffDays(d)), 'staff-offdays') : null);
   }
   // "3 carried over · 1 earned · 0 taken": how the balance adds up (opening + days worked on the weekly off day + office adjustment
@@ -150,7 +149,7 @@
     if (dr) { type.value = dr.type || type.value; from.value = dr.from || ''; to.value = dr.to || ''; if (from.value) to.min = from.value; reason.value = dr.reason || ''; }
     const keep = () => { state.draft = { type: type.value, from: from.value, to: to.value, reason: reason.value }; };
     const asked = pendingOffDays(d);
-    const typeHint = () => type.value === 'off_day' && d.offDays ? 'You have ' + MDM.ui.plural(d.offDays.balance, 'accumulated off day') + ' to use' + (asked ? ' (' + asked + ' already requested, waiting for the office)' : '') + '. You earn one each time you work on a ' + (WEEKDAYS[d.offDays.weeklyOffDay] || 'weekly off day') + '.' : 'The office approves or declines it.';
+    const typeHint = () => type.value === 'off_day' && d.offDays ? 'You have ' + MDM.ui.plural(d.offDays.balance, 'accumulated off day') + ' to use' + (asked ? ' (' + asked + ' already requested)' : '') + '. Earned by working on ' + (WEEKDAYS[d.offDays.weeklyOffDay] || 'the weekly off day') + 's.' : 'The office approves or declines it.';
     const typeField = MDM.ui.field({ name: 'type', label: 'Type', control: type, hint: typeHint() });
     const hint = typeField.querySelector('.field__hint');
     if (hint) { hint.dataset.testid = 'staff-offday-hint'; hint.setAttribute('role', 'status'); }
@@ -211,7 +210,7 @@
     const count = pending ? html(MDM.ui.badge('warn', pending + ' pending')) : el('span', { class: 'small muted' }, d.leaves.length ? MDM.ui.plural(d.leaves.length, 'request') : 'None yet');
     const det = el('details', { class: 'card staff-fold', 'data-testid': 'staff-leaves-section', open: state.leavesOpen || null },
       el('summary', { class: 'card__header staff-fold__summary', 'data-testid': 'staff-leaves-summary' },
-        el('h2', { id: 'staff-leaves-h' }, 'My leave requests'),
+        el('h2', { id: 'staff-leaves-h' }, 'My requests'),
         el('span', { class: 'staff-fold__count' }, count),
         el('span', { class: 'staff-fold__chevron', 'aria-hidden': 'true' }, html(MDM.icon('chevron-down', 18)))),
       leaveList(d));
@@ -225,21 +224,25 @@
     if (!d.me) { clearSession(); return renderSignin(); }
     state.me = d.me;
     document.title = 'Staff portal · ' + d.me.name + ' · Mr. Delivery Man';
+    // The view eases in once; the live re-renders that follow (attendance, leave) swap it in place without replaying the motion.
+    const first = state.shownId !== d.me.id;
+    state.shownId = d.me.id;
     app.replaceChildren(el('div', { class: 'container' },
-      el('div', { class: 'page-head' },
+      el('div', { class: ['page-head', !first && 'is-settled'] },
         el('h1', null, 'Hello, ' + d.me.name.split(' ')[0]),
-        el('p', { class: 'page-head__desc' }, [d.me.title, d.me.title && d.me.title.toLowerCase().indexOf(String(ROLE[d.me.role]).toLowerCase()) >= 0 ? null : ROLE[d.me.role]].filter(Boolean).join(' · ') + (d.me.joinedAt ? ' · with us since ' + MDM.ui.fmtDate(d.me.joinedAt, { dateOnly: true, year: true }) : '')),
+        el('p', { class: 'page-head__desc' }, [d.me.title, d.me.title && d.me.title.toLowerCase().indexOf(String(ROLE[d.me.role]).toLowerCase()) >= 0 ? null : ROLE[d.me.role]].filter(Boolean).join(' · ')),
         el('div', { class: 'page-head__actions' },
           d.me.role === 'driver' ? el('a', { class: 'btn btn--secondary', href: MDM.href('driver/') }, html(MDM.icon('bike', 16)), 'Driver app') : null,
           ['admin', 'operator', 'office'].indexOf(d.me.role) >= 0 ? el('a', { class: 'btn btn--secondary', href: MDM.href('login/?as=admin') }, 'Office portal') : null,
-          el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'staff-signout', on: { click: () => { clearSession(); clearInterval(state.tick); Object.assign(state, { draft: null, formOpen: false, leavesOpen: false }); render(); } } }, 'Sign out'))),
+          el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'staff-signout', on: { click: () => { clearSession(); clearInterval(state.tick); Object.assign(state, { draft: null, formOpen: false, leavesOpen: false, shownId: null }); render(); } } }, 'Sign out'))),
       el('div', { class: 'stack-6 staff-main' },
         punchCard(d), kpis(d),
         el('div', { class: 'staff-grid' },
-          el('section', { class: 'card', 'aria-labelledby': 'staff-att' }, el('div', { class: 'card__header' }, el('h2', { id: 'staff-att' }, 'My attendance'), el('span', { class: 'small muted' }, 'Last 14 days')), attendanceTable(d)),
+          el('section', { class: 'card', 'aria-labelledby': 'staff-att' }, el('div', { class: 'card__header' }, el('h2', { id: 'staff-att' }, 'Attendance'), el('span', { class: 'small muted' }, 'Last 14 days')), attendanceTable(d)),
           el('div', { class: 'stack-6' },
             leaveRequest(d),
             leaveHistory(d))))));
+    if (first) MDM.motion.enter(app.querySelector('.staff-main'), { max: 4 });
   }
   async function render() { state.settings = await MDM.store.settings(); if (readSession()) await renderPortal(); else await renderSignin(); }
   // Store changes re-render the portal, but not while focus is in the leave form (the field would be swapped under the cursor). The

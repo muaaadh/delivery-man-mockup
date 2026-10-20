@@ -1,23 +1,44 @@
 /* Admin operations layer: order queues and drawer details, dashboard figures, bulk, zones, team, reports and store.
    Layout only, scoped under body.page-admin; colours come from the base.css tokens so light and dark both work. */
 
-/* ---------- Dashboard figures: as many tiles as fit, links to their orders ---------- */
-body.page-admin .kpi-row--fluid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-body.page-admin .kpi-row--fluid .kpi__value { font-size: 24px; white-space: nowrap; }
-body.page-admin a.kpi--link { display: block; color: inherit; text-decoration: none; transition: border-color .15s; }
-body.page-admin a.kpi--link:hover { border-color: var(--border-strong); text-decoration: none; }
+/* ---------- Dashboard figures: tiles that fill the row, linked tiles lift on hover ---------- */
+body.page-admin .kpi-row--fluid .kpi__value { white-space: nowrap; }
+body.page-admin a.kpi--link { display: block; color: inherit; text-decoration: none; transition: box-shadow .35s var(--ease-out), transform .35s var(--ease-out); }
+@media (hover: hover) { body.page-admin a.kpi--link:hover { box-shadow: var(--shadow); transform: translateY(-2px); text-decoration: none; } }
+html[data-theme="dark"] body.page-admin a.kpi--link:hover { box-shadow: inset 0 0 0 1px var(--border-strong); }
 body.page-admin a.kpi--link:focus-visible { box-shadow: var(--focus); outline: none; }
-@media (max-width: 720px) { body.page-admin .kpi-row--fluid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
-/* ---------- Action queues on the overview ---------- */
-body.page-admin .queues > .queue + .queue { border-top: 1px solid var(--border); }
-body.page-admin .queue__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 4px; font-size: 13px; font-weight: 600; color: var(--text-2); }
-body.page-admin .queue__count { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--red-soft); color: var(--red); font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
-body.page-admin .queue__head a { color: inherit; text-decoration: none; }
-body.page-admin .queue__head a:hover { color: var(--text); }
-body.page-admin .queue .list__item { padding-left: 16px; padding-right: 16px; }
-body.page-admin .queue__more { display: block; padding: 8px 16px 12px; font-size: 13px; }
-@media (min-width: 721px) { body.page-admin .queue__head, body.page-admin .queue .list__item, body.page-admin .queue__more { padding-left: 20px; padding-right: 20px; } }
+/* ---------- Overview: "Needs attention" as a masonry of small queue cards, then recent orders beside the drivers map ---------- */
+body.page-admin .queues { columns: 3 300px; column-gap: 16px; }
+body.page-admin .queue { break-inside: avoid; margin-bottom: 16px; background: var(--card); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+html[data-theme="dark"] body.page-admin .queue { box-shadow: inset 0 0 0 1px var(--border); }
+body.page-admin .queue__head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 6px 16px; font-size: 14px; font-weight: 600; color: var(--text); text-decoration: none; }
+body.page-admin .queue__title { flex: 1 1 auto; min-width: 0; }
+body.page-admin .queue__head > .icon { flex: none; width: 16px; height: 16px; color: var(--text-3); transition: transform .3s var(--ease-out), color .2s ease; }
+@media (hover: hover) { body.page-admin .queue__head:hover { text-decoration: none; } body.page-admin .queue__head:hover > .icon { color: var(--text); transform: translateX(2px); } }
+body.page-admin .queue__head:focus-visible { box-shadow: inset 0 0 0 2px var(--brand); outline: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+body.page-admin .queue__count { flex: none; min-width: 22px; height: 20px; padding: 0 7px; border-radius: 10px; background: var(--red-soft); color: var(--red); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+html[data-theme="dark"] body.page-admin .queue__count { color: var(--brand); }
+body.page-admin .queue .list__item { position: relative; gap: 12px; padding: 10px 16px; }
+/* Inset separators, as in iOS lists. */
+body.page-admin .queue .list__item + .list__item { border-top: 0; }
+body.page-admin .queue .list__item + .list__item::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; border-top: 1px solid var(--border); }
+body.page-admin .queue .list__title { font-size: 14px; }
+body.page-admin .queue .list__meta { margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+body.page-admin .queue .list__aside { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+body.page-admin .queue .list__aside.mono { font-size: 13px; color: var(--text); }
+body.page-admin .queue > .list:last-child { padding-bottom: 6px; }
+body.page-admin .queue__more { display: flex; align-items: center; gap: 2px; padding: 6px 16px 14px; font-size: 13px; font-weight: 500; color: var(--brand); }
+body.page-admin .queue__more .icon { width: 14px; height: 14px; }
+body.page-admin .attention > .card .empty { padding: 28px 20px; }
+body.page-admin .admin-grid--overview { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+body.page-admin .overview-map { overflow: hidden; }
+body.page-admin .overview-map .map { height: 340px; border: 0; border-radius: 0; }
+body.page-admin .overview-riders { padding: 12px 16px 14px; font-size: 13px; line-height: 1.45; color: var(--text-2); }
+@media (max-width: 1180px) { body.page-admin .admin-grid--overview { grid-template-columns: 1fr; } }
+/* Phones list the five newest orders; the full list is one tap away. */
+@media (max-width: 720px) { body.page-admin [data-testid="recent-orders"] tbody tr:nth-child(n + 6) { display: none; } }
+@media (max-width: 720px) { body.page-admin .overview-map .map { height: 240px; } }
 /* Fifteen views fit a 900px-tall laptop without scrolling the sidebar. */
 @media (min-width: 961px) { body.page-admin .sidebar__nav a { height: 34px; } body.page-admin .sidebar__group { padding: 12px 10px 4px; } }
 
@@ -75,7 +96,8 @@ body.page-admin .admin-grid--wide { grid-template-columns: minmax(0, 3fr) minmax
 
 /* ---------- Zones: map with the editor or the list beside it ---------- */
 body.page-admin .zones-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px; align-items: start; }
-body.page-admin .zones-map { height: calc(100dvh - 200px); min-height: 420px; position: sticky; top: 80px; }
+body.page-admin .zones-map { height: calc(100dvh - 200px); min-height: 420px; position: sticky; top: 80px; border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+html[data-theme="dark"] body.page-admin .zones-map { box-shadow: inset 0 0 0 1px var(--border); }
 body.page-admin .zones-side .list__title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 body.page-admin .zone-form h2 { font-size: 18px; }
 body.page-admin .zone-form > * + * { margin-top: 16px; }
@@ -87,6 +109,14 @@ body.page-admin .marker--zone .marker__label { font-size: 11px; font-weight: 600
 body.page-admin .marker--zone.is-paused::before { background: var(--fill-off); box-shadow: 0 0 0 1px rgba(17, 17, 20, .3); }
 body.page-admin .marker--zone.is-selected::before, body.page-admin .marker--zone.is-draft::before { background: var(--text); box-shadow: 0 0 0 1px rgba(17, 17, 20, .3), 0 0 0 10px rgba(17, 17, 20, .14); }
 @media (max-width: 1100px) { body.page-admin .zones-layout { grid-template-columns: 1fr; } body.page-admin .zones-map { position: static; height: 360px; min-height: 0; } }
+
+/* ---------- Reports: two groups (orders, then charges and cash), each a two-column grid of tables; wide tables span both ---------- */
+body.page-admin .report-group__title { font-size: 22px; font-weight: 700; letter-spacing: -.02em; line-height: 1.25; margin-bottom: 16px; }
+body.page-admin .report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 20px; align-items: start; }
+body.page-admin .report-grid > .section + .section { margin-top: 0; }
+body.page-admin .report-grid > .report-wide { grid-column: 1 / -1; }
+body.page-admin .stack-6 > .report-group { margin-top: 44px; }
+@media (max-width: 1399px) { body.page-admin .report-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- Team, reports, store ---------- */
 body.page-admin .team-tabs .tabs { margin-bottom: 0; }

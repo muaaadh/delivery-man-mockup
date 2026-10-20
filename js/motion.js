@@ -4,9 +4,13 @@
 //   [data-reveal-group]      children with [data-reveal] get a 90ms stagger unless they set --d themselves
 //   [data-split]             splits the text into masked words that rise in when the element enters (headlines)
 //   [data-fill]              words fill from grey to ink as the paragraph scrolls through the viewport (binary per word)
-//   [data-count]             every number in the text counts up from 0 when it enters
+//   [data-countup]           every number in the text counts up from 0 when it enters
 // MDM.motion.addScene({ measure(vh), update(scrollY, vh) }) registers a scrubbed effect on the same rAF loop.
-// Nothing is hidden unless this script runs (the CSS keys off html.motion), and prefers-reduced-motion shows everything at rest.
+// MDM.motion.enter(container, { selector, max }) eases a freshly rendered view's blocks in once (staggered); call it when a view or
+// step is first shown, not on every re-render.
+// Loaded on every page: hooks added later by page scripts are picked up by a MutationObserver, so content rendered after load
+// is revealed too. Nothing is hidden unless this script runs (the CSS keys off html.motion), and prefers-reduced-motion shows
+// everything at rest.
 (function (MDM) { 'use strict';
   const root = document.documentElement;
   const reduced = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -80,16 +84,19 @@
   let io = null;
   function reveal(el) {
     el.classList.add('is-in');
-    if (el.hasAttribute('data-count')) countUp(el);
-    el.querySelectorAll('[data-count]').forEach(countUp);
+    if (el.hasAttribute('data-countup')) countUp(el);
+    el.querySelectorAll('[data-countup]').forEach(countUp);
   }
+  const HOOKS = '[data-reveal], [data-split], [data-countup]';
+  // Matches inside scope, plus scope itself when it is an element carrying a hook.
+  const within = (scope, sel) => { const out = Array.from(scope.querySelectorAll(sel)); if (scope.nodeType === 1 && scope.matches(sel)) out.unshift(scope); return out; };
   function observe(scope) {
     scope = scope || document;
-    scope.querySelectorAll('[data-reveal-group]').forEach(g => {
+    within(scope, '[data-reveal-group]').forEach(g => {
       Array.from(g.querySelectorAll('[data-reveal]')).forEach((c, i) => { if (!c.style.getPropertyValue('--d')) c.style.setProperty('--d', (i * 90) + 'ms'); });
     });
-    scope.querySelectorAll('[data-split]').forEach(splitWords);
-    const targets = scope.querySelectorAll('[data-reveal], [data-split], [data-count]');
+    within(scope, '[data-split]').forEach(splitWords);
+    const targets = within(scope, HOOKS);
     if (reduced || !('IntersectionObserver' in window)) { targets.forEach(reveal); return; }
     if (!io) io = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) { reveal(e.target); io.unobserve(e.target); } }), { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
     targets.forEach(t => { if (!t.classList.contains('is-in')) io.observe(t); });
@@ -127,10 +134,33 @@
     });
   }
 
+  // ---- Enter: a one-off staggered rise for a newly shown view ----
+  function enter(container, opts) {
+    if (!container || reduced) return;
+    opts = opts || {};
+    const nodes = Array.from(opts.selector ? container.querySelectorAll(opts.selector) : container.children).slice(0, opts.max || 12);
+    nodes.forEach((n, i) => {
+      n.classList.remove('motion-enter');
+      void n.offsetWidth;   // restart the animation if the node is reused
+      n.style.setProperty('--i', String(i));
+      n.classList.add('motion-enter');
+      const done = e => { if (e.target !== n) return; n.classList.remove('motion-enter'); n.removeEventListener('animationend', done); };
+      n.addEventListener('animationend', done);
+    });
+  }
+
   function init() {
     root.classList.add('motion');
     if (reduced) root.classList.add('reduce-motion');
     observe(document);
+    // Page scripts render most content after load: reveal hooks in added nodes are observed as they arrive.
+    if ('MutationObserver' in window) {
+      new MutationObserver(records => records.forEach(r => r.addedNodes.forEach(n => {
+        if (n.nodeType !== 1) return;
+        if (n.matches(HOOKS + ', [data-reveal-group]') || n.querySelector(HOOKS)) observe(n);
+        if (n.matches('[data-fill]')) fillScene(n); else n.querySelectorAll && n.querySelectorAll('[data-fill]').forEach(fillScene);
+      }))).observe(document.body || root, { childList: true, subtree: true });
+    }
     document.querySelectorAll('[data-fill]').forEach(fillScene);
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', () => measureAll());
@@ -138,6 +168,6 @@
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(measureAll);
   }
 
-  MDM.motion = { observe, reveal, splitWords, countUp, addScene, measure: measureAll, pageTop, clamp, reduced };
+  MDM.motion = { observe, reveal, enter, splitWords, countUp, addScene, measure: measureAll, pageTop, clamp, reduced };
   init();
 })(window.MDM);

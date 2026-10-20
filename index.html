@@ -36,52 +36,104 @@
 <header data-shell="public"></header>
 <main id="main">
 
-  <!-- Hero -->
+  <!-- Hero: the promise and the two actions beside the live demo order -->
   <section id="top" class="hero" aria-labelledby="top-title">
-    <div class="container hero__intro">
-      <p class="hero__status" data-reveal="fade"><span class="hero__dot" aria-hidden="true"></span><span data-testid="home-hours">Open today · Malé and Hulhumalé</span></p>
-      <h1 id="top-title" class="hero__title" data-split>We pick it up.<br>We shop for it.<br><span class="hero__mark">We deliver it.</span></h1>
-      <p class="hero__lead" data-reveal style="--d:450ms">Door-to-door across Malé, Hulhumalé and the airport, from <span data-testid="home-hero-from">MVR 35</span>. Follow every step, and pay by transfer when it arrives.</p>
-      <div class="hero__actions" data-reveal style="--d:600ms">
-        <a class="btn btn--brand btn--lg btn--pill" href="./request/" data-testid="home-request">Request a delivery</a>
-        <a class="btn btn--secondary btn--lg btn--pill" href="./track/" data-testid="home-track">Track an order</a>
+    <div class="container hero__grid">
+      <div class="hero__copy">
+        <p class="hero__status" data-reveal="fade"><span class="hero__dot" aria-hidden="true"></span><span data-testid="home-hours">Open today · Malé and Hulhumalé</span></p>
+        <h1 id="top-title" class="hero__title" data-split>We pick it up.<br>We shop for it.<br><span class="hero__mark">We deliver it.</span></h1>
+        <p class="hero__lead" data-reveal style="--d:420ms">Across Malé, Hulhumalé and the airport, from <span data-testid="home-hero-from">MVR 35</span>.</p>
+        <div class="hero__actions" data-reveal style="--d:540ms">
+          <a class="btn btn--brand btn--lg btn--pill" href="./request/" data-testid="home-request">Request a delivery</a>
+          <a class="btn btn--secondary btn--lg btn--pill" href="./track/" data-testid="home-track">Track an order</a>
+        </div>
       </div>
-    </div>
-    <div class="container">
-      <div class="hero__stage" data-reveal="fade" style="--d:350ms">
+      <div class="hero__visual" data-reveal="fade" style="--d:160ms">
         <div class="hero__panel" aria-hidden="true"></div>
         <div class="hero__lift">
-          <div class="phone" role="img" aria-label="Live tracking preview: a rider on the way from Malé to Hulhumalé" data-testid="home-phone">
-            <div class="phone__screen">
-              <div class="phone__top"><span class="phone__code" data-testid="home-phone-code">MDM-1038</span><span class="badge badge--info" data-testid="home-phone-status">On the way</span></div>
-              <div class="phone__map" id="hero-map"></div>
-              <div class="phone__sheet">
-                <div class="phone__eta"><span>Estimated arrival</span><strong class="mono" data-testid="home-phone-eta">--:--</strong></div>
-                <div class="phone__rider"><span class="phone__avatar" data-testid="home-phone-initials">AN</span><span class="phone__who"><span data-testid="home-phone-rider">Ahmed Nazim</span><small data-testid="home-phone-vehicle">Bike</small></span></div>
-                <ol class="phone__steps"><li class="is-done">Collected</li><li class="is-current">Out for delivery</li><li>Delivered</li></ol>
+          <div class="hero__float">
+            <div class="phone" role="img" aria-label="Live tracking preview: a rider on the way from Malé to Hulhumalé" data-testid="home-phone">
+              <div class="phone__screen">
+                <div class="phone__top"><span class="phone__code" data-testid="home-phone-code">MDM-1038</span><span class="badge badge--info" data-testid="home-phone-status">On the way</span></div>
+                <div class="phone__map" id="hero-map"></div>
+                <div class="phone__sheet">
+                  <div class="phone__eta"><span>Estimated arrival</span><strong class="mono" data-testid="home-phone-eta">--:--</strong></div>
+                  <div class="phone__rider"><span class="phone__avatar" data-testid="home-phone-initials">AN</span><span class="phone__who"><span data-testid="home-phone-rider">Ahmed Nazim</span><small data-testid="home-phone-vehicle">Bike</small></span></div>
+                  <ol class="phone__steps"><li class="is-done">Collected</li><li class="is-current">Out for delivery</li><li>Delivered</li></ol>
+                </div>
               </div>
             </div>
           </div>
         </div>
-        <p class="hero__caption"><span class="hero__live" aria-hidden="true"></span>A real order moving across the bridge right now in the demo</p>
+        <p class="hero__caption"><span class="hero__live" aria-hidden="true"></span>Live demo order</p>
       </div>
     </div>
   </section>
 
-  <!-- Statement -->
-  <section class="statement" aria-label="What we do">
+  <!-- Services: the three categories, then where we hand the package over -->
+  <section id="services" class="section" aria-labelledby="services-title">
     <div class="container">
-      <p class="statement__text" data-fill>Documents, keys, a Redbox parcel, a shopping list, a box for the island speedboat, a parcel for a resort counter at the airport. Anything you need moved in Greater Malé. We collect it, you follow every step, and you pay when it arrives.</p>
+      <h2 id="services-title" class="section__title" data-reveal>Three ways we deliver.</h2>
+      <div class="services" data-reveal-group data-testid="home-services">
+        <article class="tile" data-reveal data-testid="home-service-pick" data-category="pick">
+          <span class="tile__icon" data-icon="package" aria-hidden="true"></span>
+          <h3 data-cat-label="pick">Pick &amp; Deliver</h3>
+          <p class="tile__line">We collect it and bring it to the door.</p>
+          <ul class="chips" aria-label="What we collect" data-testid="home-pick-types">
+            <li><a href="./request/?type=home" data-testid="home-pick-home"><span class="pick-list__label" data-type-label="home">Home collection</span></a></li>
+            <li><a href="./request/?type=shop_collect" data-testid="home-pick-shop_collect"><span class="pick-list__label" data-type-label="shop_collect">Shop or godown collection</span></a></li>
+            <li><a href="./request/?type=postal" data-testid="home-pick-postal"><span class="pick-list__label" data-type-label="postal">Postal &amp; courier collection</span></a></li>
+            <li><a href="./request/?type=office" data-testid="home-pick-office"><span class="pick-list__label" data-type-label="office">Administrative services</span></a></li>
+          </ul>
+          <div class="tile__foot">
+            <p class="tile__price" data-testid="home-service-price-pick">From MVR 35</p>
+            <a class="tile__link" href="./request/?category=pick" data-testid="home-pick-request">Request a pickup</a>
+          </div>
+        </article>
+        <article class="tile" data-reveal data-testid="home-service-shop" data-category="shop">
+          <span class="tile__icon" data-icon="shopping-bag" aria-hidden="true"></span>
+          <h3 data-cat-label="shop">Shop &amp; Deliver</h3>
+          <p class="tile__line">We buy your list and deliver it.</p>
+          <div class="receipt" aria-hidden="true">
+            <div><span>Basmati rice 5 kg</span><span class="mono">MVR 58</span></div>
+            <div><span>Fresh milk 1 L × 4</span><span class="mono">MVR 42</span></div>
+            <div><span>Eggs, tray of 30</span><span class="mono">MVR 36</span></div>
+            <div class="receipt__fee"><span data-testid="home-service-fee-shop">Shopping fee 10%</span><span class="mono">MVR 14</span></div>
+          </div>
+          <div class="tile__foot">
+            <p class="tile__price"><span data-testid="home-service-price-shop">From MVR 35</span> <small>paid upfront</small></p>
+            <a class="tile__link" href="./request/?type=shop_buy" data-testid="home-shop-request">Start shopping</a>
+          </div>
+        </article>
+        <article class="tile" data-reveal data-testid="home-service-business" data-category="business">
+          <span class="tile__icon" data-icon="building" aria-hidden="true"></span>
+          <h3 data-cat-label="business">Business Delivery</h3>
+          <p class="tile__line">Fixed rates for each package size.</p>
+          <ul class="tiers" data-testid="home-business-tiers" aria-label="Business starting rates by package size">
+            <li data-tier="small"><span>Small, bag size</span><strong class="mono"><span class="tiers__from">from</span> MVR 25</strong></li>
+            <li data-tier="medium"><span>Medium, box size</span><strong class="mono"><span class="tiers__from">from</span> MVR 35</strong></li>
+            <li data-tier="large"><span>Large, XL size</span><strong class="mono"><span class="tiers__from">from</span> MVR 60</strong></li>
+          </ul>
+          <p class="tiers__note" data-testid="home-business-rates-note">Starting rates. Each business gets its own agreed rates.</p>
+          <div class="tile__foot">
+            <a class="tile__link" href="./business/" data-testid="home-business-request">Request an account</a>
+          </div>
+        </article>
+      </div>
+      <div class="methods" data-reveal-group data-testid="home-methods">
+        <h3 class="methods__title" data-reveal>Delivery methods</h3>
+        <div class="method" data-reveal data-testid="home-method-home"><span class="method__icon" data-icon="home" aria-hidden="true"></span><h4 data-method-label="home">Home delivery</h4><p class="method__fee">No extra fee</p></div>
+        <div class="method" data-reveal data-testid="home-method-boat"><span class="method__icon" data-icon="ship" aria-hidden="true"></span><h4 data-method-label="boat">Boat, ferry or speedboat</h4><p class="method__fee">No extra fee</p></div>
+        <div class="method" data-reveal data-testid="home-method-cargo"><span class="method__icon" data-icon="truck" aria-hidden="true"></span><h4 data-method-label="cargo">Maldivian Cargo</h4><p class="method__fee">Plus <span class="mono" data-testid="home-method-cargo-fee">MVR 20</span></p></div>
+        <div class="method" data-reveal data-testid="home-method-airport"><span class="method__icon" data-icon="plane" aria-hidden="true"></span><h4 data-method-label="airport">Airport delivery</h4><p class="method__fee">Plus <span class="mono" data-testid="home-method-airport-fee">MVR 40</span></p></div>
+      </div>
     </div>
   </section>
 
-  <!-- How it works: pinned story -->
-  <section id="how" class="story" aria-labelledby="how-title">
+  <!-- How it works: one phone; its screen follows the step crossing the middle of the viewport -->
+  <section id="how" class="section section--tint story" aria-labelledby="how-title">
     <div class="container">
-      <div class="head head--center" data-reveal>
-        <h2 id="how-title">How it works.</h2>
-        <p>Four steps, and you can see every one of them on your phone.</p>
-      </div>
+      <h2 id="how-title" class="section__title" data-reveal>How it works.</h2>
       <div class="story__grid">
         <div class="story__device" aria-hidden="true">
           <div class="phone phone--story" data-step="1" id="story-phone">
@@ -90,9 +142,9 @@
               <div class="scr scr--1" data-scr="1">
                 <div class="scr__head">Request a delivery</div>
                 <div class="scr__seg"><span class="is-on">Bag × 1</span><span>Box</span><span>XL</span></div>
-                <div class="scr__row"><i class="pin pin--from"></i><span><small>Collection</small>M. Kaneerumaage, Malé</span></div>
-                <div class="scr__row"><i class="pin pin--to"></i><span><small>Delivery</small>Amin Avenue, Hulhumalé Phase 1</span></div>
-                <div class="scr__row"><i class="pin pin--time"></i><span><small>Delivery method</small>Home delivery, normal</span></div>
+                <div class="scr__row"><i class="pin pin--from"></i><span><small>Collection</small>Kaneerumaage, Malé</span></div>
+                <div class="scr__row"><i class="pin pin--to"></i><span><small>Delivery</small>Amin Avenue, Hulhumalé</span></div>
+                <div class="scr__row"><i class="pin pin--time"></i><span><small>Delivery method</small>Home delivery</span></div>
                 <div class="scr__total"><span>Estimate</span><strong class="mono"><span data-k="bag-same">MVR 35</span>–<span data-k="bag-cross-num">45</span></strong></div>
                 <div class="scr__btn">Send request</div>
               </div>
@@ -107,204 +159,131 @@
               </div>
 
               <div class="scr scr--3" data-scr="3">
-                <div class="scr__head">Out for delivery <span class="scr__eta mono">12 min</span></div>
-                <div class="scr__map">
-                  <svg viewBox="0 0 240 300" width="240" height="300" aria-hidden="true" focusable="false">
-                    <path class="land" d="M18 238c10-18 44-24 70-18 18 4 22 22 16 38-8 20-40 30-64 24-22-6-30-26-22-44z"/>
-                    <path class="land" d="M168 22c16-6 34 4 38 22l10 70c2 18-8 30-22 32-14 2-24-8-26-24l-10-70c-2-14 0-26 10-30z"/>
-                    <path class="land land--air" d="M140 110c8-4 16 2 18 10l14 90c2 10-4 18-12 18s-14-6-16-14l-12-90c-2-8 0-12 8-14z"/>
-                    <path class="road" d="M62 246 C 100 246, 128 232, 150 196 S 186 110, 190 58"/>
-                    <path class="road road--live" d="M62 246 C 100 246, 128 232, 150 196 S 186 110, 190 58"/>
-                    <circle class="dot dot--from" cx="62" cy="246" r="6"/>
-                    <circle class="dot dot--to" cx="190" cy="58" r="6"/>
-                    <text class="lbl" x="30" y="284">Malé</text>
-                    <text class="lbl" x="150" y="16">Hulhumalé</text>
-                    <text class="lbl lbl--soft" x="96" y="150">Airport</text>
-                  </svg>
-                  <span class="scr__rider"></span>
+                <div class="scr__head">On the way <span class="scr__eta mono">12 min</span></div>
+                <div class="scr__arrive"><small>Arriving around</small><strong class="mono">12:53</strong></div>
+                <div class="scr__trip" aria-hidden="true">
+                  <div class="scr__trip-line"><span class="scr__trip-fill"></span><span class="scr__trip-dot"></span></div>
+                  <div class="scr__trip-ends"><span>Malé</span><span>Hulhumalé</span></div>
                 </div>
+                <ol class="scr__steps">
+                  <li class="is-done"><span>Collected</span><small class="mono">12:31</small></li>
+                  <li class="is-now"><span>Out for delivery</span><small class="mono">12:38</small></li>
+                  <li><span>Delivered</span></li>
+                </ol>
                 <div class="scr__rider-card"><span class="phone__avatar">AN</span><span><strong>Ahmed Nazim</strong><small>Crossing Sinamalé Bridge</small></span></div>
               </div>
 
               <div class="scr scr--4" data-scr="4">
                 <div class="scr__done"><span class="scr__check"></span></div>
                 <div class="scr__head scr__head--center">Delivered</div>
-                <p class="scr__note">Handed to Ismail Riyaz in the lobby at 12:41</p>
-                <div class="scr__photo"><span data-icon="package"></span></div>
-                <div class="scr__btn scr__btn--ghost">Share with the recipient</div>
+                <p class="scr__note">Handed to Ismail Riyaz at 12:41</p>
+                <div class="scr__receipt">
+                  <div><span>Delivery, 1 bag</span><strong class="mono" data-k="bag-cross">MVR 45</strong></div>
+                  <div><span>Proof photo</span><strong class="scr__ok">On file</strong></div>
+                  <div><span>Pay by</span><strong>Bank transfer</strong></div>
+                </div>
+                <div class="scr__btn scr__btn--ghost">View invoice</div>
               </div>
 
             </div>
           </div>
         </div>
-        <ol class="story__steps">
-          <li class="story__step is-active" data-step="1"><span class="story__num">01</span><h3>Tell us what and where.</h3><p>Choose Pick &amp; Deliver or Shop &amp; Deliver, count your bags, boxes and XL packages, and choose how we deliver: to a door, a boat, Maldivian Cargo or the airport. You see an estimated price range straight away.</p></li>
-          <li class="story__step" data-step="2"><span class="story__num">02</span><h3>We confirm the price.</h3><p>No measuring: add a photo of the package, or our driver photographs it at collection. Our team confirms the exact price, with any cargo or airport fee and any extra vehicle<span data-k="review">, usually in about 30 minutes</span>. Pay after delivery, or upfront if you prefer.</p></li>
-          <li class="story__step" data-step="3"><span class="story__num">03</span><h3>Follow every step.</h3><p>Driver assigned, on the way, collected, out for delivery. Each update is on your tracking page and sent to you by SMS or WhatsApp. No app to install.</p></li>
-          <li class="story__step" data-step="4"><span class="story__num">04</span><h3>See who received it.</h3><p>Every handover is recorded with a photo: who took it, where and when. The invoice is ready on the same page.</p></li>
+        <ol class="story__steps" data-testid="home-how">
+          <li class="story__step is-active" data-step="1"><span class="story__num">01</span><h3>Tell us what and where.</h3><p>Choose the size, the pickup and the drop-off. The price range shows straight away.</p></li>
+          <li class="story__step" data-step="2"><span class="story__num">02</span><h3>We confirm the price.</h3><p>No measuring. Our team checks the package and confirms the price<span data-k="review">, usually in about 30 minutes</span>.</p></li>
+          <li class="story__step" data-step="3"><span class="story__num">03</span><h3>Follow it live.</h3><p>Every step on your tracking page, and by SMS or WhatsApp. No app needed.</p></li>
+          <li class="story__step" data-step="4"><span class="story__num">04</span><h3>Pay when it arrives.</h3><p>A photo records every handover. Pay by bank transfer; the invoice is ready.</p></li>
         </ol>
       </div>
     </div>
   </section>
 
-  <!-- Services: the three service categories, then the delivery methods and the service levels -->
-  <section id="services" class="section-pad section-pad--tint" aria-labelledby="services-title">
+  <!-- Rates (§4: a range per size, filled from settings) -->
+  <section id="rates" class="section" aria-labelledby="rates-title">
     <div class="container">
-      <div class="head head--center" data-reveal>
-        <h2 id="services-title">Three ways we deliver.</h2>
-        <p>One team of drivers for Malé, Hulhumalé, Villimalé and the airport, and the boats to every other island.</p>
-      </div>
-      <div class="bento" data-reveal-group data-testid="home-services">
-        <article class="tile tile--ink tile--wide" data-reveal data-testid="home-service-pick" data-category="pick">
-          <div class="tile__text">
-            <h3 data-cat-label="pick">Pick &amp; Deliver</h3>
-            <p data-cat-hint="pick">We collect from a home, a shop or godown, a post or courier office, or a government office, and deliver it.</p>
-            <p class="tile__price"><span data-testid="home-service-price-pick">From MVR 35</span></p>
-            <a class="btn btn--brand btn--pill" href="./request/?category=pick" data-testid="home-pick-request">Request a pickup</a>
-          </div>
-          <ul class="pick-list" aria-label="What we collect" data-testid="home-pick-types">
-            <li><a href="./request/?type=home" data-testid="home-pick-home"><span class="pick-list__label" data-type-label="home">Home collection</span><span class="pick-list__hint">From a home address and the contact you name</span></a></li>
-            <li><a href="./request/?type=shop_collect" data-testid="home-pick-shop_collect"><span class="pick-list__label" data-type-label="shop_collect">Shop or godown collection</span><span class="pick-list__hint">Items you bought from a shop or warehouse: upload the invoice or quotation and the payment slip</span></a></li>
-            <li><a href="./request/?type=postal" data-testid="home-pick-postal"><span class="pick-list__label" data-type-label="postal">Postal &amp; courier collection</span><span class="pick-list__hint">Redbox, Pikpost, Post Office, DHL, FedEx and other couriers, with the tracking number or code</span></a></li>
-            <li><a href="./request/?type=office" data-testid="home-pick-office"><span class="pick-list__label" data-type-label="office">Administrative services</span><span class="pick-list__hint">Documents and packages from government offices, administrative offices and ministries</span></a></li>
-          </ul>
-        </article>
-        <article class="tile" data-reveal data-testid="home-service-shop" data-category="shop">
-          <h3 data-cat-label="shop">Shop &amp; Deliver</h3>
-          <p>Tell us the shop or supplier and list the items with details, quantities and any special instructions. We buy them and deliver to your address.</p>
-          <div class="receipt" aria-hidden="true">
-            <div><span>Basmati rice 5 kg × 1</span><span class="mono">MVR 58</span></div>
-            <div><span>Fresh milk 1 L × 4</span><span class="mono">MVR 42</span></div>
-            <div><span>Eggs, tray of 30 × 1</span><span class="mono">MVR 36</span></div>
-            <div class="receipt__fee"><span data-testid="home-service-fee-shop">Shopping fee 10%</span><span class="mono">MVR 14</span></div>
-          </div>
-          <p class="tile__price"><span data-testid="home-service-price-shop">From MVR 35</span> <small>delivery, plus the shopping fee, paid upfront</small></p>
-          <a class="tile__link" href="./request/?type=shop_buy" data-testid="home-shop-request">Start a shopping order</a>
-        </article>
-        <article class="tile tile--red" data-reveal data-testid="home-service-business" data-category="business">
-          <h3 data-cat-label="business">Business Delivery</h3>
-          <p>A fixed delivery rate for each package size you agree with us, bulk orders from a form or a spreadsheet, cash on delivery and one monthly invoice.</p>
-          <ul class="tiers" data-testid="home-business-tiers" aria-label="Business starting rates by package size">
-            <li data-tier="small"><span>Small, bag size</span><strong class="mono"><span class="tiers__from">from</span> MVR 25</strong></li>
-            <li data-tier="medium"><span>Medium, box size</span><strong class="mono"><span class="tiers__from">from</span> MVR 35</strong></li>
-            <li data-tier="large"><span>Large, XL size</span><strong class="mono"><span class="tiers__from">from</span> MVR 60</strong></li>
-          </ul>
-          <p class="tiers__note" data-testid="home-business-rates-note">Starting rates. Each business gets its own agreed rates.</p>
-          <p class="tile__sub">Apply with a photo of a typical package. We use it to agree your size categories and rates.</p>
-          <a class="tile__link" href="./business/" data-testid="home-business-request">Request a business account</a>
-        </article>
-      </div>
-      <div class="methods" data-reveal data-testid="home-methods">
-        <h3 class="methods__title">Delivery methods</h3>
-        <div class="methods__grid">
-          <div class="method" data-testid="home-method-home"><h4 data-method-label="home">Home delivery</h4><p>To an address in Malé, Hulhumalé or Villimalé, with the receiver's name and number.</p></div>
-          <div class="method" data-testid="home-method-boat"><h4 data-method-label="boat">Boat, ferry or speedboat</h4><p>Handed to the vessel at the harbour or jetty for another island. The boat, departure time and receiver go on the label.</p></div>
-          <div class="method" data-testid="home-method-cargo"><h4 data-method-label="cargo">Maldivian Cargo</h4><p>Delivered to the Maldivian Cargo counter at the main bus terminal.</p><p class="method__fee">Maldivian Cargo fee <strong class="mono" data-testid="home-method-cargo-fee">MVR 20</strong></p></div>
-          <div class="method" data-testid="home-method-airport"><h4 data-method-label="airport">Airport delivery</h4><p>To a resort counter or meeting point at Velana Airport, with the resort speedboat details.</p><p class="method__fee">Airport fee <strong class="mono" data-testid="home-method-airport-fee">MVR 40</strong></p></div>
-        </div>
-      </div>
-      <div class="levels" data-reveal>
-        <div class="level"><h3>Normal</h3><p>On our regular schedule, usually within 60 to 90 minutes in Malé and Hulhumalé.</p></div>
-        <div class="level"><h3>Express</h3><p>Straight to the front of the queue, confirmed by our team before we set off.</p></div>
-        <div class="level"><h3>Advance order</h3><p>Choose the collection and delivery day and time, days ahead.</p></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Rates (§4: ranges per size) -->
-  <section id="rates" class="section-pad" aria-labelledby="rates-title">
-    <div class="container">
-      <div class="head head--center" data-reveal>
+      <div class="section__head" data-reveal>
         <h2 id="rates-title">Simple rates.</h2>
-        <p>Priced by package size. The lower figure is within one island, the higher one across the bridge. No measuring: choose the size and our team confirms it.</p>
+        <p>Lower within one island, higher across the bridge.</p>
       </div>
       <div class="rates" data-testid="home-rates" data-reveal-group>
         <div class="rate" data-reveal>
           <h3>Bag</h3>
-          <p class="rate__num mono" data-count data-testid="home-rate-bag">MVR 35–45</p>
-          <p class="rate__cross">Within one island to across the bridge</p>
+          <p class="rate__num mono" data-countup data-testid="home-rate-bag">MVR 35–45</p>
           <p class="rate__guide" data-testid="home-guide-bag">Fits in a bag, under about 1 ft (30 cm): documents, food, small parcels</p>
         </div>
         <div class="rate" data-reveal>
           <h3>Box</h3>
-          <p class="rate__num mono" data-count data-testid="home-rate-box">MVR 45–60</p>
-          <p class="rate__cross">Within one island to across the bridge</p>
+          <p class="rate__num mono" data-countup data-testid="home-rate-box">MVR 45–60</p>
           <p class="rate__guide" data-testid="home-guide-box">A box up to about 2 ft (60 cm), strapped on the bike</p>
         </div>
         <div class="rate" data-reveal>
           <h3>XL-size package</h3>
-          <p class="rate__num mono" data-count data-testid="home-rate-xl">MVR 60++</p>
-          <p class="rate__cross">Confirmed by our team before pickup</p>
-          <p class="rate__guide" data-testid="home-guide-xl">Bigger than a box or needs two hands</p>
+          <p class="rate__num mono" data-countup data-testid="home-rate-xl">MVR 60++</p>
+          <p class="rate__guide" data-testid="home-guide-xl">Bigger than a box; our team confirms the price first</p>
         </div>
       </div>
       <ul class="fees" data-testid="home-fees" data-reveal>
-        <li data-testid="home-fee-cargo-pill">Maldivian Cargo fee <strong class="mono" data-testid="home-fee-cargo">MVR 20</strong> <span class="fees__note" data-testid="home-fee-cargo-note">only for Maldivian Cargo deliveries</span></li>
-        <li>Airport fee <strong class="mono" data-testid="home-fee-airport">MVR 40</strong> <span class="fees__note" data-testid="home-fee-airport-note">airport deliveries</span></li>
+        <li data-testid="home-fee-cargo-pill">Maldivian Cargo fee <strong class="mono" data-testid="home-fee-cargo">MVR 20</strong> <span data-testid="home-fee-cargo-note">a package</span></li>
+        <li>Airport fee <strong class="mono" data-testid="home-fee-airport">MVR 40</strong> <span data-testid="home-fee-airport-note"></span></li>
         <li>Shopping fee <strong class="mono" data-testid="home-fee-shopping">10% of the budget</strong></li>
         <li>Business rates <strong class="mono" data-testid="home-fee-business-from">from MVR 25</strong></li>
-        <li>Extra vehicle <strong data-testid="home-fee-vehicle">confirmed first</strong></li>
+        <li>Extra vehicle <strong data-testid="home-fee-vehicle">quoted first</strong></li>
       </ul>
-      <p class="fine" data-testid="home-rates-note" data-reveal>Prices in Maldivian Rufiyaa. Pay by bank transfer to Bank of Maldives or Maldives Islamic Bank.</p>
+      <p class="fine" data-testid="home-rates-note" data-reveal>Prices in Maldivian Rufiyaa. Pay by bank transfer.</p>
     </div>
   </section>
 
-  <!-- Business -->
-  <section id="business" class="section-pad section-pad--flush" aria-labelledby="business-title">
+  <!-- Business strip -->
+  <section id="business" class="section section--flush" aria-labelledby="business-title">
     <div class="container">
-      <div class="biz" data-reveal>
-        <div class="biz__text">
-          <h2 id="business-title">Sending every day?</h2>
-          <p>For shops, online sellers and offices in Malé and Hulhumalé. Apply with a photo of a typical package and we agree a fixed rate for each of your package sizes. Upload a whole day of orders at once, print the labels, collect cash on delivery from your customers, and get one invoice a month, <span data-testid="home-due-days">due in 14 days</span>.</p>
-          <div class="biz__actions"><a class="btn btn--brand btn--lg btn--pill" href="./business/">Request a business account</a><a class="btn btn--secondary btn--lg btn--pill" href="./login/?as=business">Business sign-in</a></div>
-        </div>
-        <div class="biz__num">
-          <p class="biz__big mono"><span class="biz__cur">MVR</span><span data-count data-testid="home-fee-business">25</span></p>
-          <p class="biz__per" data-testid="home-biz-per">per small package; each size has its own rate</p>
+      <div class="biz-scale">
+        <div class="biz" data-reveal>
+          <div class="biz__text">
+            <h2 id="business-title">Sending every day?</h2>
+            <p>Bulk upload, cash on delivery and one invoice a month, <span data-testid="home-due-days">due in 14 days</span>.</p>
+            <div class="biz__actions"><a class="btn btn--brand btn--lg btn--pill" href="./business/">Request an account</a><a class="btn btn--on-dark btn--lg btn--pill" href="./login/?as=business">Business sign-in</a></div>
+          </div>
+          <div class="biz__num">
+            <p class="biz__big mono"><span class="biz__cur">MVR</span><span data-countup data-testid="home-fee-business">25</span></p>
+            <p class="biz__per" data-testid="home-biz-per">per small package</p>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Coverage -->
-  <section id="coverage" class="section-pad" aria-labelledby="coverage-title">
-    <div class="container">
-      <div class="head head--center" data-reveal>
-        <h2 id="coverage-title">Where we deliver.</h2>
-        <p>Everywhere the bridge and the roads reach in Greater Malé, plus the ferry to Villimalé.</p>
+  <!-- Coverage: the four places beside the map -->
+  <section id="coverage" class="section" aria-labelledby="coverage-title">
+    <div class="container split">
+      <div class="split__side">
+        <h2 id="coverage-title" class="split__title" data-reveal>Where we deliver.</h2>
+        <ul class="zones" data-testid="home-coverage-text" data-reveal-group>
+          <li data-reveal><strong>Malé</strong><span>All wards and jetties</span></li>
+          <li data-reveal><strong>Hulhumalé</strong><span>Phase 1 and Phase 2</span></li>
+          <li data-reveal><strong>Velana Airport</strong><span>Resort counters and cargo</span></li>
+          <li data-reveal><strong>Villimalé</strong><span>By ferry, quoted first</span></li>
+        </ul>
       </div>
       <div class="map coverage__map" id="coverage-map" data-testid="home-map" data-reveal="scale">
-        <noscript><div class="map__fallback"><div class="alert alert--warn">Map unavailable without JavaScript. The zones we cover are listed below.</div></div></noscript>
+        <noscript><div class="map__fallback"><div class="alert alert--warn">Map unavailable without JavaScript. We cover Malé, Hulhumalé, Velana Airport and Villimalé.</div></div></noscript>
       </div>
-      <ul class="zones" data-testid="home-coverage-text" data-reveal-group>
-        <li data-reveal><strong>Malé</strong><span>All wards, harbours and jetties</span></li>
-        <li data-reveal><strong>Hulhumalé</strong><span>Phase 1 and Phase 2</span></li>
-        <li data-reveal><strong>Velana Airport</strong><span>Arrivals, cargo, seaplanes</span></li>
-        <li data-reveal><strong>Villimalé</strong><span>By ferry, quoted first</span></li>
-      </ul>
     </div>
   </section>
 
-  <!-- FAQ -->
-  <section id="faq" class="section-pad section-pad--tint" aria-labelledby="faq-title">
-    <div class="container faq">
-      <div class="head head--center" data-reveal>
-        <h2 id="faq-title">Questions.</h2>
-        <p>Anything else, message us on WhatsApp or Viber.</p>
+  <!-- FAQ: the six questions people ask most -->
+  <section id="faq" class="section section--tint" aria-labelledby="faq-title">
+    <div class="container split split--faq">
+      <div class="split__side" data-reveal>
+        <h2 id="faq-title" class="split__title">Questions.</h2>
+        <p class="split__note">Anything else, message us on WhatsApp or Viber.</p>
       </div>
       <div class="faq__list" data-testid="home-faq" data-reveal>
-        <details><summary>How do I pay?</summary><div class="faq__a"><p>By bank transfer to our Bank of Maldives or Maldives Islamic Bank account, after delivery: your invoice is on the tracking page. If you prefer, pay upfront once we confirm the price. Upload a screenshot of the slip and we verify it<span data-k="review">, usually in about 30 minutes</span>.</p></div></details>
-        <details><summary>How long does a delivery take?</summary><div class="faq__a"><p data-testid="home-faq-asap">Usually within 60 to 90 minutes in Malé and Hulhumalé on a normal order. Choose Express to jump the queue (we confirm it first), or an Advance order to book the collection and delivery days ahead.</p></div></details>
-        <details><summary>How is the price worked out?</summary><div class="faq__a"><p data-testid="home-faq-price">By size: bag <span data-k="range-bag">MVR 35–45</span>, box <span data-k="range-box">MVR 45–60</span>, XL-size package <span data-k="range-xl">MVR 60++</span>. Within one island you pay the lower figure; when we cross the Sinamalé Bridge you pay the higher one. Maldivian Cargo deliveries add a cargo fee of <span data-k="fee-cargo">MVR 20</span>, and airport deliveries an airport fee of <span data-k="fee-airport">MVR 40</span>; boat and home deliveries have no extra fee. No measuring: you choose the size and can add a photo, and our team confirms the exact price after checking it, or the driver's photo at collection.</p></div></details>
-        <details><summary>Can you collect my Redbox, Pikpost or post office parcel?</summary><div class="faq__a"><p>Yes. Choose Postal &amp; courier, pick the carrier and add the collection code or tracking number from your SMS. For the post office without a code, send your ID details to the post collections desk and we do the rest. DHL needs the collection document, which you upload with the request.</p></div></details>
-        <details><summary>Do you deliver to the airport and resort counters?</summary><div class="faq__a"><p data-testid="home-faq-airport">Yes. Choose Airport delivery and we hand it to a resort counter or a meeting point at Velana Airport. Add the receiver, the resort or destination, and the resort speedboat and its departure time if there is one. The airport fee of <span data-k="fee-airport">MVR 40</span> is added to the price.</p></div></details>
-        <details><summary>My package is big or heavy. Can you still take it?</summary><div class="faq__a"><p>Yes. Choose XL-size package. With more than one box or more than one XL package you can ask for an extra vehicle; our team confirms the vehicle charge before you pay. If a package does not match the size you chose, our team changes it and you see the new price first.</p></div></details>
-        <details><summary>How does Shop &amp; Deliver work?</summary><div class="faq__a"><p>Tell us the shop or supplier, list each item with its details, quantity and any special instructions, and set a budget. You pay the budget, the shopping fee and the delivery charge upfront; the charges are shown before you send. We show you the receipt; if it comes in under budget we refund the difference, if it is over we ask before paying more.</p></div></details>
-        <details><summary>Can you collect something I already paid for in a shop?</summary><div class="faq__a"><p>Yes. Choose Pick &amp; Deliver, then Shop or godown collection. Give us the shop or godown and upload the invoice or the quotation with your payment slip, and we collect it for you.</p></div></details>
-        <details><summary>Do you go to Villimalé or other islands?</summary><div class="faq__a"><p data-testid="home-faq-islands">Villimalé by ferry. For other islands, choose Boat, ferry or speedboat: we hand the package to the vessel at the harbour or jetty, with the boat name, departure time and receiver on the label. Or choose Maldivian Cargo: we take it to the Maldivian Cargo counter at the main bus terminal, and a cargo fee of <span data-k="fee-cargo">MVR 20</span> applies only to this option.</p></div></details>
-        <details><summary>Do you deliver for businesses?</summary><div class="faq__a"><p data-testid="home-faq-business">Yes. Request a business account with a photo of a typical package; we use it to agree your package size categories and a fixed rate for each. Send orders one at a time or in bulk from a spreadsheet, and we collect cash on delivery from your customers and pay it to you.</p></div></details>
+        <details><summary>How is the price worked out?</summary><div class="faq__a"><p data-testid="home-faq-price">By size: bag <span data-k="range-bag">MVR 35–45</span>, box <span data-k="range-box">MVR 45–60</span>, XL-size package <span data-k="range-xl">MVR 60++</span>. The lower figure is within one island, the higher across the bridge. No measuring: our team confirms the size and the price before you pay.</p></div></details>
+        <details><summary>How do I pay?</summary><div class="faq__a"><p>By bank transfer to Bank of Maldives or Maldives Islamic Bank, after delivery or upfront. Upload the slip and we verify it<span data-k="review">, usually in about 30 minutes</span>.</p></div></details>
+        <details><summary>How long does a delivery take?</summary><div class="faq__a"><p data-testid="home-faq-asap">Usually within 60 to 90 minutes in Malé and Hulhumalé. Express jumps the queue; an advance order books a set day and time.</p></div></details>
+        <details><summary>Do you deliver to the airport and other islands?</summary><div class="faq__a"><p data-testid="home-faq-islands">Yes. We hand it to a resort counter at Velana Airport (<span data-k="fee-airport">MVR 40</span>), to a boat or ferry at the jetty, or to the Maldivian Cargo counter at the main bus terminal (<span data-k="fee-cargo">MVR 20</span>). Villimalé is by ferry.</p></div></details>
+        <details><summary>Can you collect a Redbox, Pikpost or courier parcel?</summary><div class="faq__a"><p>Yes. Choose Postal &amp; courier and add the collection code or tracking number. For DHL, upload the collection document.</p></div></details>
         <details><summary>What don't you carry?</summary><div class="faq__a"><p data-testid="home-terms">We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.</p></div></details>
-        <details><summary>Can I cancel?</summary><div class="faq__a"><p>Yes, until the package is collected: ask from your tracking page and our team confirms it. If you already paid, we refund you.</p></div></details>
       </div>
     </div>
   </section>
@@ -313,13 +292,13 @@
   <section id="contact" class="finale" aria-labelledby="contact-title">
     <div class="container">
       <h2 id="contact-title" class="finale__title" data-split>Send something today.</h2>
-      <p class="finale__lead" data-reveal style="--d:300ms">Request online in a minute, or message us and we will set it up for you.</p>
+      <p class="finale__lead" data-reveal style="--d:300ms">Request online in a minute, or message us.</p>
       <div class="finale__actions" data-testid="home-contact" data-reveal style="--d:420ms">
         <a class="btn btn--brand btn--lg btn--pill" href="./request/">Request a delivery</a>
         <a class="btn btn--secondary btn--lg btn--pill" href="./track/" data-contact="whatsapp">WhatsApp us</a>
         <a class="btn btn--secondary btn--lg btn--pill" href="./track/" data-contact="tel">Call us</a>
       </div>
-      <p class="finale__signin" data-reveal style="--d:520ms">Already with us? <a href="./login/" data-testid="home-signin-customer">Sign in to your orders</a> · <a href="./login/?as=rider">Rider sign-in</a> · <a href="./login/?as=admin">Admin sign-in</a></p>
+      <p class="finale__signin" data-reveal style="--d:520ms">Already with us? <a href="./login/" data-testid="home-signin-customer">Sign in</a></p>
     </div>
   </section>
 

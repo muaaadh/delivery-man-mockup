@@ -1,6 +1,7 @@
 // Home: the three service categories, the delivery methods and the rate ranges (web app updates 11/10/2026 §1, §3, §4) are
-// filled from the shared lists and settings; it also runs the live demo order in the hero phone (real map, rider, ETA), drives the
-// scrubbed hero stage and the pinned "How it works" story, and draws the coverage map. Motion primitives come from js/motion.js.
+// filled from the shared lists and settings; it also runs the live demo order in the hero phone (real map, rider, ETA), the
+// "How it works" phone that follows the step on screen, two scrubbed scenes (hero phone lift, business panel), the header
+// scroll-spy, the phone quick bar and the coverage map. Motion primitives come from js/motion.js.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
   const fmt = n => MDM.pricing.format(n);
@@ -9,15 +10,12 @@
   const setKey = (k, text) => document.querySelectorAll('[data-k="' + k + '"]').forEach(n => { if (text != null) n.textContent = String(text); });
   const DEMO_CODE = 'MDM-1038';
 
-  // Count-up numbers ([data-count]) end on dataset.countFinal, so a settings change mid-animation still lands on the right text.
+  // Count-up numbers ([data-countup]) end on dataset.countFinal, so a settings change mid-animation still lands on the right text.
   const setCount = (testid, text) => { const n = node(testid); if (n && text != null) { n.textContent = String(text); n.dataset.countFinal = String(text); } };
 
   // Service categories (§1), collection types and delivery methods (§3) take their wording from the shared lists.
   function renderLabels() {
-    MDM.SERVICE_CATEGORIES.forEach(c => {
-      document.querySelectorAll('[data-cat-label="' + c.value + '"]').forEach(n => { n.textContent = c.label; });
-      document.querySelectorAll('[data-cat-hint="' + c.value + '"]').forEach(n => { n.textContent = c.hint.replace(/([^.])$/, '$1.'); });
-    });
+    MDM.SERVICE_CATEGORIES.forEach(c => document.querySelectorAll('[data-cat-label="' + c.value + '"]').forEach(n => { n.textContent = c.label; }));
     MDM.REQUEST_TYPES.forEach(t => document.querySelectorAll('[data-type-label="' + t.value + '"]').forEach(n => { n.textContent = t.label; }));
     MDM.DELIVERY_METHODS.forEach(m => document.querySelectorAll('[data-method-label="' + m.value + '"]').forEach(n => { n.textContent = m.label; }));
   }
@@ -53,8 +51,8 @@
     const rules = s.rules || {};
     const cargoEach = rules.cargoFeePer === 'order' ? '' : ' a package', airportEach = rules.airportFeePer === 'package' ? ' a package' : '';
     setText('home-method-cargo-fee', fmt(rates.cargo) + cargoEach); setText('home-method-airport-fee', fmt(rates.airport) + airportEach);
-    setText('home-fee-cargo-note', (cargoEach ? 'a package, ' : '') + 'only for Maldivian Cargo deliveries');
-    setText('home-fee-airport-note', (airportEach ? 'a package, ' : '') + 'airport deliveries');
+    setText('home-fee-cargo-note', cargoEach.trim());
+    setText('home-fee-airport-note', airportEach.trim());
 
     // §4: rates as ranges (Bag MVR 35–45, Box MVR 45–60, XL MVR 60++) straight from settings.rates.sizes.
     ['bag', 'box', 'xl'].forEach(size => { setCount('home-rate-' + size, MDM.pricing.rangeLabel(size, s)); setKey('range-' + size, MDM.pricing.rangeLabel(size, s)); });
@@ -67,9 +65,8 @@
     setText('home-due-days', 'due in ' + (Number(s.invoiceDueDays) || 14) + ' days');
 
     setKey('bag-cross', fmt(bag.cross)); setKey('bag-same', fmt(bag.same)); setKey('bag-cross-num', String(bag.cross));
-    const bank = (s.banks || [])[0]; if (bank) { setKey('bank-name', bank.name); setKey('bank-no', bank.accountNo); }
     setKey('review', ops.reviewText ? ', usually in ' + ops.reviewText : '');
-    if (ops.asapText) setText('home-faq-asap', ops.asapText + ' on a normal order. Choose Express to jump the queue (we confirm it first), or an Advance order to book the collection and delivery days ahead.');
+    if (ops.asapText) setText('home-faq-asap', ops.asapText + '. Express jumps the queue; an advance order books a set day and time.');
     if (s.terms) setText('home-terms', s.terms);
 
     const c = MDM.shell.contactLinks();
@@ -122,17 +119,30 @@
     MDM.live.onPosition(o.driverId, p => { if (!demo.marker) demo.marker = MDM.map.driverMarker(map, p, demo.driver); else demo.marker.moveTo(p, 1000); updateEta(p); });
   }
 
-  // Scrubbed hero: as the page scrolls, the red stage widens to full width and the phone rises through it.
+  // ---- Scrubbed scenes (skipped under reduced motion by MDM.motion.addScene); each writes one custom property, only on change ----
+  // Hero: as the hero scrolls away the phone lifts up to 56px, ahead of the red panel behind it.
   function heroScene() {
-    const stage = document.querySelector('.hero__stage');
-    if (!stage) return;
-    let top = 0;
+    const hero = document.querySelector('.hero'), lift = document.querySelector('.hero__lift');
+    if (!hero || !lift) return;
+    let top = 0, h = 1, last = '';
     MDM.motion.addScene({
-      measure() { top = MDM.motion.pageTop(stage); },
+      measure() { top = MDM.motion.pageTop(hero); h = Math.max(1, hero.offsetHeight); },
+      update(y) {
+        const v = (-56 * MDM.motion.clamp((y - top) / h, 0, 1)).toFixed(1) + 'px';
+        if (v !== last) { lift.style.setProperty('--lift', v); last = v; }
+      },
+    });
+  }
+  // Business strip: the dark panel opens from 94% to full width as it rises into view.
+  function bizScene() {
+    const wrap = document.querySelector('.biz-scale');
+    if (!wrap) return;
+    let top = 0, last = '';
+    MDM.motion.addScene({
+      measure() { top = MDM.motion.pageTop(wrap); },
       update(y, vh) {
-        const p = MDM.motion.clamp((y + vh - top) / (vh * 1.1), 0, 1);
-        stage.style.setProperty('--panel', (0.9 + 0.1 * p).toFixed(4));
-        stage.style.setProperty('--lift', (36 - 80 * p).toFixed(1) + 'px');
+        const v = (0.94 + 0.06 * MDM.motion.clamp((y + vh - top) / (vh * 0.65), 0, 1)).toFixed(4);
+        if (v !== last) { wrap.style.setProperty('--biz', v); last = v; }
       },
     });
   }
@@ -142,7 +152,7 @@
     const phone = document.getElementById('story-phone');
     const steps = Array.from(document.querySelectorAll('.story__step'));
     if (!phone || !steps.length) return;
-    // Phones below 900px get their own small phone per step (the sticky one is hidden there).
+    // Below 900px each step carries its own small phone, in a swipeable row (the sticky phone is hidden there).
     steps.forEach(step => {
       const n = step.dataset.step;
       const src = phone.querySelector('.scr--' + n);
@@ -160,9 +170,37 @@
     if ('IntersectionObserver' in window) {
       const io = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) setStep(e.target.dataset.step); }), { rootMargin: '-50% 0px -50% 0px', threshold: 0 });
       steps.forEach(s => io.observe(s));
-      const miniIo = new IntersectionObserver(entries => entries.forEach(e => e.target.classList.toggle('is-active', e.isIntersecting)), { threshold: 0.4 });
+      const miniIo = new IntersectionObserver(entries => entries.forEach(e => e.target.classList.toggle('is-active', e.isIntersecting)), { threshold: 0.6 });
       document.querySelectorAll('.story__mini').forEach(m => miniIo.observe(m));
     } else document.querySelectorAll('.story__mini').forEach(m => m.classList.add('is-active'));
+  }
+
+  // ---- Navigation helpers -------------------------------------------------------------------------------------------
+  // Scroll-spy: the header link for the section crossing the middle of the screen reads as the current place.
+  function navSpy() {
+    if (!('IntersectionObserver' in window)) return;
+    const sections = Array.from(document.querySelectorAll('main > section[id]'));
+    const mark = id => document.querySelectorAll('.site-nav a[href*="#"]').forEach(a => {
+      const on = a.hash === '#' + id;
+      if (on && a.getAttribute('aria-current') !== 'location') a.setAttribute('aria-current', 'location');
+      else if (!on && a.getAttribute('aria-current') === 'location') a.removeAttribute('aria-current');
+    });
+    const io = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) mark(e.target.id); }), { rootMargin: '-45% 0px -54% 0px', threshold: 0 });
+    sections.forEach(s => io.observe(s));
+  }
+  // Phones: once the hero buttons have scrolled away, a bar keeps "Request a delivery" in thumb reach; it steps aside again at
+  // the closing call to action (and for the footer below it).
+  function quickbar() {
+    const start = document.querySelector('.hero__actions'), end = document.getElementById('contact');
+    if (!start || !end || !('IntersectionObserver' in window)) return;
+    const bar = el('div', { class: 'quickbar', 'data-testid': 'home-quickbar' },
+      el('a', { class: 'btn btn--brand btn--pill', href: MDM.href('request/') }, 'Request a delivery'),
+      el('a', { class: 'btn btn--secondary btn--pill', href: MDM.href('track/') }, 'Track'));
+    document.body.appendChild(bar);
+    let past = false, done = false;
+    const sync = () => bar.classList.toggle('is-on', past && !done);
+    new IntersectionObserver(([e]) => { past = !e.isIntersecting && e.boundingClientRect.top < 0; sync(); }).observe(start);
+    new IntersectionObserver(([e]) => { done = e.isIntersecting || e.boundingClientRect.top < 0; sync(); }).observe(end);
   }
 
   // ---- Coverage map ---------------------------------------------------------------------------------------------------
@@ -170,7 +208,7 @@
     if (box.querySelector('.map__fallback')) return;
     box.appendChild(el('div', { class: 'map__fallback', 'data-testid': 'home-map-fallback' },
       el('div', { class: 'alert alert--warn', role: 'status' }, html(MDM.icon('alert-triangle', 16)),
-        el('div', { class: 'alert__body' }, 'Map unavailable right now. The zones we cover are listed below.'))));
+        el('div', { class: 'alert__body' }, 'Map unavailable right now. We cover Malé, Hulhumalé, Velana Airport and Villimalé.'))));
   }
   async function mountCoverage() {
     const box = document.getElementById('coverage-map');
@@ -189,6 +227,9 @@
     drawIcons();
     story();
     heroScene();
+    bizScene();
+    navSpy();
+    quickbar();
     await MDM.store.ready;
     await render();
     MDM.store.subscribe('settings', () => { render(); });

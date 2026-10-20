@@ -6,9 +6,15 @@ body.page-checkout .checkout-code { font-size: 24px; font-weight: 500; letter-sp
 body.page-checkout .checkout-account { font-size: 17px; font-weight: 500; line-height: 1.3; }
 body.page-checkout .checkout-copy { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 body.page-checkout .checkout-copy--end { justify-content: flex-end; }
-body.page-checkout .checkout-summary { margin-top: 16px; }
+body.page-checkout .checkout-summary { margin-top: 20px; border-color: transparent; background: var(--surface); border-radius: var(--radius-lg); }
+body.page-checkout .checkout-banks { padding: 4px 18px; border-radius: var(--radius-lg); background: var(--surface); }
+body.page-checkout .checkout-banks .rate-table__row + .rate-table__row { border-top-color: var(--border-strong); }
+html[data-theme="dark"] body.page-checkout .checkout-banks .rate-table__row + .rate-table__row { border-top-color: var(--border); }
+body.page-checkout .checkout .section + .section { margin-top: 40px; }
+body.page-checkout .checkout .section-head h2:focus, body.page-checkout .checkout-panel h2:focus { outline: none; }
 body.page-checkout .checkout-ref { font-size: 13px; line-height: 1.4; color: var(--text-2); }
 body.page-checkout .checkout-form .form-actions { margin-top: 8px; }
+body.page-checkout .checkout-panel { border: 0; background: var(--surface); }
 body.page-checkout .checkout-panel .card__body > * + * { margin-top: 16px; }
 body.page-checkout .checkout-panel .checkout-copy { display: flex; }
 body.page-checkout .checkout-panel h3 + .checkout-next { margin-top: 8px; }

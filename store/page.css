@@ -1,35 +1,67 @@
-/* E-store: catalogue grid, cart drawer lines and checkout. Components come from css/base.css. */
+/* E-store: product tiles (icon on a grey stage, name, price, one button), the cart drawer and checkout. Tokens only, so dark mode
+   follows. Components come from css/base.css. */
 body.page-store .btn:not(.btn--sm), body.page-store .input, body.page-store .select, body.page-store .segmented > label, body.page-store .checkbox { min-height: 44px; }
 body.page-store .btn--sm { position: relative; }
 body.page-store .btn--sm::after { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
 body.page-store main { padding-bottom: 64px; }
 
-.store-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-.store-chips .chip { min-height: 36px; }
+/* Cart button in the title row: count in a small red bubble, the total beside it; it bumps when something is added. */
+.store-cartbtn { gap: 8px; }
+.store-cartbtn__count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--red); color: var(--on-red); font-size: 12px; font-weight: 600; }
+.store-cartbtn__total { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.store-cartbtn.is-bump { animation: store-bump .5s var(--ease-out); }
+@keyframes store-bump { 30% { transform: scale(1.06); } }
+
+/* Category chips */
+.store-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+.store-chips { gap: 8px; }
+.store-chips .chip { position: relative; height: 36px; min-height: 36px; cursor: pointer; }
+.store-chips .chip::after { content: ""; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }   /* 44px hit area, 36px chip */
 .store-chips .chip .count { margin-left: 2px; color: inherit; opacity: .6; }
-.store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-.store-card { display: flex; flex-direction: column; overflow: hidden; }
-.store-card__art { height: 132px; display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--text); border-bottom: 1px solid var(--border); }
-.store-card__art .icon { width: 44px; height: 44px; stroke-width: 1.5; }
+
+/* Tiles */
+.store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; }
+.store-card { display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--card); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--border); transition: box-shadow .35s var(--ease-out), translate .35s var(--ease-out); }
+/* The hover lift uses `translate`, so it never fights the reveal's `transform`; the reveal keeps its delay, the hover has none. */
+html.motion .store-grid .store-card[data-reveal] { transition: opacity .9s var(--ease-out), transform 1.1s var(--ease-out), box-shadow .35s var(--ease-out), translate .35s var(--ease-out); transition-delay: var(--d, 0ms), var(--d, 0ms), 0s, 0s; }
+.store-card__art { height: 168px; display: flex; align-items: center; justify-content: center; background: var(--surface); color: var(--text); }
+.store-card__art .icon { width: 56px; height: 56px; stroke-width: 1.25; transition: transform .5s var(--ease-out); }
 .store-card.is-out .store-card__art { color: var(--text-3); }
-.store-card__body { flex: 1 1 auto; display: flex; flex-direction: column; padding: 16px; }
-.store-card__cat { font-size: 12px; color: var(--text-3); }
-.store-card__name { margin-top: 2px; font-size: 16px; }
-.store-card__desc { margin-top: 6px; font-size: 14px; line-height: 1.45; color: var(--text-2); flex: 1 1 auto; }
-.store-card__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.store-card__body { flex: 1 1 auto; display: flex; flex-direction: column; padding: 18px 20px 20px; }
+.store-card__cat { font-size: 12px; font-weight: 500; color: var(--text-3); }
+.store-card__name { margin-top: 4px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.3; }
+.store-card__desc { margin-top: 6px; font-size: 14px; line-height: 1.45; color: var(--text-2); flex: 1 1 auto; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.store-card__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 18px; }
 .store-card__pricebox { min-width: 0; }
 .store-card__price { font-size: 17px; font-weight: 600; white-space: nowrap; }
-.store-card__unit { font-size: 13px; font-weight: 400; color: var(--text-2); }
+.store-card__action { flex: none; }
+.store-card__add { height: 36px; padding: 0 16px; }
 .store-stock { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
 .store-stock--low { color: var(--warn); font-weight: 500; }
 .store-stock--out { color: var(--danger); font-weight: 500; }
+@media (hover: hover) {
+  .store-card:hover { box-shadow: var(--shadow), inset 0 0 0 1px var(--border); translate: 0 -3px; }
+  .store-card:hover .store-card__art .icon { transform: scale(1.06); }
+}
+html[data-theme="dark"] .store-card { box-shadow: inset 0 0 0 1px var(--border); }
 
 .qty { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .qty__value { min-width: 24px; text-align: center; font-weight: 600; font-size: 15px; }
-.store-lines .list__item { align-items: flex-start; }
+
+/* Cart drawer: a small icon per line, the stepper and line total on the right. */
+.store-lines .list__item { align-items: center; padding: 16px 0; }
+.store-line__art { flex: none; width: 48px; height: 48px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; background: var(--surface); color: var(--text); }
 .store-line__aside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none; }
 .store-drawer-foot { width: 100%; justify-content: space-between; }
-.store-how { margin-top: 56px; }
+.store-cart-empty { padding-top: 40px; }
+
+/* How it works: three short steps in a row. */
+.store-how { margin-top: 80px; }
+.store-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.store-step { padding: 20px; border-radius: var(--radius-lg); background: var(--surface); }
+.store-step__num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; }
+.store-step__title { margin-top: 14px; font-size: 17px; font-weight: 600; }
+.store-step__text { margin-top: 4px; font-size: 14px; line-height: 1.45; color: var(--text-2); }
 
 .store-checkout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 40px; align-items: start; }
 .store-form { max-width: none; }
@@ -42,22 +74,21 @@ body.page-store main { padding-bottom: 64px; }
 }
 @media (max-width: 720px) {
   .store-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
-  .store-card__art { height: 96px; }
-  .store-card__body { padding: 12px; }
+  .store-card__art { height: 112px; }
+  .store-card__art .icon { width: 44px; height: 44px; }
+  .store-card__body { padding: 12px 14px 14px; }
+  .store-card__name { font-size: 15px; }
   .store-card__desc { display: none; }
-  .store-card__foot { flex-direction: column; align-items: stretch; gap: 10px; }
-  .store-card__foot .btn { width: 100%; }
-  .store-card__foot .qty { justify-content: space-between; }
+  .store-card__foot { flex-direction: column; align-items: stretch; gap: 10px; margin-top: 12px; }
+  .store-card__action, .store-card__add { width: 100%; }
+  .store-card__foot .qty { width: 100%; justify-content: space-between; }
+  .store-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: -4px calc(var(--gutter) * -1); padding: 4px var(--gutter); }   /* the 4px keeps the chips' hit area inside the scroller */
+  .store-chips::-webkit-scrollbar { display: none; }
+  .store-chips .chip { flex: none; }
+  .store-bar { display: block; }
+  .store-how { margin-top: 56px; }
+  .store-steps { grid-template-columns: 1fr; gap: 12px; }
+  .store-cartbtn__total { display: none; }
 }
 @media (max-width: 360px) { .store-grid { grid-template-columns: 1fr; } }
-
-/* Same page-title band and entrance as the other public inner pages (css/base.css scopes those rules to their body classes). */
-body.page-store main .page-head { padding-bottom: 32px; margin-bottom: 36px; background: var(--band); box-shadow: 0 0 0 100vmax var(--band); clip-path: inset(0 -100vmax); }
-body.page-store main .page-head h1 { font-size: 36px; font-weight: 700; letter-spacing: -.025em; }
-body.page-store main .page-head > * { animation: rise-in .8s var(--ease-out) both; }
-body.page-store main .page-head > * + * { animation-delay: .08s; }
-@media (max-width: 720px) {
-  body.page-store main .page-head { padding-bottom: 24px; margin-bottom: 28px; }
-  body.page-store main .page-head h1 { font-size: 28px; }
-}
-@media (prefers-reduced-motion: reduce) { body.page-store main .page-head > * { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .store-cartbtn.is-bump { animation: none; } }
