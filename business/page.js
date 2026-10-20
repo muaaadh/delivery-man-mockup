@@ -228,13 +228,15 @@
     const form = el('form', { class: 'form biz-signin__form', novalidate: true, on: { submit: async e => {
       e.preventDefault();
       if (!MDM.ui.phone.valid(phone.value)) { setError(phone, 'Enter the 7-digit mobile number on your account'); phone.focus(); return; }
+      // Live service: business sign-in is a real SMS code on the sign-in page; visitors cannot look accounts up from here.
+      if (MDM.auth) { location.href = MDM.href('login/?as=business&phone=' + encodeURIComponent(phone.value)); return; }
       const n = MDM.ui.phone.normalize(phone.value);
       const acc = (await MDM.store.list('business_accounts')).find(a => a.phone === n);
       if (!acc) { setError(phone, 'No business account uses this number. Request one below.'); phone.focus(); return; }
       if (acc.status !== 'approved') { setError(phone, 'This account is not active yet. We will call you.'); return; }
       st.phone = phone.value; st.step = 2; renderPublicSignin();
     } } },
-      field('phone', 'Account mobile number', phone, { hint: 'Demo: 780 1122 or 763 3221' }),
+      field('phone', 'Account mobile number', phone, { hint: MDM.auth ? null : 'Demo: 780 1122 or 763 3221' }),
       el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-signin-continue' }, 'Send code'));
     body.append(title, form);
     return box;

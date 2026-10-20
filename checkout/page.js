@@ -249,7 +249,7 @@
     return el('section', { class: 'section', 'aria-labelledby': 'co-bank' },
       el('div', { class: 'section-head' }, el('h2', { id: 'co-bank' }, 'Our bank accounts')),
       el('div', { class: 'stack-4' },
-        notice('info', 'info', 'Demo bank details, replace before launch.'),
+        MDM.store._live ? null : notice('info', 'info', 'Demo bank details, replace before launch.'),
         el('div', { class: 'rate-table checkout-banks' }, banks.map(b => row(b.name, el('span', { class: 'checkout-copy checkout-copy--end' },
           el('span', { class: 'checkout-account mono' }, b.accountNo), copyButton(b.accountNo, 'checkout-copy-account', 'account number')), { sub: 'Account name: ' + b.accountName }))),
         el('p', { class: 'checkout-ref' }, 'Use the order code ', el('span', { class: 'mono' }, order.code), ' as the transfer reference.')));

@@ -775,6 +775,7 @@
     const radio = ui.online.querySelector('input[value="' + (state.online ? 'online' : 'offline') + '"]');
     if (radio) radio.checked = true;
     ui.simulate.disabled = !has || !state.online;
+    ui.simulate.hidden = !!MDM.store._live;   // route simulation is a demo tool
     ui.simulate.textContent = state.sim ? 'Stop simulation' : 'Simulate route';
     ui.gps.disabled = !has || !state.online || !window.isSecureContext;
     ui.gps.textContent = state.gpsOn ? 'Stop GPS' : 'Use my GPS';
@@ -800,9 +801,10 @@
   function hideGpsAlert() { ui.gpsAlert.hidden = true; ui.gpsAlert.replaceChildren(); }
   function showGpsError(err) {
     const code = err && err.code;
-    const msg = code === 1 ? 'Location permission is off. Allow location for this site in your browser settings, or use Simulate route for the demo.'
+    const sim = MDM.store._live ? '' : ', or use Simulate route for the demo';
+    const msg = code === 1 ? 'Location permission is off. Allow location for this site in your browser settings' + sim + '.'
       : code === 'insecure' ? 'Location sharing needs an https address (it works on the published site).'
-      : code === 'unsupported' ? 'This browser cannot share location. Use Simulate route for the demo.'
+      : code === 'unsupported' ? 'This browser cannot share location' + (sim ? '. Use Simulate route for the demo.' : '.')
       : 'Could not get a location fix. Try again outdoors.';
     ui.gpsAlert.replaceChildren(el('div', { class: 'alert alert--danger', role: 'alert' }, icon('info', 16), el('div', { class: 'alert__body' }, msg)));
     ui.gpsAlert.hidden = false;

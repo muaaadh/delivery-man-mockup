@@ -105,11 +105,41 @@
       setText('home-phone-vehicle', ({ bike: 'Bike', car: 'Car', pickup: 'Pickup' }[demo.driver.vehicle] || 'Bike') + (demo.driver.vehicleNote ? ' · ' + demo.driver.vehicleNote : ''));
     }
   }
+  // With no moving order to show (the live service has no demo data), the phone plays an example trip of its own: a real street
+  // route from central Malé over the bridge to Hulhumalé Phase 1, the rider riding its middle stretch on a slow loop, so the hero
+  // never shows an empty map or "--:--". The rider, code and status keep the markup's example values.
+  function exampleTrip() {
+    const a = Object.assign({ zone: 'male' }, MDM.geo.geocodeZone('male', 'home-example-from'));
+    const b = Object.assign({ zone: 'hulhumale_p1' }, MDM.geo.geocodeZone('hulhumale_p1', 'home-example-to'));
+    const line = MDM.geo.routeBetween(a, b);
+    if (!Array.isArray(line) || line.length < 2) return null;
+    return { polyline: line, stops: [{ type: 'pickup', lat: a.lat, lng: a.lng, status: 'done', label: '' }, { type: 'dropoff', lat: b.lat, lng: b.lng, label: '' }] };
+  }
+  function playExample(map, trip) {
+    const km = MDM.geo.distanceKm(trip.polyline), LAP = 60000, FROM = .3, TO = .85, t0 = Date.now();
+    const at = () => MDM.geo.pointAt(trip.polyline, FROM + (TO - FROM) * (((Date.now() - t0) % LAP) / LAP));
+    const eta = p => setText('home-phone-eta', hhmm(new Date(Date.now() + MDM.geo.etaMinutes(MDM.geo.remainingKm(trip.polyline, p), true, demo.settings) * 60000)));
+    let p = at();
+    const marker = MDM.map.driverMarker(map, p, { name: 'Ahmed Nazim', vehicle: 'bike' });
+    eta(p);
+    setInterval(() => { const n = at(); marker.moveTo(n, n.index < p.index ? 0 : 1000); p = n; eta(p); }, 1000);
+    return km;
+  }
   async function mountHeroMap() {
     const box = document.getElementById('hero-map');
-    if (!box || !demo.order || !MDM.map.available()) return;
+    if (!box || !MDM.map.available()) return;
+    const trip = demo.order ? null : exampleTrip();
+    if (!demo.order && !trip) return;
     let map;
     try { map = await MDM.map.create(box, { interactive: false, zoom: 12.5 }); } catch (e) { return; }
+    if (trip) {
+      MDM.map.route(map, 'demo-route', trip.polyline, {});
+      MDM.map.stopMarkers(map, trip.stops);
+      MDM.map.fit(map, trip.polyline, { padding: { top: 28, right: 28, bottom: 44, left: 28 }, maxZoom: 15 });
+      playExample(map, trip);
+      const cap = document.querySelector('.hero__caption'); if (cap) cap.lastChild.textContent = 'Example trip';
+      return;
+    }
     const o = demo.order;
     MDM.map.route(map, 'demo-route', o.route.polyline, {});
     MDM.map.stopMarkers(map, (o.route.stops || []).map(s => Object.assign({}, s, { label: '' })));

@@ -1020,7 +1020,7 @@
           el('div', { class: 'grid-3' }, field('First slot', input('slotStart', ops.slotStart, { placeholder: '09:00' })), field('Last slot', input('slotEnd', ops.slotEnd, { placeholder: '23:00' })), field('Slot length, minutes', numInput('slotMinutes', ops.slotMinutes))),
           el('div', { class: 'grid-3' }, field('City speed, km/h', numInput('speedCityKmh', ops.speedCityKmh)), field('Bridge speed, km/h', numInput('speedHighwayKmh', ops.speedHighwayKmh)), field('Peak buffer, minutes', numInput('peakBufferMin', ops.peakBufferMin))),
           field('Peak windows', input('peakWindows', (ops.peakWindows || []).join(', ')), { hint: '24 h, comma separated: 08:00-09:30' }),
-          field('Closed windows', input('closedWindows', (ops.closedWindows || []).join(', ')), { hint: 'Optional day first: Fri 12:00-13:30' })], 'Demo defaults'),
+          field('Closed windows', input('closedWindows', (ops.closedWindows || []).join(', ')), { hint: 'Optional day first: Fri 12:00-13:30' })], MDM.store._live ? null : 'Demo defaults'),
         formSection('rates-banks', 'Bank accounts', 'On checkout and invoices. The reference is the order or invoice number.', banks.map((b, i) => el('div', { class: 'grid-3' },
           field('Bank ' + (i + 1), input('banks.' + i + '.name', b.name)), field('Account name', input('banks.' + i + '.accountName', b.accountName)), field('Account number', input('banks.' + i + '.accountNo', b.accountNo, { class: 'input mono', inputmode: 'numeric' }))))),
         formSection('rates-terms', 'Terms and invoicing', null, [
