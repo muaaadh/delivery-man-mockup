@@ -417,6 +417,7 @@
         else if (f.type === 'number' && v != null && f.min != null && v < Number(f.min)) msg = 'Enter at least ' + f.min;
         else if (f.type === 'number' && v != null && f.max != null && v > Number(f.max)) msg = 'Enter at most ' + f.max;
         else if (f.type === 'tel' && v && !phone.valid(v, { landline: !!f.landline, intl: !!f.intl })) msg = f.invalidMessage || 'Enter a valid Maldivian mobile number';
+        else if (f.type === 'email' && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v).trim())) msg = 'Enter a valid email address';
         else if (typeof f.validate === 'function') msg = f.validate(v, values) || null;
         if (msg) fail(f.name, msg);
       });

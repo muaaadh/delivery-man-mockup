@@ -507,12 +507,14 @@
       ];
       body.replaceChildren(table(cols, drivers.map(d => ({ data: d, attrs: { 'data-testid': 'drivers-row', 'data-driver-id': d.id, 'data-status': d.status } })), { testid: 'drivers-table' }));
     }
-    function riderFields(d, zones) {
+    // email: the staff record's, which the live service signs drivers in with (a code by email until SMS is connected).
+    function riderFields(d, zones, email) {
       d = d || {};
       const mine = z => (z.driverIds || []).indexOf(d.id) >= 0 || (d.zones || []).indexOf(z.key) >= 0;
       return [
         { name: 'name', label: 'Name', type: 'text', required: true, value: d.name || '', autocomplete: 'off' },
         { name: 'phone', label: 'Mobile number', type: 'tel', required: true, value: d.phone ? phone.format(d.phone) : '', placeholder: '7XX XXXX' },
+        { name: 'email', label: 'Email', type: 'email', value: email || '', placeholder: 'For signing in', autocomplete: 'off' },
         { name: 'vehicle', label: 'Vehicle', type: 'select', required: true, value: d.vehicle || 'bike', options: VEHICLE_OPTIONS },
         { name: 'vehicleNote', label: 'Vehicle note', type: 'text', value: d.vehicleNote || '', placeholder: 'Honda Wave' },
       ].concat(zones.map(z => ({ name: 'zone_' + z.key, label: 'Covers ' + z.name, type: 'checkbox', value: d.id ? mine(z) : false })));
@@ -527,11 +529,11 @@
     }
     async function addRider() {
       const zones = await MDM.store.list('zones', { order: 'createdAt' });
-      const v = await MDM.ui.dialog({ title: 'Add driver', message: 'They sign in with this mobile number.', fields: riderFields(null, zones), okLabel: 'Add driver' });
+      const v = await MDM.ui.dialog({ title: 'Add driver', message: MDM.auth ? 'They sign in with this email.' : 'They sign in with this mobile number.', fields: riderFields(null, zones), okLabel: 'Add driver' });
       if (!v) return;
       try {
         const ph = phone.normalize(v.phone);
-        const staff = await MDM.store.insert('staff', { name: v.name, role: 'driver', title: v.vehicle === 'pickup' ? 'Driver (pickup truck)' : 'Rider', phone: ph, username: ph, status: 'active', joinedAt: MDM.ui.dayKey(new Date()), leaveBalance: { annual: 30, sick: 30 } });
+        const staff = await MDM.store.insert('staff', { name: v.name, role: 'driver', title: v.vehicle === 'pickup' ? 'Driver (pickup truck)' : 'Rider', phone: ph, email: String(v.email || '').trim().toLowerCase(), username: ph, status: 'active', joinedAt: MDM.ui.dayKey(new Date()), leaveBalance: { annual: 30, sick: 30 } });
         const d = await MDM.store.insert('drivers', { name: v.name, phone: ph, vehicle: v.vehicle, vehicleNote: v.vehicleNote || '', status: 'offline', staffId: staff.id, zones: [] });
         await MDM.store.update('staff', staff.id, { driverId: d.id });
         await saveZones(d.id, v, zones);
@@ -540,11 +542,12 @@
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function editRider(d, zones) {
-      const v = await MDM.ui.dialog({ title: 'Edit driver', fields: riderFields(d, zones), okLabel: 'Save driver' });
+      const st = d.staffId ? await MDM.store.get('staff', d.staffId) : null;
+      const v = await MDM.ui.dialog({ title: 'Edit driver', fields: riderFields(d, zones, st && st.email), okLabel: 'Save driver' });
       if (!v) return;
       try {
         await MDM.store.update('drivers', d.id, { name: v.name, phone: phone.normalize(v.phone), vehicle: v.vehicle, vehicleNote: v.vehicleNote || '' });
-        if (d.staffId) await MDM.store.update('staff', d.staffId, { name: v.name, phone: phone.normalize(v.phone) });
+        if (d.staffId) await MDM.store.update('staff', d.staffId, { name: v.name, phone: phone.normalize(v.phone), email: String(v.email || '').trim().toLowerCase() });
         await saveZones(d.id, v, zones);
         toast('Driver updated');
       } catch (e) { toast(storeMessage(e), 'danger'); }

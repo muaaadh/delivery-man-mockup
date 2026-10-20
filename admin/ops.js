@@ -646,11 +646,12 @@
           { name: 'role', label: 'Role', type: 'select', options: MDM.ROLES, value: s ? s.role : 'operator', hint: 'Sets which pages they can open' },
           { name: 'title', label: 'Job title', type: 'text', value: s ? s.title : '' },
           { name: 'phone', label: 'Mobile number', type: 'tel', required: true, value: s ? phone.format(s.phone) : '' },
+          { name: 'email', label: 'Email', type: 'email', value: s ? s.email || '' : '', hint: 'Drivers sign in with it on the live service' },
           { name: 'username', label: 'Username', type: 'text', value: s ? s.username : '', hint: 'Drivers use their mobile number' },
           { name: 'status', label: 'Status', type: 'select', options: [{ value: 'active', label: 'Active' }, { value: 'on_leave', label: 'On leave' }, { value: 'inactive', label: 'Inactive' }], value: s ? s.status : 'active' }] });
       if (!v) return;
       const ph = phone.normalize(v.phone);
-      const patch = { name: v.name, role: v.role, title: v.title, phone: ph, username: v.role === 'driver' ? ph : (trim(v.username) || norm(v.name).slice(0, 12)), status: v.status };
+      const patch = { name: v.name, role: v.role, title: v.title, phone: ph, email: String(v.email || '').trim().toLowerCase(), username: v.role === 'driver' ? ph : (trim(v.username) || norm(v.name).slice(0, 12)), status: v.status };
       let saved;
       if (s) saved = await MDM.store.update('staff', s.id, patch);
       else saved = await MDM.store.insert('staff', Object.assign({ joinedAt: dayKey(new Date()), leaveBalance: { annual: Number(hr.annualLeaveDays) || 30, sick: Number(hr.sickLeaveDays) || 30 } }, patch));
