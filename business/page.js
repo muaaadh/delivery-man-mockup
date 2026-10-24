@@ -231,7 +231,6 @@
       e.preventDefault();
       if (!MDM.ui.phone.valid(phone.value)) { setError(phone, 'Enter the 7-digit mobile number on your account'); phone.focus(); return; }
       // Live service: business sign-in is a real SMS code on the sign-in page; visitors cannot look accounts up from here.
-      if (MDM.auth) { location.href = MDM.href('login/?as=business&phone=' + encodeURIComponent(phone.value)); return; }
       const n = MDM.ui.phone.normalize(phone.value);
       const acc = (await MDM.store.list('business_accounts')).find(a => a.phone === n);
       if (!acc) { setError(phone, 'No business account uses this number. Request one below.'); phone.focus(); return; }
