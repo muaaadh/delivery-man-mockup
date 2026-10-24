@@ -1,17 +1,18 @@
-// Home: the three service categories, the delivery methods and the rate ranges (web app updates 11/10/2026 §1, §3, §4) are
-// filled from the shared lists and settings; it also runs the live demo order in the hero phone (real map, rider, ETA), the
-// "How it works" phone that follows the step on screen, two scrubbed scenes (hero phone lift, business panel), the header
-// scroll-spy, the phone quick bar and the coverage map. Motion primitives come from js/motion.js.
+// Home: the three service categories and the delivery methods take their wording from the shared lists (web app updates
+// 11/10/2026 §1, §3); the shopping fee, the review and delivery times, the terms and the contact links come from settings. No
+// delivery rates on this page (client, 24 Oct 2026): they show when an order is placed. It also plays the drawn delivery in the
+// hero phone, runs the "How it works" phone that follows the step on screen, two scrubbed scenes (hero phone lift, business
+// panel), the header scroll-spy, the phone quick bar and the coverage map (MapLibre loads only when the map is near). Motion
+// primitives come from js/motion.js.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
   const fmt = n => MDM.pricing.format(n);
   const node = testid => document.querySelector('[data-testid="' + testid + '"]');
   const setText = (testid, text) => { const n = node(testid); if (n && text != null) n.textContent = String(text); };
   const setKey = (k, text) => document.querySelectorAll('[data-k="' + k + '"]').forEach(n => { if (text != null) n.textContent = String(text); });
-  const DEMO_CODE = 'MDM-1038';
-
-  // Count-up numbers ([data-countup]) end on dataset.countFinal, so a settings change mid-animation still lands on the right text.
-  const setCount = (testid, text) => { const n = node(testid); if (n && text != null) { n.textContent = String(text); n.dataset.countFinal = String(text); } };
+  const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  // The Shop & Deliver example (client, 24 Oct): MVR 450 + 2,500 + 1,500 of shopping; the fee is the settings percentage of it.
+  const SHOP_EXAMPLE = 4450;
 
   // Service categories (§1), collection types and delivery methods (§3) take their wording from the shared lists.
   function renderLabels() {
@@ -19,134 +20,113 @@
     MDM.REQUEST_TYPES.forEach(t => document.querySelectorAll('[data-type-label="' + t.value + '"]').forEach(n => { n.textContent = t.label; }));
     MDM.DELIVERY_METHODS.forEach(m => document.querySelectorAll('[data-method-label="' + m.value + '"]').forEach(n => { n.textContent = m.label; }));
   }
-  // Business size categories (§1.3) with their starting rates, smallest first; each business then agrees its own rates.
-  function renderTiers(s) {
-    const list = node('home-business-tiers');
-    const tiers = MDM.pricing.businessTiers(s);
-    if (list) list.replaceChildren(...tiers.map(t => el('li', { 'data-tier': t.value }, el('span', null, t.label + ', ' + (t.size === 'xl' ? 'XL' : MDM.pricing.sizeLabel(t.size).toLowerCase()) + ' size'),
-      el('strong', { class: 'mono' }, el('span', { class: 'tiers__from' }, 'from'), ' ' + fmt(t.rate)))));
-    return tiers.reduce((m, t) => Math.min(m, Number(t.rate) || Infinity), Infinity);
+  function setHours(line) {
+    setText('home-hours', line);
+    const status = node('home-hours'); if (status) status.parentElement.dataset.open = String(/^Open/.test(line));
   }
 
   async function render() {
     const s = await MDM.store.settings();
-    const rates = s.rates || {}, sizes = rates.sizes || {}, guide = s.sizeGuide || {}, ops = s.ops || {};
+    const rates = s.rates || {}, ops = s.ops || {};
     const pct = Math.round(Number(rates.shoppingPct) || 0);
-    const bag = sizes.bag || {};
 
-    const hours = MDM.shell.hoursLine(s);
-    setText('home-hours', hours);
-    const status = node('home-hours'); if (status) status.parentElement.dataset.open = String(/^Open/.test(hours));
-
+    setHours(MDM.shell.hoursLine(s));
     renderLabels();
-    const bizFrom = renderTiers(s);
-    const bizMin = isFinite(bizFrom) ? bizFrom : Math.round(Number(rates.business) || 0);
-
-    setText('home-hero-from', fmt(bag.same));
-    setText('home-service-price-pick', 'From ' + fmt(bag.same));
-    setText('home-service-price-shop', 'From ' + fmt(bag.same));
     setText('home-service-fee-shop', 'Shopping fee ' + pct + '%');
-    const fee = document.querySelector('.receipt__fee .mono'); if (fee) fee.textContent = fmt(Math.round(136 * pct / 100));
-    // The cargo fee is per package unless rules.cargoFeePer is 'order' (and the airport fee per order unless airportFeePer is 'package').
-    const rules = s.rules || {};
-    const cargoEach = rules.cargoFeePer === 'order' ? '' : ' a package', airportEach = rules.airportFeePer === 'package' ? ' a package' : '';
-    setText('home-method-cargo-fee', fmt(rates.cargo) + cargoEach); setText('home-method-airport-fee', fmt(rates.airport) + airportEach);
-    setText('home-fee-cargo-note', cargoEach.trim());
-    setText('home-fee-airport-note', airportEach.trim());
-
-    // §4: rates as ranges (Bag MVR 35–45, Box MVR 45–60, XL MVR 60++) straight from settings.rates.sizes.
-    ['bag', 'box', 'xl'].forEach(size => { setCount('home-rate-' + size, MDM.pricing.rangeLabel(size, s)); setKey('range-' + size, MDM.pricing.rangeLabel(size, s)); });
-    setText('home-guide-bag', guide.bag); setText('home-guide-box', guide.box);
-    setText('home-fee-shopping', pct + '% of the budget');
-    setText('home-fee-cargo', fmt(rates.cargo)); setText('home-fee-airport', fmt(rates.airport));
-    setKey('fee-cargo', fmt(rates.cargo) + cargoEach); setKey('fee-airport', fmt(rates.airport) + airportEach);
-    setText('home-fee-business-from', 'from ' + fmt(bizMin));
-    setCount('home-fee-business', String(bizMin));
-    setText('home-due-days', 'due in ' + (Number(s.invoiceDueDays) || 14) + ' days');
-
-    setKey('bag-cross', fmt(bag.cross)); setKey('bag-same', fmt(bag.same)); setKey('bag-cross-num', String(bag.cross));
+    setText('home-service-fee-amount', fmt(Math.round(SHOP_EXAMPLE * pct / 100)));
     setKey('review', ops.reviewText ? ', usually in ' + ops.reviewText : '');
     if (ops.asapText) setText('home-faq-asap', ops.asapText + '. Express jumps the queue; an advance order books a set day and time.');
     if (s.terms) setText('home-terms', s.terms);
 
+    // Closing call to action: WhatsApp, Viber and the phone from settings.contact; a channel without a number is hidden.
     const c = MDM.shell.contactLinks();
-    const wa = document.querySelector('[data-contact="whatsapp"]'), tel = document.querySelector('[data-contact="tel"]');
-    if (wa) { if (c.whatsapp) { wa.href = c.whatsapp; wa.target = '_blank'; wa.rel = 'noopener'; } else wa.hidden = true; }
-    if (tel) { if (c.tel) { tel.href = c.tel; tel.textContent = 'Call ' + c.display; } else tel.hidden = true; }
+    const link = (key, href, external) => {
+      const a = document.querySelector('[data-contact="' + key + '"]');
+      if (!a) return null;
+      a.hidden = !href;
+      if (href) { a.href = href; if (external) { a.target = '_blank'; a.rel = 'noopener'; } }
+      return a;
+    };
+    link('whatsapp', c.whatsapp, true);
+    link('viber', c.viber, false);
+    const tel = link('tel', c.tel, false);
+    if (tel && c.tel) { tel.setAttribute('aria-label', 'Call ' + c.display); const num = tel.querySelector('.finale__num'); if (num) num.textContent = ' ' + c.display; }
   }
 
-  function drawIcons(scope) {
-    (scope || document).querySelectorAll('[data-icon]').forEach(n => { if (!n.firstChild) n.innerHTML = MDM.icon(n.dataset.icon, 24); });
+  // Icons on this page are drawn once into their [data-icon] holders.
+  function drawIcons() {
+    document.querySelectorAll('[data-icon]').forEach(n => { if (!n.firstChild) n.innerHTML = MDM.icon(n.dataset.icon, 24); });
   }
 
-  // ---- Hero: the live demo order inside the phone --------------------------------------------------------------------
-  const demo = { order: null, driver: null, marker: null, cross: false, settings: null };
-  const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-  function updateEta(pos) {
-    if (!demo.order || !pos) return;
-    const km = MDM.geo.remainingKm(demo.order.route.polyline, pos);
-    setText('home-phone-eta', hhmm(new Date(Date.now() + MDM.geo.etaMinutes(km, demo.cross, demo.settings) * 60000)));
-  }
-  async function loadDemo() {
-    let order = await MDM.store.orderByCode(DEMO_CODE);
-    if (!order || !order.driverId || !(order.route && (order.route.polyline || []).length)) {
-      order = (await MDM.store.list('orders', { where: { status: ['out_for_delivery', 'collected', 'on_the_way', 'arrived', 'dispatched'] } })).find(o => o.driverId && o.route && (o.route.polyline || []).length) || null;
+  // ---- Hero: a drawn delivery on a calm loop -------------------------------------------------------------------------------
+  // The phone plays the same trip on the demo and on the live site (no map, no order data): the red route draws itself from the
+  // pickup, the rider rides it to the jetty, and the status pill, the arrival time and the progress bars follow in step:
+  // Collected, On the way, Delivered. Then it fades and starts again. It pauses while off screen or in a background tab; reduced
+  // motion shows one still frame with the rider on the way.
+  const TRIP = { LOOP: 12500, IN: 400, DRAW: [200, 1600], RIDE: [1900, 9100], FADE: [11600, 12300], MINUTES: 12, STILL: 0.6 };
+  const STATES = { collected: 'Collected', way: 'On the way', done: 'Delivered' };
+  const ORDER = ['collected', 'way', 'done'];
+  const easeOut = x => 1 - Math.pow(1 - x, 3);
+  const easeInOut = x => x * x * (3 - 2 * x);
+  const span = (t, [a, b]) => MDM.motion.clamp((t - a) / (b - a), 0, 1);
+
+  function heroTrip() {
+    const phone = node('home-phone');
+    const svg = phone && phone.querySelector('.trip');
+    const route = svg && svg.querySelector('.trip__route');
+    if (!route || typeof route.getTotalLength !== 'function') return;
+    const rider = svg.querySelector('.trip__rider'), fx = svg.querySelector('.trip__fx');
+    const pill = node('home-phone-status'), eta = node('home-phone-eta'), etaLabel = node('home-phone-eta-label');
+    const steps = Array.from(phone.querySelectorAll('.phone__steps li')), fills = steps.map(li => li.querySelector('.phone__fill'));
+    const len = route.getTotalLength();
+    route.style.strokeDasharray = len.toFixed(1);
+    const last = {};
+    const put = (key, value, apply) => { if (last[key] !== value) { last[key] = value; apply(value); } };
+
+    // One frame of the story: state, how much of the route is drawn, where the rider is (0 to 1) and the overlay opacity.
+    function paint(state, drawn, p, shown) {
+      put('state', state, st => {
+        const at = ORDER.indexOf(st);
+        pill.dataset.state = st; pill.textContent = STATES[st];
+        steps.forEach((li, i) => { li.classList.toggle('is-done', i < at || st === 'done'); li.classList.toggle('is-current', i === at && st !== 'done'); });
+        svg.classList.toggle('is-done', st === 'done');
+        etaLabel.textContent = st === 'done' ? 'Delivered at' : 'Arriving in';
+        if (st === 'done') eta.textContent = hhmm(new Date());
+      });
+      if (state !== 'done') put('eta', Math.max(1, Math.ceil(TRIP.MINUTES * (1 - p))) + ' min', v => { eta.textContent = v; });
+      put('drawn', drawn.toFixed(3), () => { route.style.strokeDashoffset = (len * (1 - drawn)).toFixed(1); });
+      put('p', p.toFixed(4), () => {
+        const pt = route.getPointAtLength(len * p);
+        rider.setAttribute('transform', 'translate(' + pt.x.toFixed(1) + ' ' + pt.y.toFixed(1) + ')');
+        if (fills[1]) fills[1].style.transform = 'scaleX(' + p.toFixed(3) + ')';
+      });
+      put('done', state === 'done', d => { if (fills[2]) fills[2].style.transform = 'scaleX(' + (d ? 1 : 0) + ')'; });
+      put('shown', shown.toFixed(2), v => { fx.style.opacity = v; });
     }
-    demo.order = order; demo.settings = await MDM.store.settings();
-    if (!order) return;
-    demo.driver = await MDM.store.get('drivers', order.driverId);
-    const pkg = order.packages && order.packages[0];
-    demo.cross = !!(pkg && pkg.price && pkg.price.crossIsland);
-    setText('home-phone-code', order.code);
-    const badge = node('home-phone-status'); if (badge) badge.outerHTML = MDM.badgeFor(order.status, { customer: true }).replace('<span ', '<span data-testid="home-phone-status" ');
-    if (demo.driver) {
-      setText('home-phone-rider', demo.driver.name);
-      setText('home-phone-initials', demo.driver.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase());
-      setText('home-phone-vehicle', ({ bike: 'Bike', car: 'Car', pickup: 'Pickup' }[demo.driver.vehicle] || 'Bike') + (demo.driver.vehicleNote ? ' · ' + demo.driver.vehicleNote : ''));
+    function frame(t) {
+      if (t < 0) { paint('collected', 0, 0, 0); return; }
+      const p = easeInOut(span(t, TRIP.RIDE));
+      const state = t >= TRIP.RIDE[1] ? 'done' : t >= TRIP.RIDE[0] ? 'way' : 'collected';
+      const shown = t < TRIP.FADE[0] ? span(t, [0, TRIP.IN]) : 1 - span(t, TRIP.FADE);
+      paint(state, easeOut(span(t, TRIP.DRAW)), p, shown);
     }
-  }
-  // With no moving order to show (the live service has no demo data), the phone plays an example trip of its own: a real street
-  // route from central Malé over the bridge to Hulhumalé Phase 1, the rider riding its middle stretch on a slow loop, so the hero
-  // never shows an empty map or "--:--". The rider, code and status keep the markup's example values.
-  function exampleTrip() {
-    const a = Object.assign({ zone: 'male' }, MDM.geo.geocodeZone('male', 'home-example-from'));
-    const b = Object.assign({ zone: 'hulhumale_p1' }, MDM.geo.geocodeZone('hulhumale_p1', 'home-example-to'));
-    const line = MDM.geo.routeBetween(a, b);
-    if (!Array.isArray(line) || line.length < 2) return null;
-    return { polyline: line, stops: [{ type: 'pickup', lat: a.lat, lng: a.lng, status: 'done', label: '' }, { type: 'dropoff', lat: b.lat, lng: b.lng, label: '' }] };
-  }
-  function playExample(map, trip) {
-    const km = MDM.geo.distanceKm(trip.polyline), LAP = 60000, FROM = .3, TO = .85, t0 = Date.now();
-    const at = () => MDM.geo.pointAt(trip.polyline, FROM + (TO - FROM) * (((Date.now() - t0) % LAP) / LAP));
-    const eta = p => setText('home-phone-eta', hhmm(new Date(Date.now() + MDM.geo.etaMinutes(MDM.geo.remainingKm(trip.polyline, p), true, demo.settings) * 60000)));
-    let p = at();
-    const marker = MDM.map.driverMarker(map, p, { name: 'Ahmed Nazim', vehicle: 'bike' });
-    eta(p);
-    setInterval(() => { const n = at(); marker.moveTo(n, n.index < p.index ? 0 : 1000); p = n; eta(p); }, 1000);
-    return km;
-  }
-  async function mountHeroMap() {
-    const box = document.getElementById('hero-map');
-    if (!box || !MDM.map.available()) return;
-    const trip = demo.order ? null : exampleTrip();
-    if (!demo.order && !trip) return;
-    let map;
-    try { map = await MDM.map.create(box, { interactive: false, zoom: 12.5 }); } catch (e) { return; }
-    if (trip) {
-      MDM.map.route(map, 'demo-route', trip.polyline, {});
-      MDM.map.stopMarkers(map, trip.stops);
-      MDM.map.fit(map, trip.polyline, { padding: { top: 28, right: 28, bottom: 44, left: 28 }, maxZoom: 15 });
-      playExample(map, trip);
-      const cap = document.querySelector('.hero__caption'); if (cap) cap.lastChild.textContent = 'Example trip';
-      return;
-    }
-    const o = demo.order;
-    MDM.map.route(map, 'demo-route', o.route.polyline, {});
-    MDM.map.stopMarkers(map, (o.route.stops || []).map(s => Object.assign({}, s, { label: '' })));
-    const pos = MDM.live.last(o.driverId) || await MDM.store.get('positions', o.driverId);
-    if (pos) { demo.marker = MDM.map.driverMarker(map, pos, demo.driver); updateEta(pos); }
-    MDM.map.fit(map, o.route.polyline, { padding: { top: 28, right: 28, bottom: 44, left: 28 }, maxZoom: 15 });
-    MDM.live.onPosition(o.driverId, p => { if (!demo.marker) demo.marker = MDM.map.driverMarker(map, p, demo.driver); else demo.marker.moveTo(p, 1000); updateEta(p); });
+
+    if (MDM.motion.reduced) { paint('way', 1, TRIP.STILL, 1); return; }
+    // The first loop waits for the phone to rise into place.
+    let t = -900, prev = 0, raf = 0, onScreen = false;
+    const tick = now => {
+      raf = 0;
+      t += Math.min(64, prev ? now - prev : 16); prev = now;
+      if (t >= TRIP.LOOP) t -= TRIP.LOOP;
+      frame(t);
+      if (onScreen && !document.hidden) raf = requestAnimationFrame(tick);
+    };
+    const run = () => { if (!raf && onScreen && !document.hidden) { prev = 0; raf = requestAnimationFrame(tick); } };
+    const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
+    frame(t);
+    if ('IntersectionObserver' in window) new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; if (onScreen) run(); else stop(); }).observe(phone);
+    else { onScreen = true; run(); }
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); else run(); });
   }
 
   // ---- Scrubbed scenes (skipped under reduced motion by MDM.motion.addScene); each writes one custom property, only on change ----
@@ -177,32 +157,28 @@
     });
   }
 
-  // ---- How it works: the step crossing the middle of the viewport picks the phone screen --------------------------------
+  // ---- How it works: the step on screen picks the phone screen ---------------------------------------------------------------
+  // Desktop: the step crossing the middle of the screen, beside the sticky phone. Phones: the phone sits above a plain list and the
+  // step that has just scrolled up into view (a line near the bottom) picks the screen, so the phone is still in sight for step 4.
   function story() {
     const phone = document.getElementById('story-phone');
     const steps = Array.from(document.querySelectorAll('.story__step'));
-    if (!phone || !steps.length) return;
-    // Below 900px each step carries its own small phone, in a swipeable row (the sticky phone is hidden there).
-    steps.forEach(step => {
-      const n = step.dataset.step;
-      const src = phone.querySelector('.scr--' + n);
-      if (!src) return;
-      const mini = el('div', { class: 'story__mini', 'aria-hidden': 'true' },
-        el('div', { class: 'phone', 'data-step': n }, el('div', { class: 'phone__screen' }, src.cloneNode(true))));
-      step.insertBefore(mini, step.firstChild);
-    });
-    drawIcons(document.querySelector('.story'));
+    if (!phone || !steps.length || !('IntersectionObserver' in window)) return;
     const setStep = n => {
       if (phone.dataset.step === n) return;
       phone.dataset.step = n;
       steps.forEach(s => s.classList.toggle('is-active', s.dataset.step === n));
     };
-    if ('IntersectionObserver' in window) {
-      const io = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) setStep(e.target.dataset.step); }), { rootMargin: '-50% 0px -50% 0px', threshold: 0 });
+    const small = window.matchMedia('(max-width: 900px)');
+    let io = null;
+    const watch = () => {
+      if (io) io.disconnect();
+      io = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) setStep(e.target.dataset.step); }),
+        { rootMargin: small.matches ? '-90% 0px -10% 0px' : '-50% 0px -50% 0px', threshold: 0 });
       steps.forEach(s => io.observe(s));
-      const miniIo = new IntersectionObserver(entries => entries.forEach(e => e.target.classList.toggle('is-active', e.isIntersecting)), { threshold: 0.6 });
-      document.querySelectorAll('.story__mini').forEach(m => miniIo.observe(m));
-    } else document.querySelectorAll('.story__mini').forEach(m => m.classList.add('is-active'));
+    };
+    watch();
+    if (small.addEventListener) small.addEventListener('change', watch); else if (small.addListener) small.addListener(watch);
   }
 
   // ---- Navigation helpers -------------------------------------------------------------------------------------------
@@ -234,27 +210,101 @@
   }
 
   // ---- Coverage map ---------------------------------------------------------------------------------------------------
+  // MapLibre (about 800 KB) loads only when the map comes within a screen of view; the hero never needs it.
+  const MAPLIBRE = {
+    css: 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css', cssHash: 'sha384-K282sW/zFjTkrjR/+yr1H+gCukuy4OEYrkXRybV88g7pk+kZZYpNV6SAV59NcgFg',
+    js: 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js', jsHash: 'sha384-KKgyz2mG25bKJ1O2PyqTJPlAF8Kw2BpDmsLTNBXslICOBvhTAyF5F0XhLWF2ZovY',
+  };
+  let mapLibrary = null;
+  function loadMapLibre() {
+    if (MDM.map.available()) return Promise.resolve();
+    if (!mapLibrary) mapLibrary = new Promise((resolve, reject) => {
+      document.head.appendChild(el('link', { rel: 'stylesheet', href: MAPLIBRE.css, integrity: MAPLIBRE.cssHash, crossorigin: 'anonymous' }));
+      document.head.appendChild(el('script', { src: MAPLIBRE.js, integrity: MAPLIBRE.jsHash, crossorigin: 'anonymous', on: { load: () => resolve(), error: () => reject(new Error('map_unavailable')) } }));
+    });
+    return mapLibrary;
+  }
+  // The three places we cover directly, traced from the basemap as [lat, lng] outlines and rounded off (corner cutting), with
+  // where each name sits beside its island. Villimalé is in the list too, but goes by ferry.
+  const AREAS = [
+    { key: 'male', label: 'Malé', tag: [4.16662, 73.50969],
+      outline: [
+        [4.17668, 73.5011], [4.17892, 73.50297], [4.18041, 73.50596], [4.18078, 73.51081], [4.18004, 73.5153],
+        [4.17832, 73.51791], [4.17631, 73.51918], [4.17258, 73.51844], [4.17072, 73.51642], [4.16983, 73.51007],
+        [4.16886, 73.50372], [4.1696, 73.5011], [4.17258, 73.5005],
+      ] },
+    { key: 'airport', label: 'Velana Airport', tag: [4.19457, 73.51941],
+      outline: [
+        [4.17609, 73.528], [4.1819, 73.52591], [4.1901, 73.52516], [4.19755, 73.52591], [4.205, 73.5274],
+        [4.21133, 73.52949], [4.21804, 73.53159], [4.21901, 73.53233], [4.2173, 73.53308], [4.21096, 73.53383],
+        [4.20664, 73.53562], [4.20336, 73.53861], [4.20008, 73.54055], [4.19457, 73.53921], [4.18861, 73.53659],
+        [4.18264, 73.53338], [4.17758, 73.53009],
+      ] },
+    { key: 'hulhumale', label: 'Hulhumalé', tag: [4.2199, 73.55677],
+      outline: [
+        [4.20008, 73.54085], [4.20336, 73.53846], [4.20679, 73.53547], [4.21245, 73.53517], [4.21767, 73.53547],
+        [4.2199, 73.53263], [4.22437, 73.53435], [4.22959, 73.53734], [4.23555, 73.53958], [4.23965, 73.54055],
+        [4.24122, 73.54294], [4.24122, 73.54967], [4.23928, 73.55161], [4.23332, 73.55154], [4.22475, 73.55079],
+        [4.22214, 73.54817], [4.22102, 73.54653], [4.21469, 73.54556], [4.20798, 73.54332],
+      ] },
+  ];
+  // Chaikin corner cutting, two passes: each edge keeps its middle half, so the traced corners become soft curves.
+  function rounded(points) {
+    let ring = points;
+    for (let pass = 0; pass < 2; pass++) {
+      ring = [].concat(...ring.map((p, i) => { const q = ring[(i + 1) % ring.length]; return [[p[0] * .75 + q[0] * .25, p[1] * .75 + q[1] * .25], [p[0] * .25 + q[0] * .75, p[1] * .25 + q[1] * .75]]; }));
+    }
+    const out = ring.map(p => [+p[1].toFixed(6), +p[0].toFixed(6)]);
+    return out.concat([out[0]]);
+  }
   function showFallback(box) {
     if (box.querySelector('.map__fallback')) return;
     box.appendChild(el('div', { class: 'map__fallback', 'data-testid': 'home-map-fallback' },
       el('div', { class: 'alert alert--warn', role: 'status' }, html(MDM.icon('alert-triangle', 16)),
         el('div', { class: 'alert__body' }, 'Map unavailable right now. We cover Malé, Hulhumalé, Velana Airport and Villimalé.'))));
   }
-  async function mountCoverage() {
-    const box = document.getElementById('coverage-map');
-    if (!box) return;
-    if (!MDM.map.available()) { showFallback(box); return; }
+  async function mountCoverage(box) {
+    try { await loadMapLibre(); } catch (e) { showFallback(box); return; }
     let map;
     try { map = await MDM.map.create(box, { interactive: false, center: MDM.geo.CENTER, zoom: 11.6 }); } catch (e) { showFallback(box); return; }
-    const male = MDM.geo.zone('male'), p2 = MDM.geo.zone('hulhumale_p2');
-    const corridor = MDM.geo.routeBetween({ lat: male.center[0], lng: male.center[1], zone: male.key }, { lat: p2.center[0], lng: p2.center[1], zone: p2.key });
-    if (Array.isArray(corridor) && corridor.length > 1) MDM.map.route(map, 'corridor', corridor, { active: false });
-    MDM.geo.ZONE_LIST.forEach(z => { const m = MDM.map.marker(map, 'point', z.center, { label: z.airport ? z.short : z.label }); m.el.dataset.zone = z.key; });
-    MDM.map.fit(map, MDM.geo.ZONE_LIST.map(z => z.center), { padding: { top: 40, right: 48, bottom: 64, left: 48 }, maxZoom: 13 });
+    const rings = AREAS.map(z => rounded(z.outline));
+    map.addSource('home-areas', { type: 'geojson', data: { type: 'FeatureCollection', features: AREAS.map((z, i) => ({ type: 'Feature', properties: { key: z.key }, geometry: { type: 'Polygon', coordinates: [rings[i]] } })) } });
+    map.addLayer({ id: 'home-areas-fill', type: 'fill', source: 'home-areas', paint: { 'fill-color': '#D2002F', 'fill-opacity': 0.16 } });
+    map.addLayer({ id: 'home-areas-line', type: 'line', source: 'home-areas', paint: { 'line-color': '#D2002F', 'line-width': 1.5, 'line-opacity': 0.75 } });
+    // Our areas survive the light/dark basemap swap (map.js carries the ids it is told about across a style change).
+    if (map.__own) ['home-areas', 'home-areas-fill', 'home-areas-line'].forEach(id => map.__own.add(id));
+    AREAS.forEach(z => { const m = MDM.map.marker(map, 'point', z.tag, { label: z.label, testid: 'home-area-' + z.key }); m.el.classList.add('area-tag'); });
+    // After every style load (and a light/dark swap): the basemap's own place and street names stay hidden, since they would repeat
+    // ours, and the areas get a stronger tint on the dark basemap. Each property is set only when it differs, so this settles.
+    let pending = false;
+    const set = (kind, id, key, value) => { if (map.getLayer(id) && map[kind === 'layout' ? 'getLayoutProperty' : 'getPaintProperty'](id, key) !== value) map[kind === 'layout' ? 'setLayoutProperty' : 'setPaintProperty'](id, key, value); };
+    const tune = () => {
+      pending = false;
+      try {
+        map.getStyle().layers.forEach(l => { if (l.type === 'symbol') set('layout', l.id, 'visibility', 'none'); });
+        const dark = document.documentElement.dataset.theme === 'dark';
+        set('paint', 'home-areas-fill', 'fill-opacity', dark ? 0.34 : 0.16);
+        set('paint', 'home-areas-line', 'line-opacity', dark ? 0.95 : 0.75);
+      } catch (e) { /* the style is mid-swap */ }
+    };
+    tune();
+    map.on('styledata', () => { if (!pending) { pending = true; requestAnimationFrame(tune); } });
+    // Room at the bottom for Malé's name and the attribution; narrow maps keep less at the sides.
+    const side = box.clientWidth < 500 ? 24 : 56;
+    MDM.map.fit(map, [].concat(...rings).map(p => [p[1], p[0]]), { padding: { top: side === 24 ? 28 : 48, right: side, bottom: side === 24 ? 96 : 76, left: side }, maxZoom: 13 });
+    box.dataset.state = 'ready';
+  }
+  function coverage() {
+    const box = document.getElementById('coverage-map');
+    if (!box) return;
+    if (!('IntersectionObserver' in window)) { mountCoverage(box); return; }
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { io.disconnect(); mountCoverage(box); } }, { rootMargin: '0px 0px 100% 0px' });
+    io.observe(box);
   }
 
   async function main() {
     drawIcons();
+    heroTrip();
     story();
     heroScene();
     bizScene();
@@ -263,11 +313,9 @@
     await MDM.store.ready;
     await render();
     MDM.store.subscribe('settings', () => { render(); });
-    MDM.store.subscribe('*', msg => { if (msg && msg.op === 'reset') { render(); loadDemo(); } });
-    setInterval(() => { const h = MDM.shell.hoursLine(); setText('home-hours', h); const st = node('home-hours'); if (st) st.parentElement.dataset.open = String(/^Open/.test(h)); }, 60000);
-    await loadDemo();
-    mountHeroMap();
-    mountCoverage();
+    MDM.store.subscribe('*', msg => { if (msg && msg.op === 'reset') render(); });
+    setInterval(() => setHours(MDM.shell.hoursLine()), 60000);
+    coverage();
     MDM.motion.measure();
   }
   main();

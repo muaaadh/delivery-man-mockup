@@ -94,11 +94,27 @@
     { value: 'changed', label: 'Boat or speedboat changed' }, { value: 'missed', label: 'Missed the boat, sending on the next one' },
     { value: 'delayed', label: 'Departure time changed' }, { value: 'other', label: 'Other' },
   ];
-  // Business package size categories (§1.3, §5.2). Each business account has agreed rates for some of these.
+  // Business package size categories (§1.3, §5.2). Each business account has agreed rates for some of these. `rate` is the "from"
+  // figure and the default agreed rate; `rateTo` (optional) is the top of the range the business page shows (client 24/10/2026:
+  // Small from MVR 25, Medium from MVR 40–45, Large from MVR 55–60).
   MDM.DEFAULT_BUSINESS_TIERS = [
-    { value: 'small',  label: 'Small',  size: 'bag', hint: 'Fits in a carrier bag, under about 1 ft (30 cm)', rate: 25 },
-    { value: 'medium', label: 'Medium', size: 'box', hint: 'A carton up to about 2 ft (60 cm) a side', rate: 35 },
-    { value: 'large',  label: 'Large',  size: 'xl',  hint: 'Bigger or heavy, may need a vehicle', rate: 60 },
+    { value: 'small',  label: 'Small',  size: 'bag', hint: 'Fits in a carrier bag, under about 1 ft (30 cm)', rate: 25, rateTo: null },
+    { value: 'medium', label: 'Medium', size: 'box', hint: 'A carton up to about 2 ft (60 cm) a side', rate: 40, rateTo: 45 },
+    { value: 'large',  label: 'Large',  size: 'xl',  hint: 'Bigger or heavy, may need a vehicle', rate: 55, rateTo: 60 },
+  ];
+  // Pickup windows a business chooses when it asks for an account (24/10/2026). 'evening' keeps its key for existing accounts.
+  MDM.PICKUP_WINDOWS = [
+    { value: 'morning', label: 'Morning 09:00–12:00' }, { value: 'afternoon', label: 'Afternoon 12:00–16:00' }, { value: 'evening', label: 'Late afternoon 16:00–20:00' },
+  ];
+  // Where a business is based (24/10/2026): an address in Malé, Hulhumalé or Villimalé, or a local island in an atoll, whose packages
+  // we collect from the Villimalé ferry or from a boat or speedboat at the jetty once the business calls to say it is loaded.
+  // business_requests.pickupFrom / business_accounts.pickupFrom: 'address' (default) | 'boat'; an atoll island has zone 'other'.
+  // Our bank accounts for transfers (24/10/2026). The MVR accounts keep the ids bml and mib that older payment records point at.
+  MDM.DEFAULT_BANKS = [
+    { id: 'bml',     name: 'BML MVR', accountName: 'AAMU INVESTMENT', accountNo: '7770000205406' },
+    { id: 'bml_usd', name: 'BML USD', accountName: 'AAMU INVESTMENT', accountNo: '7770000205408' },
+    { id: 'mib',     name: 'MIB MVR', accountName: 'AAMU INVESTMENT', accountNo: '90101400044621000' },
+    { id: 'mib_usd', name: 'MIB USD', accountName: 'AAMU INVESTMENT', accountNo: '90101400044622000' },
   ];
   // Charges recorded on proof of collection / delivery or by the office (§6).
   // cargo: the Maldivian Cargo bill the driver pays at the counter (updates 17/10/2026), always added to the customer's delivery charges.
@@ -340,8 +356,36 @@
     settingsCache = seed.settings || {}; writeRaw(PREFIX + 'settings', settingsCache);
     const codes = (seed.orders || []).map(o => Number(String(o.code || '').replace(/\D/g, ''))).filter(n => n > 0);
     const bcodes = (seed.batches || []).map(o => Number(String(o.code || '').replace(/\D/g, ''))).filter(n => n > 0);
-    writeMeta({ seededAt: Date.now(), dirty: false, orderSeq: (codes.length ? Math.max.apply(null, codes) : 1000) + 1, batchSeq: (bcodes.length ? Math.max.apply(null, bcodes) : 1000) + 1, invoiceSeq: (seed.invoices || []).length + 1, seededISO: t });
+    writeMeta({ seededAt: Date.now(), dirty: false, orderSeq: (codes.length ? Math.max.apply(null, codes) : 1000) + 1, batchSeq: (bcodes.length ? Math.max.apply(null, bcodes) : 1000) + 1, invoiceSeq: (seed.invoices || []).length + 1, seededISO: t, settingsRev: SETTINGS_REV });
     writeRaw('mdm:schema', MDM.SCHEMA);
+  }
+  // Settings that changed after a visitor's demo was seeded reach them on boot, without wiping their orders (meta.settingsRev).
+  // Only figures still at the old demo value are replaced, so anything the office edited stays. Rev 1 (24/10/2026): the four real
+  // bank accounts, business size ranges (rateTo; Medium 35 → 40, Large 60 → 55) and the business reply time.
+  const SETTINGS_REV = 1;
+  const OLD_DEMO_ACCOUNTS = ['7730 0000 12345', '9010 0000 67890'];
+  const OLD_TIER_RATES = { small: 25, medium: 35, large: 60 };
+  function upgradeSettings() {
+    const m = meta();
+    if ((m.settingsRev || 0) >= SETTINGS_REV) return;
+    const s = readRaw(PREFIX + 'settings', null);
+    if (s && typeof s === 'object') {
+      const banks = Array.isArray(s.banks) ? s.banks : [];
+      if (!banks.length || banks.every(b => b && OLD_DEMO_ACCOUNTS.indexOf(b.accountNo) >= 0)) s.banks = clone(MDM.DEFAULT_BANKS);
+      if (s.rates && Array.isArray(s.rates.businessTiers)) {
+        s.rates.businessTiers = s.rates.businessTiers.map(t => {
+          const d = MDM.DEFAULT_BUSINESS_TIERS.find(x => x.value === t.value);
+          if (!d) return t;
+          const next = Object.assign({}, t);
+          if (Number(next.rate) === OLD_TIER_RATES[t.value]) next.rate = d.rate;
+          if (next.rateTo == null && Number(next.rate) === d.rate) next.rateTo = d.rateTo;
+          return next;
+        });
+      }
+      if (s.ops && s.ops.businessReplyText === 'within 1 working day') s.ops.businessReplyText = 'within 3 working hours';
+      writeRaw(PREFIX + 'settings', s); settingsCache = null;
+    }
+    writeMeta(Object.assign({}, m, { settingsRev: SETTINGS_REV }));
   }
   function clearAll() {
     // Sign-ins survive a reset; the portals check that the account, customer or employee still exists.
@@ -356,6 +400,7 @@
     const m = meta();
     if (schema !== MDM.SCHEMA || !m.seededAt) { clearAll(); writeSeed(buildSeed(new Date())); }
     else if (!m.dirty && Date.now() - m.seededAt > RESEED_AFTER_MS) { clearAll(); writeSeed(buildSeed(new Date())); }
+    else upgradeSettings();
     readyState = 'ready'; readyResolve();
   }
   function reset() {
@@ -1462,15 +1507,26 @@
     if (list.length && !list.some(x => x.isDefault)) list[0].isDefault = true;
     return update('business_accounts', accountId, { collectionPoints: list });
   }
-  // §1.3: the office looks at the typical package photo, picks the size categories and agrees a fixed rate for each.
+  // business_requests.photos = [{ fileId, note }]: the business sends a photo of each of its usual package sizes (24/10/2026); the
+  // account keeps them as packagePhotos. packagePhotoId stays the first one so older readers and older records (one photo) keep working.
+  // requestPhotos(requestOrAccount) → [{ fileId, note }].
+  MDM.requestPhotos = r => {
+    const list = r ? (Array.isArray(r.photos) && r.photos.length ? r.photos : r.packagePhotos) : null;
+    if (Array.isArray(list) && list.length) return list.filter(x => x && x.fileId);
+    return r && r.packagePhotoId ? [{ fileId: r.packagePhotoId, note: '' }] : [];
+  };
+  // §1.3: the office looks at the package photos, picks the size categories and agrees a fixed rate for each (the business no longer
+  // picks a size itself).
   function approveBusinessRequest(requestId, p) {
     p = p || {};
     const req = readCol('business_requests').find(r => r.id === requestId); if (!req) throw new StoreError('not_found', 'Request not found');
     const rates = {}; Object.keys(p.rates || {}).forEach(k => { const v = Math.round(Number(p.rates[k])); if (v > 0) rates[k] = v; });
     if (!Object.keys(rates).length) throw new StoreError('validation', 'Agree a rate for at least one package size');
     const tiers = MDM.pricing.businessTiers(settings()).map(t => t.value).filter(k => rates[k] != null);
+    const photos = MDM.requestPhotos(req);
     const acc = insert('business_accounts', { name: req.name, contactName: req.contactName, phone: req.phone, landline: req.landline || '', email: req.email || '', tin: req.tin || '', zone: req.zone, pickupAddress: req.pickupAddress, pickupWindow: req.pickupWindow || '',
-      rates, tiers, ratePerPackage: rates[tiers[0]], packagePhotoId: req.packagePhotoId || null, assessment: p.notes || '', priorityAllowed: true, status: 'approved', approvedAt: now(), approvedBy: p.by || 'admin',
+      pickupFrom: req.pickupFrom || 'address', packagePhotos: photos,
+      rates, tiers, ratePerPackage: rates[tiers[0]], packagePhotoId: req.packagePhotoId || (photos[0] ? photos[0].fileId : null), assessment: p.notes || '', priorityAllowed: true, status: 'approved', approvedAt: now(), approvedBy: p.by || 'admin',
       collectionPoints: [{ id: MDM.id('cpt'), label: 'Main', address: req.pickupAddress, zone: req.zone, landmark: '', contactName: req.contactName, contactPhone: req.phone, preferredTime: '', isDefault: true }] });
     update('business_requests', requestId, { status: 'approved', accountId: acc.id, decidedAt: now(), decidedBy: p.by || 'admin', rates });
     audit('business_approved', 'Business account approved: ' + req.name + ' (' + tiers.map(k => k + ' ' + fmt(rates[k])).join(', ') + ')', p.by || 'admin', { accountId: acc.id });
@@ -1485,6 +1541,27 @@
     audit('business_rates', 'Rates for ' + acc.name + ': ' + tiers.map(k => k + ' ' + fmt(clean[k])).join(', '), by || 'admin', { accountId });
     return saved;
   }
+
+  // ---- Who may see an order's details (privacy, client 24/10/2026) --------------------------------------------------------
+  // Anyone with an order code can open the tracking page; only the order's owner sees names, phones, addresses, the price, payment,
+  // the invoice and files. Owners: our office (mdm:session), the business that sent it (mdm:business), the customer signed in with the
+  // order's phone (mdm:me), and the browser that placed it (mdm:placed, written when the request page lands on track/?new=1).
+  // The live service applies its own rule to api/track; there a shared link's order arrives without customer details anyway.
+  const PLACED_KEY = 'mdm:placed', PLACED_CAP = 50;
+  function placedIds() { const v = readRaw(PLACED_KEY, []); return Array.isArray(v) ? v : []; }
+  MDM.rememberPlaced = function (orderId) {
+    if (!orderId) return;
+    try { localStorage.setItem(PLACED_KEY, JSON.stringify([orderId].concat(placedIds().filter(x => x !== orderId)).slice(0, PLACED_CAP))); } catch (e) { /* storage blocked: owner for this page only */ }
+  };
+  MDM.ownsOrder = function (o) {
+    if (!o) return false;
+    const office = readRaw('mdm:session', null), biz = readRaw('mdm:business', null), me = readRaw('mdm:me', null);
+    if (office && office.role) return true;
+    if (biz && biz.accountId && o.accountId && biz.accountId === o.accountId) return true;
+    const mine = me && me.phone ? normPhone(me.phone) : null, theirs = o.customer && o.customer.phone ? normPhone(o.customer.phone) : null;
+    if (mine && theirs && mine === theirs) return true;
+    return placedIds().indexOf(o.id) >= 0;
+  };
 
   // ---- Public surface: every method returns a Promise -----------------------------------------------------------------
   const P = fn => function () { const args = arguments; return new Promise((resolve, reject) => { try { resolve(fn.apply(null, args)); } catch (e) { reject(e); } }); };

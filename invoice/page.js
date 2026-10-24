@@ -1,8 +1,9 @@
 // Customer invoice (client requirements §4; web app updates §3, §6): /invoice/?order=MDM-1031 (code or id). Renders the order's frozen
 // prices: store items, packages, the shopping budget with the item list, the cargo / airport / shopping fees, the extra vehicle charge,
 // billable charges (packing, naalu or other when billed; never voided or non-billable ones) and the total, with the delivery method,
-// the payment status and the bank details from settings. The link is what we message the customer after delivery, so it needs no
-// sign-in. Forced light; print rules for body.page-invoice are in css/base.css. Updates 17/10/2026: Maldivian Cargo charges from the
+// the payment status and the bank details from settings. Only the order's owner opens it (MDM.ownsOrder: our office, the business
+// that sent it, the customer signed in with the order's number, or the browser that placed it; privacy, 24/10/2026); anyone else who
+// has the code is asked to sign in. Forced light; print rules for body.page-invoice are in css/base.css. Updates 17/10/2026: Maldivian Cargo charges from the
 // counter's bill, the shopping budget of a shop stop on a multi-collection order, and the estimate note for a price set after collection.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
@@ -85,6 +86,18 @@
       el('p', { class: 'empty__hint' }, 'It is billed to ' + name + ', so there is no invoice here.' + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash on delivery.' : '')),
       el('a', { class: 'btn btn--secondary', href: MDM.href('track/?code=' + encodeURIComponent(o.code)) }, 'Track ' + o.code)));
   }
+  // Someone who is not the order's owner (a mistyped or shared code): no amounts, names or addresses, just a way to sign in.
+  function notOwner(o) {
+    document.title = 'Invoice · ' + BRAND;
+    const back = 'invoice/?order=' + encodeURIComponent(o.code);
+    const login = MDM.href('login/?' + (isBusinessOrder(o) ? 'as=business&' : '') + 'next=' + encodeURIComponent(back));
+    slot.replaceChildren(el('div', { class: 'page-head' }, el('h1', null, 'Invoice')), el('div', { class: 'empty', 'data-testid': 'invoice-private' },
+      el('p', { class: 'empty__title' }, 'This invoice is private'),
+      el('p', { class: 'empty__hint' }, 'Sign in with the number on the order to see it.'),
+      el('div', { class: 'row row--wrap invoice-private__actions' },
+        el('a', { class: 'btn btn--primary btn--sm', href: login, 'data-testid': 'invoice-signin' }, 'Sign in'),
+        el('a', { class: 'btn btn--secondary btn--sm', href: MDM.href('track/?code=' + encodeURIComponent(o.code)) }, 'Track ' + o.code))));
+  }
   function notFound() {
     document.title = 'Invoice · ' + BRAND;
     slot.replaceChildren(el('div', { class: 'page-head' }, el('h1', null, 'Invoice')), el('div', { class: 'empty', 'data-testid': 'invoice-missing' },
@@ -102,9 +115,11 @@
     let o = key ? await MDM.store.orderByCode(key) : null;
     if (!o && key) o = await MDM.store.get('orders', key);
     if (!o) { notFound(); return; }
+    if (MDM.ownsOrder && !MDM.ownsOrder(o)) { notOwner(o); return; }
     if (!mayOpen(o)) { billedToBusiness(o); return; }
     const settings = await MDM.store.settings();
     const contact = settings.contact || {}, banks = settings.banks || [];
+    const holders = banks.map(b => b.accountName).filter((v, i, a) => v && a.indexOf(v) === i), sharedName = holders.length === 1 ? holders[0] : null;
     const p = o.payment || {};
     const number = p.invoiceNo || 'INV-' + o.code.replace('MDM-', '');
     const confirmed = o.pricing && o.pricing.status === 'confirmed';
@@ -155,7 +170,10 @@
       ? el('section', { class: 'invoice-block' }, el('h2', null, 'Payment'), el('p', null, 'This order is billed on your monthly business invoice.'))
       : el('section', { class: 'invoice-block', 'aria-labelledby': 'inv-pay' },
         el('h2', { id: 'inv-pay' }, p.status === 'paid' ? 'Paid by bank transfer' : 'Pay by bank transfer'),
-        el('div', { class: 'rate-table', 'data-testid': 'invoice-banks' }, banks.map(b => row(b.name, el('span', null, el('span', { class: 'mono' }, b.accountNo), el('small', null, b.accountName))))),
+        // BML and MIB in MVR and USD (the currency is in each name); one shared account name is printed once.
+        el('div', { class: 'rate-table', 'data-testid': 'invoice-banks' },
+          sharedName ? row('Account name', sharedName) : null,
+          banks.map(b => row(el('span', { class: 'invoice-bank' }, b.name), el('span', null, el('span', { class: 'mono' }, b.accountNo), sharedName ? null : el('small', null, b.accountName))))),
         el('p', { class: 'small muted', style: { marginTop: '8px' } }, 'Use ', el('span', { class: 'mono mono--code' }, o.code), ' as the transfer reference.'));
 
     slot.replaceChildren(

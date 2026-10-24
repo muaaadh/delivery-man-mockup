@@ -6,6 +6,9 @@
 // order's first render; the driver marker follows MDM.live.onPosition; a 5 s timer only re-evaluates staleness.
 // Updates 17/10/2026: orders without a package photo are collected first and priced from the driver's photo (MDM.priceAfterCollection),
 // extra collection and shop stops on one order, and Maldivian Cargo charges with their bill.
+// Privacy (24/10/2026): only the order's owner (MDM.ownsOrder in js/store.js) gets the full view. Anyone else with the code gets the
+// public view: status, progress, the ETA, the driver's first name and the delivery area, plus the cash to have ready for a business
+// order's cash on delivery; no names, phones, full addresses, price, payment, invoice, files or map.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
 
@@ -26,7 +29,8 @@
   const SIZE_ORDER = ['bag', 'box', 'xl'];
 
   // enteredId: the order whose view has had its entrance (hero rise, progress steps revealing); live re-renders of it skip the motion.
-  const state = { settings: null, account: null, order: null, stops: [], driver: null, pos: null, posDriverId: null, unsubPos: null, timer: null, map: null, refs: null, share: false, code: '', isNew: false, receiver: false, enteredId: null, activityOpen: false };
+  const state = { settings: null, account: null, order: null, stops: [], driver: null, pos: null, posDriverId: null, unsubPos: null, timer: null, map: null, refs: null, share: false, code: '', isNew: false, receiver: false, owner: true, enteredId: null, activityOpen: false };
+  const FRESH_MS = 15 * 60 * 1000;   // a ?new=1 landing counts as "this browser placed it" only for an order this fresh
   let renderSeq = 0;
   let form, input, fieldEl, emptyEl, resultEl, introEl;
 
@@ -121,6 +125,12 @@
     state.isNew = q.get('new') === '1';
     if (id) {
       const o = await MDM.store.get('orders', id) || await MDM.store.orderByCode(id);
+      // The request page lands here with the new order's id and new=1: remember that this browser placed it, then drop new=1 from the
+      // address so a copied link does not carry it. A code in place of the id, or an older order, never counts.
+      if (o && state.isNew && o.id === id && Date.now() - Date.parse(o.createdAt) < FRESH_MS && MDM.rememberPlaced) {
+        MDM.rememberPlaced(o.id);
+        history.replaceState(null, '', location.pathname + '?order=' + encodeURIComponent(o.id));
+      }
       if (o) { input.value = o.code; return setOrder(o); }
       return showEmpty(code ? normCode(code) : '');
     }
@@ -292,23 +302,29 @@
     if (!o) return showEmpty(current.code);
     state.order = o;
     state.settings = await MDM.store.settings();
-    const stops = o.route && o.route.stops && o.route.stops.length ? o.route.stops : (o.status === 'cancelled' ? [] : await MDM.store.buildStops(o));
+    const owner = MDM.ownsOrder ? MDM.ownsOrder(o) : true;
+    // The public view needs no stops, account or files: it never shows addresses, the business or photos.
+    const stops = !owner ? [] : o.route && o.route.stops && o.route.stops.length ? o.route.stops : (o.status === 'cancelled' ? [] : await MDM.store.buildStops(o));
     const driver = o.driverId ? await MDM.store.get('drivers', o.driverId) : null;
-    const account = o.accountId ? await MDM.store.get('business_accounts', o.accountId) : null;
+    const account = owner && o.accountId ? await MDM.store.get('business_accounts', o.accountId) : null;
     const ids = new Set();
-    stops.forEach(s => { [s.photoId, s.proofPhotoId].forEach(id => { if (id) ids.add(id); }); });
-    (o.packages || []).forEach(p => { if (p.photoId) ids.add(p.photoId); });
-    (o.documents || []).forEach(d => { if (d.fileId) ids.add(d.fileId); });
-    (o.charges || []).forEach(c => { if (c.photoId && !c.void) ids.add(c.photoId); });
+    if (owner) {
+      stops.forEach(s => { [s.photoId, s.proofPhotoId].forEach(id => { if (id) ids.add(id); }); });
+      (o.packages || []).forEach(p => { if (p.photoId) ids.add(p.photoId); });
+      (o.documents || []).forEach(d => { if (d.fileId) ids.add(d.fileId); });
+      (o.charges || []).forEach(c => { if (c.photoId && !c.void) ids.add(c.photoId); });
+    }
     const files = {};
     for (const id of ids) files[id] = await MDM.store.get('files', id);
     await watchDriver(driver ? o.driverId : null);
     if (seq !== renderSeq) return;
     state.stops = stops; state.driver = driver; state.account = account;
-    state.receiver = receiverView(o);
+    state.owner = owner;
+    state.receiver = owner && receiverView(o);
     const refs = {};
     const first = state.enteredId !== o.id;
     state.enteredId = o.id;
+    if (!owner) { renderPublic(o, refs, first); return; }
     // Status first (the hero), then the map, then the progress steps; the details follow.
     const parts = [buildHead(o, refs), buildNotices(o, stops)];
     if (NO_MAP.indexOf(o.status) < 0 || stops.length) parts.push(buildRoute(o, stops));
@@ -333,6 +349,40 @@
     updateLive();
   }
 
+  // The public view (not the order's owner): status first, then the notices that need no personal detail, progress, the driver's first
+  // name and the delivery area, and a way to sign in for the full view.
+  function renderPublic(o, refs, first) {
+    destroyMap();
+    const parts = [buildHead(o, refs), buildNotices(o, []), buildProgress(o, first)];
+    if (state.driver) parts.push(buildDriver(o, state.driver, refs));
+    parts.push(buildPublicDelivery(o));
+    resultEl.replaceChildren(...parts);
+    state.refs = refs;
+    resultEl.hidden = false; form.hidden = true; introEl.hidden = true;
+    if (first && MDM.motion) MDM.motion.enter(resultEl, { max: 3 });
+    updateLive();
+  }
+  // Where it is going, at most the area: the zone, the destination island for boat and cargo, or the airport.
+  function areaText(o) {
+    const d = o.delivery || {}, m = d.method || 'home';
+    if (m === 'boat') return (d.boat || {}).island || 'Another island';
+    if (m === 'cargo') return (d.cargo || {}).island || 'Another island';
+    if (m === 'airport') return 'Velana International Airport';
+    return d.zone ? MDM.geo.zoneLabel(d.zone) : '';
+  }
+  function buildPublicDelivery(o) {
+    const d = o.delivery || {};
+    const rows = [row('Method', el('span', { 'data-testid': 'track-method' }, MDM.deliveryMethodLabel(d.method || 'home')))];
+    const area = areaText(o);
+    if (area) rows.push(row('Area', area));
+    const biz = isBusinessOrder(o);
+    const back = 'track/?code=' + encodeURIComponent(o.code);
+    const login = MDM.href('login/?' + (biz ? 'as=business&' : '') + 'next=' + encodeURIComponent(back));
+    return section('track-delivery-h', 'Delivery', el('div', { class: 'rate-table', 'data-testid': 'track-public' }, rows),
+      el('p', { class: 'track-summary-note small muted', 'data-testid': 'track-public-note' }, 'Your order? ',
+        el('a', { href: login, 'data-testid': biz ? 'track-business-signin' : 'track-signin' }, 'Sign in'), ' to see the details.'));
+  }
+
   // '1 × Bag, 2 × Box': the packages by size category.
   function pkgText(o) {
     const counts = {};
@@ -343,6 +393,7 @@
     const pk = pkgText(o);
     const parts = [MDM.requestTypeLabel(o.requestType)];
     if (o.serviceLevel === 'express') parts.push('Express');
+    if (!state.owner) { const area = areaText(o); if (area) parts.push('To ' + area); return parts.join(' · '); }
     if (pk) parts.push(pk);
     parts.push(MDM.geo.zoneShort((o.collection || {}).zone) + ' to ' + MDM.geo.zoneShort((o.delivery || {}).zone));
     const d = o.delivery || {};
@@ -356,6 +407,10 @@
   // A short line under the status for the steps that have no ETA (the notices below cover requests, problems and cancellations).
   function heroNote(o) {
     if (state.isNew && o.status === 'requested') return '';
+    if (!state.owner) {
+      const pub = { requested: 'We confirm it, then assign a driver.', confirmed: 'We are assigning a driver.', assigned: 'A driver is assigned.', dispatched: 'The driver sets off shortly.', returned: 'It went back to the sender.' };
+      if (pub[o.status]) return pub[o.status];
+    }
     switch (o.status) {
       case 'confirmed': return state.receiver || !priceConfirmed(o) ? 'We are assigning a driver.' : 'Final price ' + fmt(o.totals.total) + '. We are assigning a driver' + (o.schedule && o.schedule.type === 'advance' ? ' for your booked time.' : '.');
       case 'assigned': return 'You see the driver on the map once they set off.';
@@ -375,7 +430,7 @@
       el('span', { class: ['track-dot', 'track-dot--' + st.kind, LIVE.indexOf(o.status) >= 0 ? 'is-live' : null], 'aria-hidden': 'true' }), st.customer);
     refs.eta = el('p', { class: 'track-eta', 'data-testid': 'track-eta' });
     refs.updated = el('span', { class: 'track-hero__updated' });
-    const recipient = { name: (o.delivery || {}).recipientName, phone: (o.delivery || {}).recipientPhone };
+    const recipient = state.owner ? { name: (o.delivery || {}).recipientName, phone: (o.delivery || {}).recipientPhone } : {};
 
     const copyLabel = el('span', null, 'Copy link');
     const copyBtn = el('button', { type: 'button', class: 'btn btn--sm track-pill', 'data-testid': 'track-copy', on: { click: async () => {
@@ -422,7 +477,17 @@
   function payButton(o, label) {
     return el('a', { class: 'btn btn--brand', href: MDM.href('checkout/?order=' + encodeURIComponent(o.id)), 'data-testid': 'track-pay' }, label || 'Pay ' + fmt(o.totals.total));
   }
+  // Public view: a failed stop, a cancellation and a business order's cash on delivery, without names, reasons or our messages.
+  function publicNotices(o) {
+    const items = [];
+    if (o.status === 'failed') items.push(notice('danger', null, 'This stop could not be completed. We are sorting it out.'));
+    if (o.status === 'cancelled') items.push(notice('danger', 'Cancelled', 'This delivery will not go ahead.', { testid: 'track-public-cancel' }));
+    const cod = o.cod;
+    if (cod && cod.amount > 0 && cod.status === 'pending' && TERMINAL.indexOf(o.status) < 0) items.push(notice('warn', 'Pay ' + fmt(cod.amount) + ' in cash to the driver', 'Cash on delivery. Have it ready when the package arrives.', { testid: 'track-cod' }));
+    return el('div', { class: 'track-notices', hidden: !items.length }, items);
+  }
   function buildNotices(o, stops) {
+    if (!state.owner) return publicNotices(o);
     const s = state.settings || {}, ops = s.ops || {};
     const channelOn = CHANNEL_ON[o.customer && o.customer.notify] || CHANNEL_ON.whatsapp;
     const p = o.payment || {};
@@ -499,6 +564,8 @@
     if (first) items.forEach((li, i) => { li.setAttribute('data-reveal', ''); li.style.setProperty('--d', (i * 60) + 'ms'); });
     return section('track-progress-h', 'Progress', el('ol', { class: 'timeline track-progress', 'data-testid': 'track-progress' }, items));
   }
+  // When a step was reached, and by whom for the owner (the public view never names the customer, staff or driver).
+  function stepTime(h) { return fmtWhen(h.at) + (state.owner ? ' · ' + who(h.by) : ''); }
   function buildProgress(o, first) {
     const flow = o.batchId || o.requestType === 'bulk' ? MDM.BULK_FLOW : MDM.FLOW;
     const hist = o.statusHistory || [];
@@ -517,7 +584,7 @@
       const cls = ['timeline__item', current ? 'is-current' : done ? 'is-done' : 'is-upcoming'];
       return el('li', { class: cls, 'data-status': st, 'data-testid': 'track-step' },
         el('div', { class: 'timeline__label' }, MDM.STATUS[st].customer),
-        h ? el('div', { class: 'timeline__time' }, fmtWhen(h.at) + ' · ' + who(h.by)) : null);
+        h ? el('div', { class: 'timeline__time' }, stepTime(h)) : null);
     });
     if (stopped) {
       const h = reached[o.status];
@@ -525,15 +592,16 @@
       // A cancelled or returned order ends here; a failed one can still resume, so its remaining steps stay listed.
       if (o.status !== 'failed') items.splice(cut);
       items.splice(cut, 0, el('li', { class: 'timeline__item is-current track-step--stop', 'data-status': o.status, 'data-testid': 'track-step' },
-        el('div', { class: 'timeline__label' }, MDM.STATUS[o.status].customer), h ? el('div', { class: 'timeline__time' }, fmtWhen(h.at) + ' · ' + who(h.by)) : null));
+        el('div', { class: 'timeline__label' }, MDM.STATUS[o.status].customer), h ? el('div', { class: 'timeline__time' }, stepTime(h)) : null));
       const ret = (o.cancellation || {}).returnStatus;
       if (o.status === 'cancelled' && (ret === 'pending' || ret === 'done')) {
         const cx = o.cancellation;
         items.splice(cut + 1, 0, el('li', { class: ['timeline__item', ret === 'done' ? 'is-done' : 'is-upcoming'], 'data-status': 'return', 'data-testid': 'track-step' },
           el('div', { class: 'timeline__label' }, ret === 'done' ? 'Returned to the sender' : 'Being returned to the sender'),
-          ret === 'done' && cx.returnedAt ? el('div', { class: 'timeline__time' }, fmtDate(cx.returnedAt) + (cx.returnedBy ? ' · ' + who(cx.returnedBy) : '')) : null));
+          ret === 'done' && cx.returnedAt ? el('div', { class: 'timeline__time' }, fmtDate(cx.returnedAt) + (cx.returnedBy && state.owner ? ' · ' + who(cx.returnedBy) : '')) : null));
       }
     }
+    if (!state.owner) return progressSection(items, first);
     const p = o.payment || {};
     if (state.receiver) {
       // The receiver's only payment is the cash on delivery; the delivery itself is on the business's account.
@@ -596,6 +664,12 @@
       refs.posAge = el('span', { class: 'small muted', 'data-testid': 'track-pos-age' });
       live = el('div', { class: 'track-driver__live' }, el('span', { class: 'sr-only' }, 'Live location: '), refs.source, refs.posAge);
     }
+    // The public view: the first name and the vehicle, no number to call.
+    if (!state.owner) return section('track-driver-h', 'Driver', el('div', { class: 'track-driver', 'data-testid': 'track-driver' },
+      el('span', { class: 'track-driver__avatar', 'aria-hidden': 'true' }, initials.charAt(0) || html(MDM.icon('user', 18))),
+      el('div', { class: 'track-driver__main' },
+        el('div', { class: 'track-driver__name' }, String(d.name || '').split(/\s+/)[0] || 'Your driver'),
+        el('div', { class: 'track-driver__meta' }, VEHICLES[d.vehicle] || d.vehicle || ''))));
     return section('track-driver-h', 'Your driver', el('div', { class: 'track-driver', 'data-testid': 'track-driver' },
       el('span', { class: 'track-driver__avatar', 'aria-hidden': 'true' }, initials || html(MDM.icon('user', 18))),
       el('div', { class: 'track-driver__main' },

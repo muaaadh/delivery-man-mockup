@@ -28,9 +28,9 @@
   ];
   const groupOf = tab => GROUPS.find(g => g.tabs.indexOf(tab) >= 0) || GROUPS[0];
   const tabLabel = key => (TABS.find(t => t.key === key) || {}).label || key;
-  const PICKUP_WINDOWS = [
-    { value: 'morning', label: 'Morning 09:00 to 12:00' }, { value: 'afternoon', label: 'Afternoon 13:00 to 17:00' }, { value: 'evening', label: 'Evening 18:00 to 22:00' },
-  ];
+  const PICKUP_WINDOWS = MDM.PICKUP_WINDOWS;
+  const ATOLL = 'atoll';   // the "atoll island" choice in the request form: stored as zone 'other' with pickupFrom 'boat'
+  const MAX_PHOTOS = 6;
   const VOLUMES = [{ value: '1-10', label: '1 to 10' }, { value: '11-30', label: '11 to 30' }, { value: '31-100', label: '31 to 100' }, { value: '100+', label: 'More than 100' }];
   const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const LANDLINE = /^[36]\d{6}$/;
@@ -76,7 +76,6 @@
   }
   const empty = (title, hint) => el('div', { class: 'empty' }, el('div', { class: 'empty__title' }, title), hint ? el('div', { class: 'empty__hint' }, hint) : null);
   const zoneOptions = () => MDM.geo.zoneOptions();
-  const pickupZones = () => MDM.geo.zoneOptions().filter(o => BUSINESS_ISLANDS.indexOf(MDM.geo.island(o.value)) >= 0);
   const trackHref = o => MDM.href('track/?code=' + encodeURIComponent(o.code));
   const labelsHref = q => MDM.href('labels/?' + q);
   const failBox = () => el('div', { class: 'alert alert--danger', role: 'alert', tabindex: '-1', hidden: true });
@@ -159,17 +158,20 @@
   // =========================================================================================================================
   // Public page
   // =========================================================================================================================
+  // 'MVR 40–45' for a size with a range (rateTo, Admin → Rates), 'MVR 25' otherwise.
+  function tierPrice(t) { const to = Number(t.rateTo); return to > Number(t.rate) ? 'MVR ' + Math.round(t.rate) + '–' + Math.round(to) : money(t.rate); }
+  const price = text => el('span', { class: 'biz-price' }, text);
   function ratesBlock(s) {
     const rates = s.rates || {};
     const row = MDM.ui.rateRow;
     const tiers = MDM.pricing.businessTiers(s);
     return el('div', null,
-      el('div', { class: 'rate-table', 'data-slot': 'rates', 'data-testid': 'business-tiers' },
+      el('div', { class: 'rate-table biz-rates-public', 'data-slot': 'rates', 'data-testid': 'business-tiers' },
         row('Package size', null, { head: true }),
-        tiers.map(t => row(t.label, 'from ' + money(t.rate), { sub: t.hint + ' (' + MDM.pricing.sizeLabel(t.size) + ')', mono: true })),
-        row('Cargo delivery', '+ ' + money(rates.cargo), { mono: true, sub: 'Maldivian Cargo fee' }),
-        row('Airport delivery', '+ ' + money(rates.airport), { mono: true, sub: 'Airport fee' }),
-        row('Billing', 'Monthly', { valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') })),
+        tiers.map(t => row(t.label, price('from ' + tierPrice(t)), { mono: true })),
+        row('Cargo fee', price('+ ' + money(rates.cargo)), { mono: true }),
+        row('Airport fee', price('+ ' + money(rates.airport)), { mono: true }),
+        row('Billing', 'Weekly', { valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') })),
       el('p', { class: 'business-note' }, 'Your agreed rates show in your portal.'));
   }
   // What a business account gets, as six short tiles.
@@ -179,20 +181,20 @@
     ['banknote', 'Cash on delivery', 'We collect it and pay you.'],
     ['ship', 'Boat, cargo, airport', 'Islands and resorts too.'],
     ['printer', 'Labels and tracking', 'A code and a label per package.'],
-    ['receipt', 'One monthly invoice', 'Nothing to pay per order.'],
+    ['receipt', 'Weekly invoice', 'Pay weekly or daily.'],
   ];
   function featuresBlock() {
     return el('ul', { class: 'biz-features', 'data-reveal-group': '' }, FEATURES.map(f => el('li', { class: 'biz-feature', 'data-reveal': '' },
       el('span', { class: 'biz-feature__icon', 'aria-hidden': 'true' }, html(MDM.icon(f[0], 20))),
       el('h3', { class: 'biz-feature__title' }, f[1]), el('p', { class: 'biz-feature__text' }, f[2]))));
   }
+  const replyText = s => (s.ops || {}).businessReplyText || 'within 3 working hours';
   function stepsBlock(s) {
-    const reply = (s.ops || {}).businessReplyText || 'within 1 working day';
     const items = [
       ['Request an account', 'Send a photo of a typical package.'],
-      ['Agree your rates', 'We call you ' + reply + '.'],
+      ['Agree your rates', 'We call you ' + replyText(s) + '.'],
       ['Send orders', 'One at a time, or a whole sheet.'],
-      ['Get paid and invoiced', 'Cash comes back to you; one invoice a month.'],
+      ['Get paid and invoiced', 'Cash comes back to you.'],
     ];
     return el('ol', { class: 'steps', 'data-slot': 'steps', 'data-reveal-group': '' }, items.map((it, i) => el('li', { class: 'steps__item', 'data-reveal': '' },
       el('div', { class: 'steps__head' }, el('span', { class: 'steps__num mono' }, String(i + 1)), el('h3', { class: 'steps__title' }, it[0])),
@@ -244,6 +246,8 @@
   function renderPublicSignin() { const old = app.querySelector('[data-testid="biz-signin"]'); if (old) old.replaceWith(signinCard()); }
 
   // Account request form (inserts business_requests; the office approves it under Business → Requests and agrees the rates).
+  // 24/10/2026: Villimalé and atoll islands (collected from the ferry or a speedboat once the business calls), the new pickup windows,
+  // a photo of each usual package size with a short note, and no size choice: the office finalises the sizes and fixed rates.
   const requestRules = {
     name: v => v ? null : 'Enter your business name',
     contactName: v => v ? null : 'Enter the name of the person we should call',
@@ -251,45 +255,56 @@
     landline: v => { if (!v) return null; const n = MDM.ui.phone.normalize(v); return n && LANDLINE.test(n) ? null : 'Enter a 7-digit landline number starting with 3 or 6'; },
     email: v => !v ? 'Enter an email address for invoices' : (EMAIL.test(v) ? null : 'Enter a valid email address'),
     zone: v => v ? null : 'Choose your island',
-    pickupAddress: v => v ? null : 'Enter the address we pick up from',
+    pickupAddress: (v, all) => v ? null : all && all.zone === ATOLL ? 'Enter your island and atoll' : 'Enter the address we pick up from',
     pickupWindow: v => v ? null : 'Choose a pickup window',
     volume: v => v ? null : 'Choose how many packages you expect',
-    typicalSize: v => v ? null : 'Choose the size that fits most of your packages',
     terms: v => v ? null : "Tick the box to confirm you've read what we carry",   // asked once, at sign-up (updates 17/10/2026)
   };
-  // Typical package photo: a dropzone with preview; the image is re-encoded as a JPEG (max 1200 px) before it is stored.
-  function photoPicker(onChange) {
-    const st = { file: null, img: null, busy: null };
-    const fileInput = el('input', { type: 'file', accept: 'image/*', class: 'sr-only', tabindex: '-1', 'data-testid': 'business-photo' });
-    const chooseBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'business-photo-choose', on: { click: () => fileInput.click() } }, html(MDM.icon('camera', 16)), 'Choose a photo');
+  // Malé, Hulhumalé and Villimalé zones, then the atoll island choice.
+  const requestIslands = () => MDM.geo.zoneOptions().filter(o => BUSINESS_ISLANDS.concat(['villimale']).indexOf(MDM.geo.island(o.value)) >= 0)
+    .concat([{ value: ATOLL, label: 'An atoll island' }]);
+  // Package photos: one per usual size, each with an optional note. Images are re-encoded as JPEG (max 1200 px) as they are added.
+  function photosPicker(onChange) {
+    const st = { items: [], busy: null, seq: 0 };
+    const fileInput = el('input', { type: 'file', accept: 'image/*', multiple: true, class: 'sr-only', tabindex: '-1', 'data-testid': 'business-photo' });
+    const chooseBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'business-photo-choose', on: { click: () => fileInput.click() } }, html(MDM.icon('camera', 16)), 'Add photos');
+    const list = el('ul', { class: 'biz-photos', 'data-testid': 'business-photos' });
     const body = el('div', { class: 'dropzone__body' });
-    const zone = el('div', { class: 'dropzone biz-photo', 'data-testid': 'business-photo-zone' }, body, fileInput);
+    const zone = el('div', { class: 'dropzone biz-photo', 'data-testid': 'business-photo-zone' }, list, body, fileInput);
     function draw() {
-      if (st.img) {
-        const thumb = el('img', { class: 'dropzone__thumb', src: st.img.dataUrl, alt: 'Your typical package' });
-        body.replaceChildren(el('div', { class: 'dropzone__preview' }, thumb,
-          el('div', { class: 'dropzone__file' }, el('div', { class: 'dropzone__name' }, st.file.name || 'Package photo'), el('div', { class: 'dropzone__size' }, MDM.ui.formatBytes(st.img.size) + ' · ' + st.img.width + ' × ' + st.img.height)),
-          el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-photo-change', on: { click: () => fileInput.click() } }, 'Change photo')));
-      } else {
-        body.replaceChildren(el('div', { class: 'dropzone__title' }, 'Photo of the package you send most'),
-          el('div', { class: 'dropzone__hint' }, 'Put a phone next to it for scale.'),
-          el('span', { class: 'dropzone__drag dropzone__hint' }, 'Or drop the photo here.'), chooseBtn);
-      }
+      list.hidden = !st.items.length;
+      list.replaceChildren(...st.items.map((it, i) => el('li', { class: 'biz-photos__item', 'data-testid': 'business-photo-item' },
+        el('img', { class: 'biz-photos__thumb', src: it.img.dataUrl, alt: 'Package photo ' + (i + 1) }),
+        el('input', { class: 'input biz-photos__note', type: 'text', maxlength: '60', value: it.note, placeholder: 'Note, like "small, a phone case"', 'aria-label': 'Note for photo ' + (i + 1), 'data-testid': 'business-photo-note',
+          on: { input: e => { it.note = e.target.value; } } }),
+        el('button', { type: 'button', class: 'btn btn--ghost btn--sm biz-photos__remove', 'aria-label': 'Remove photo ' + (i + 1), 'data-testid': 'business-photo-remove',
+          on: { click: () => { st.items = st.items.filter(x => x !== it); draw(); const next = zone.querySelector('[data-testid="business-photo-remove"]') || chooseBtn; next.focus(); onChange && onChange(); } } }, 'Remove'))));
+      const full = st.items.length >= MAX_PHOTOS;
+      chooseBtn.hidden = full;
+      chooseBtn.lastChild.textContent = st.items.length ? 'Add another' : 'Add photos';
+      body.replaceChildren(...[
+        st.items.length ? null : el('div', { class: 'dropzone__title' }, 'A photo of each size you send'),
+        st.items.length ? null : el('div', { class: 'dropzone__hint' }, 'Put a phone next to it for scale.'),
+        full ? el('div', { class: 'dropzone__hint' }, 'Up to ' + MAX_PHOTOS + ' photos.') : el('span', { class: 'dropzone__drag dropzone__hint' }, 'Or drop photos here.'),
+        chooseBtn].filter(Boolean));
     }
-    async function take(file) {
-      if (!file) return;
-      if (!/^image\//.test(file.type || '')) { setError(fileInput, 'Choose a photo (JPG or PNG)'); return; }
-      st.busy = MDM.ui.imageToJpeg(file, { maxEdge: 1200, quality: 0.8 }).then(img => { st.file = file; st.img = img; setError(fileInput, null); draw(); onChange && onChange(); })
-        .catch(() => { setError(fileInput, 'We could not read this photo. Choose a JPG or PNG image.'); })
-        .finally(() => { st.busy = null; });
+    async function take(files) {
+      const pics = Array.from(files || []).filter(Boolean);
+      if (!pics.length) return;
+      const room = MAX_PHOTOS - st.items.length;
+      if (pics.some(f => !/^image\//.test(f.type || ''))) setError(fileInput, 'Choose photos (JPG or PNG)');
+      const run = pics.filter(f => /^image\//.test(f.type || '')).slice(0, Math.max(0, room)).reduce((p, file) => p.then(() => MDM.ui.imageToJpeg(file, { maxEdge: 1200, quality: 0.8 })
+        .then(img => { st.items.push({ id: ++st.seq, file, img, note: '' }); setError(fileInput, null); })
+        .catch(() => { setError(fileInput, 'We could not read a photo. Choose a JPG or PNG image.'); })), Promise.resolve());
+      st.busy = run.then(() => { draw(); onChange && onChange(); }).finally(() => { st.busy = null; });
       await st.busy;
     }
-    fileInput.addEventListener('change', () => { const f = fileInput.files && fileInput.files[0]; take(f); fileInput.value = ''; });
+    fileInput.addEventListener('change', () => { const f = fileInput.files ? Array.from(fileInput.files) : []; take(f); fileInput.value = ''; });
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('is-over'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));
-    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('is-over'); const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; take(f); });
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('is-over'); take(e.dataTransfer && e.dataTransfer.files); });
     draw();
-    return { el: zone, input: fileInput, get: () => st.img ? { file: st.file, img: st.img } : null, ready: () => st.busy || Promise.resolve(), focus: () => (st.img ? body.querySelector('button') : chooseBtn).focus() };
+    return { el: zone, input: fileInput, get: () => st.items.map(it => ({ file: it.file, img: it.img, note: String(it.note || '').trim() })), ready: () => st.busy || Promise.resolve(), focus: () => chooseBtn.focus() };
   }
   function requestForm(s) {
     const f = el('form', { class: 'form', novalidate: true, 'data-testid': 'business-form' });
@@ -297,18 +312,20 @@
     const duplicate = MDM.ui.notice('warn', 'We already have a request for this number. We will call you about it.', { testid: 'business-duplicate' });
     duplicate.hidden = true; duplicate.setAttribute('role', 'alert'); duplicate.tabIndex = -1;
     const failure = failBox();
-    const photo = photoPicker(() => { failure.hidden = true; });
-    const tiers = MDM.pricing.businessTiers(s);
-    const sizeSeg = segmented('typicalSize', tiers.map(t => ({ value: t.value, label: t.label, hint: MDM.pricing.sizeLabel(t.size) + ' · from ' + money(t.rate) })), '', 'business-size');
-    const photoField = MDM.ui.field({ name: 'packagePhoto', label: 'Photo', control: el('fieldset', { class: 'biz-photo-group' }, photo.el) });
-    photo.input.name = 'packagePhoto';
-    photo.input.setAttribute('aria-label', 'Photo of a typical package');
+    const photos = photosPicker(() => { failure.hidden = true; });
+    const photoField = MDM.ui.field({ name: 'packagePhoto', label: 'Photos', control: el('fieldset', { class: 'biz-photo-group' }, photos.el) });
+    photos.input.name = 'packagePhoto';
+    photos.input.setAttribute('aria-label', 'Photos of your packages');
     const termsBox = el('input', { type: 'checkbox', id: 'biz-terms', name: 'terms', 'aria-describedby': 'biz-terms-text', 'data-testid': 'business-terms' });
     const termsField = el('div', { class: 'field', 'data-field': 'terms' },
       el('p', { class: 'small muted', id: 'biz-terms-text' }, s.terms || ''),
       // wrapped so base.css's `.field > label` (the field label rule) does not override `.checkbox`
       el('div', null, el('label', { class: 'checkbox', for: 'biz-terms' }, termsBox, el('span', null, "I've read what we carry"))),
       el('div', { class: 'field__error', hidden: true }));
+    // An atoll island: the "address" is the island, and we collect from the ferry or a speedboat once they call.
+    const atollNote = MDM.ui.notice('info', 'We collect from the Villimalé ferry or your speedboat. Call us once it is loaded.', { testid: 'business-atoll-note' });
+    atollNote.hidden = true;
+    const address = field('pickupAddress', 'Pickup address', input({ autocomplete: 'street-address', placeholder: 'M. Kaneerumaage, 2nd floor, Majeedhee Magu', 'data-testid': 'business-address' }));
     f.append(
       field('name', 'Business name', input({ autocomplete: 'organization', 'data-testid': 'business-name' })),
       field('contactName', 'Contact person', input({ autocomplete: 'name', 'data-testid': 'business-contact' })),
@@ -316,62 +333,76 @@
         field('phone', 'Mobile', input({ type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', 'data-testid': 'business-phone' })),
         field('landline', 'Landline', input({ type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '3XX XXXX' }), { optional: true })),
       field('email', 'Email for invoices', input({ type: 'email', inputmode: 'email', autocomplete: 'email', placeholder: 'name@company.mv', 'data-testid': 'business-email' })),
-      el('div', { class: 'grid-2' }, field('zone', 'Island', select(pickupZones(), 'Choose an island')), field('pickupWindow', 'Pickup window', select(PICKUP_WINDOWS, 'Choose a window'))),
-      field('pickupAddress', 'Pickup address', input({ autocomplete: 'street-address', placeholder: 'M. Kaneerumaage, 2nd floor, Majeedhee Magu', 'data-testid': 'business-address' })),
+      el('div', { class: 'grid-2' }, field('zone', 'Island', select(requestIslands(), 'Choose an island')), field('pickupWindow', 'Pickup window', select(PICKUP_WINDOWS, 'Choose a window'))),
+      atollNote,
+      address,
       field('volume', 'Packages per week', select(VOLUMES, 'Choose a range')),
       el('div', { class: 'biz-typical stack-4', 'data-testid': 'business-typical' },
-        el('div', null, el('h3', null, 'Your typical package'), el('p', { class: 'small muted' }, 'We set your rates from this photo.')),
-        photoField,
-        MDM.ui.field({ name: 'typicalSize', label: 'Which size is it?', control: sizeSeg })),
+        el('div', null, el('h3', null, 'Your packages'), el('p', { class: 'small muted' }, 'We set your sizes and rates from these photos.')),
+        photoField),
       field('notes', 'Notes', el('textarea', { class: 'textarea', rows: 3 }), { optional: true, hint: 'Opening hours or anything the driver should know' }),
       termsField,
       duplicate, failure, el('div', { class: 'form-actions' }, submit));
     f.elements.zone.setAttribute('data-testid', 'business-zone');
     f.elements.pickupWindow.setAttribute('data-testid', 'business-window');
     f.elements.volume.setAttribute('data-testid', 'business-volume');
+    const addressLabel = address.querySelector('label'), addressInput = f.elements.pickupAddress;
+    function syncIsland() {
+      const atoll = f.elements.zone.value === ATOLL;
+      atollNote.hidden = !atoll;
+      if (addressLabel && addressLabel.firstChild) addressLabel.firstChild.textContent = atoll ? 'Island and atoll' : 'Pickup address';
+      addressInput.placeholder = atoll ? 'Thulusdhoo, Kaafu Atoll' : 'M. Kaneerumaage, 2nd floor, Majeedhee Magu';
+      addressInput.autocomplete = atoll ? 'off' : 'street-address';
+    }
+    f.elements.zone.addEventListener('change', syncIsland);
     const dirty = new Set();
     const valueOf = c => c.type === 'checkbox' ? c.checked : typeof c.value === 'string' ? c.value.trim() : c.value;
-    const check = n => { const c = f.elements[n]; const msg = requestRules[n](valueOf(c)); setError(c instanceof RadioNodeList ? c[0] : c, msg); return !msg; };
+    const values = () => { const v = {}; Object.keys(requestRules).forEach(k => { const c = f.elements[k]; v[k] = c ? valueOf(c) : ''; }); return v; };
+    const check = n => { const c = f.elements[n]; const msg = requestRules[n](valueOf(c), values()); setError(c instanceof RadioNodeList ? c[0] : c, msg); return !msg; };
     const onEdit = e => { const n = e.target.name; if (!n || n === 'packagePhoto') return; dirty.add(n); if (requestRules[n] && e.target.closest('.field').classList.contains('is-invalid')) check(n); if (n === 'phone') duplicate.hidden = true; failure.hidden = true; };
     f.addEventListener('input', onEdit); f.addEventListener('change', onEdit);
-    f.addEventListener('focusout', e => { const n = e.target.name; if (n && n !== 'typicalSize' && requestRules[n] && dirty.has(n)) check(n); });
+    f.addEventListener('focusout', e => { const n = e.target.name; if (n && requestRules[n] && dirty.has(n)) check(n); });
     f.addEventListener('submit', async e => {
       e.preventDefault(); duplicate.hidden = true; failure.hidden = true;
-      await photo.ready();
+      await photos.ready();
       const r = MDM.ui.validate(f, requestRules);
-      const pic = photo.get();
-      setError(photo.input, pic ? null : 'Add a photo of a typical package');
-      if (!r.ok || !pic) { if (!r.ok) MDM.ui.focusFirstInvalid(f); else { MDM.ui.scrollIntoViewIfNeeded(photo.el); photo.focus(); } return; }
+      const pics = photos.get();
+      setError(photos.input, pics.length ? null : 'Add a photo of a typical package');
+      if (!r.ok || !pics.length) { if (!r.ok) MDM.ui.focusFirstInvalid(f); else { MDM.ui.scrollIntoViewIfNeeded(photos.el); photos.focus(); } return; }
       const phone = MDM.ui.phone.normalize(r.values.phone);
+      const atoll = r.values.zone === ATOLL;
       MDM.ui.setLoading(submit, true);
-      let fileRow = null;
+      const saved = [];
       try {
         const existing = await MDM.store.list('business_requests');
         if (existing.some(x => x.phone === phone)) { duplicate.hidden = false; duplicate.focus(); return; }
-        fileRow = await MDM.store.insert('files', { kind: 'business_package', orderId: null, name: pic.file.name || 'package.jpg', type: pic.img.type, size: pic.img.size, width: pic.img.width, height: pic.img.height, dataUrl: pic.img.dataUrl, at: new Date().toISOString() });
+        const at = new Date().toISOString();
+        for (const pic of pics) {
+          const row = await MDM.store.insert('files', { kind: 'business_package', orderId: null, name: pic.file.name || 'package.jpg', type: pic.img.type, size: pic.img.size, width: pic.img.width, height: pic.img.height, dataUrl: pic.img.dataUrl, note: pic.note, at });
+          saved.push({ fileId: row.id, note: pic.note });
+        }
         state.received = await MDM.store.insert('business_requests', {
           name: r.values.name, contactName: r.values.contactName, phone, landline: MDM.ui.phone.normalize(r.values.landline) || '', email: r.values.email,
-          zone: r.values.zone, pickupAddress: r.values.pickupAddress, pickupWindow: r.values.pickupWindow, volume: r.values.volume, notes: valueOf(f.elements.notes),
-          typicalSize: r.values.typicalSize, packagePhotoId: fileRow.id, termsAcceptedAt: new Date().toISOString(), status: 'pending' });
-        state.received.photo = pic.img.dataUrl;
+          zone: atoll ? 'other' : r.values.zone, pickupFrom: atoll ? 'boat' : 'address', pickupAddress: r.values.pickupAddress, pickupWindow: r.values.pickupWindow, volume: r.values.volume, notes: valueOf(f.elements.notes),
+          photos: saved, packagePhotoId: saved[0].fileId, termsAcceptedAt: at, status: 'pending' });
+        state.received.thumbs = pics.map(p => p.img.dataUrl);
         await render();
       } catch (err) {
-        if (fileRow && !state.received) MDM.store.remove('files', fileRow.id).catch(() => null);
+        if (!state.received) saved.forEach(x => MDM.store.remove('files', x.fileId).catch(() => null));
         showFail(failure, null, 'We could not save your request. ' + (err && err.code === 'quota' ? 'This browser is out of storage space for the demo. Reset demo data from the admin.' : 'Please try again or call us.'));
       } finally { if (document.contains(submit)) MDM.ui.setLoading(submit, false); }
     });
     return f;
   }
   function receivedCard(s) {
-    const r = state.received, reply = (s.ops || {}).businessReplyText || 'within 1 working day';
-    const t = MDM.pricing.businessTiers(s).find(x => x.value === r.typicalSize);
+    const r = state.received;
     return el('div', { class: 'card biz-done business-received', 'data-testid': 'business-received' },
       el('div', { class: 'card__body stack-4' },
         el('div', { class: 'biz-done__mark', 'aria-hidden': 'true' }, html(MDM.icon('check', 26))),
         el('div', { class: 'stack-1' }, el('h2', { tabindex: '-1' }, 'Request received'),
-          el('p', { class: 'muted' }, 'Thanks, ', el('strong', null, r.name), '. We will call ', el('span', { class: 'mono nowrap' }, MDM.ui.phone.format(r.phone)), ' ' + reply + '.')),
-        r.photo ? el('div', { class: 'row row--start biz-received-photo' }, el('img', { class: 'thumb', src: r.photo, alt: 'Your typical package' }),
-          el('p', { class: 'small muted' }, 'Your typical package' + (t ? ': ' + t.label.toLowerCase() : '') + '. Nothing to pay now.')) : null,
+          el('p', { class: 'muted' }, 'Thanks, ', el('strong', null, r.name), '. We will call ', el('span', { class: 'mono nowrap' }, MDM.ui.phone.format(r.phone)), ' ' + replyText(s) + '.'),
+          el('p', { class: 'muted' }, 'Our team will call and confirm the rates with you.')),
+        r.thumbs && r.thumbs.length ? el('div', { class: 'biz-received-photos', 'aria-label': 'Your package photos' }, r.thumbs.map((src, i) => el('img', { class: 'thumb', src, alt: 'Package photo ' + (i + 1) }))) : null,
         el('div', null, el('a', { class: 'btn btn--secondary', href: MDM.href('') }, 'Back to home'))));
   }
   function renderPublic(s) {
@@ -386,7 +417,7 @@
     const applyBtn = el('a', { class: 'btn btn--brand btn--lg', href: '#apply', 'data-testid': 'business-apply', on: { click: e => { e.preventDefault(); toForm(true); } } }, 'Request an account');
     app.replaceChildren(el('div', { class: 'container container--narrow biz-public' },
       el('div', { class: 'page-head page-head--stack' }, el('h1', null, 'Delivery for businesses'),
-        el('p', { class: 'page-head__desc' }, 'Fixed rates, daily pickups and one monthly invoice.'),
+        el('p', { class: 'page-head__desc' }, 'Fixed rates, daily pickups and weekly invoice.'),
         el('div', { class: 'page-head__actions' }, applyBtn)),
       signinCard(),
       el('section', { class: 'section', 'aria-label': 'What you get' }, featuresBlock()),

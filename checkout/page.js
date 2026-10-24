@@ -20,7 +20,6 @@
   class SlipError extends Error {}
   const trackHref = id => '../track/?order=' + encodeURIComponent(id);
   const icon = (name, size) => MDM.ui.html(MDM.icon(name, size || 16));
-  const parseAmount = v => Number(String(v == null ? '' : v).replace(/[^\d.]/g, ''));
   const channelOf = c => CHANNEL[c && c.notify] || CHANNEL.whatsapp;
   const CHARGE_STAGE = { collection: 'at collection', delivery: 'at delivery' };
   // Fee rows in the amount due: airport, cargo and shopping fees, the extra vehicle charge and billable charges (web app updates §3, §6).
@@ -39,10 +38,10 @@
     }).filter(Boolean);
   }
 
+  // The slip upload asks only for the bank and the slip (client 24/10/2026): the store takes the order total as the amount paid and
+  // leaves the account holder empty; the office reads both off the slip.
   const RULES = {
     bank: d => d.bank ? null : 'Choose the bank you paid from',
-    payerName: d => d.payerName.trim() ? null : "Enter the account holder's name",
-    paidAmount: d => parseAmount(d.paidAmount) > 0 ? null : 'Enter the amount you transferred',
     slip: () => state.slip ? null : 'Upload your transfer slip to continue',
   };
 
@@ -57,7 +56,7 @@
   function initDraft(order) {
     const p = order.payment || {};
     state.draftFor = order.id;
-    state.draft = { bank: p.bank || '', payerName: p.payerName || '', paidAmount: p.paidAmount != null ? String(p.paidAmount) : String(order.totals.total), reference: p.reference || '', touched: {} };
+    state.draft = { bank: p.bank || '', reference: p.reference || '', touched: {} };
   }
   async function loadSlip(order) {
     const s = order.payment && order.payment.slip;
@@ -140,7 +139,7 @@
     const d = state.draft;
     try {
       const cur = await MDM.store.get('orders', state.orderId);
-      await MDM.store.submitPayment(state.orderId, { bank: d.bank, payerName: d.payerName.trim(), paidAmount: parseAmount(d.paidAmount), reference: d.reference.trim(), slip: cur && cur.payment ? cur.payment.slip : null, by: 'customer' });
+      await MDM.store.submitPayment(state.orderId, { bank: d.bank, reference: d.reference.trim(), slip: cur && cur.payment ? cur.payment.slip : null, by: 'customer' });
       state.busy = false; state.focusPanel = true;
       await render();
     } catch (e) {
@@ -234,24 +233,30 @@
   // ---- Sections ----
   function orderSection(order, settings) {
     const c = order.customer || {};
+    // The customer's name and number only for the order's owner (privacy, 24/10/2026); anyone else with the link can still pay.
+    const owner = MDM.ownsOrder ? MDM.ownsOrder(order) : true;
     return el('section', { class: 'section', 'aria-labelledby': 'co-order' },
       el('div', { class: 'section-head' }, el('h2', { id: 'co-order' }, 'Your order')),
       el('div', { class: 'rate-table' },
         row('Order code', el('span', { class: 'checkout-copy checkout-copy--end' }, el('span', { class: 'checkout-code mono', 'data-testid': 'checkout-code' }, order.code), copyButton(order.code, 'checkout-copy-code', 'order code'))),
-        row('Customer', [c.name || '', el('small', { class: 'mono' }, MDM.ui.phone.format(c.phone))]),
+        owner && c.name ? row('Customer', [c.name || '', c.phone ? el('small', { class: 'mono' }, MDM.ui.phone.format(c.phone)) : null]) : null,
         row('Status', [MDM.ui.html(MDM.badgeFor(order.status, { customer: true })), ' ', MDM.ui.html(MDM.payBadge(order.payment.status))]),
         row('Collection', scheduleText(order)),
         row('Delivery', [el('span', { 'data-testid': 'checkout-method' }, MDM.deliveryMethodLabel((order.delivery || {}).method)), deliverySub(order)])),
       summary(order, settings));
   }
+  // Our accounts (BML and MIB, MVR and USD; the currency is in each name). One shared account name is shown once, above them.
   function bankSection(order, settings) {
     const banks = settings.banks || [];
+    const names = banks.map(b => b.accountName).filter((v, i, a) => v && a.indexOf(v) === i);
+    const shared = names.length === 1 ? names[0] : null;
     return el('section', { class: 'section', 'aria-labelledby': 'co-bank' },
       el('div', { class: 'section-head' }, el('h2', { id: 'co-bank' }, 'Our bank accounts')),
       el('div', { class: 'stack-4' },
-        MDM.store._live ? null : notice('info', 'info', 'Demo bank details, replace before launch.'),
-        el('div', { class: 'rate-table checkout-banks' }, banks.map(b => row(b.name, el('span', { class: 'checkout-copy checkout-copy--end' },
-          el('span', { class: 'checkout-account mono' }, b.accountNo), copyButton(b.accountNo, 'checkout-copy-account', 'account number')), { sub: 'Account name: ' + b.accountName }))),
+        el('div', { class: 'rate-table checkout-banks', 'data-testid': 'checkout-banks' },
+          shared ? row('Account name', el('span', { class: 'checkout-copy checkout-copy--end' }, el('span', { class: 'checkout-account', 'data-testid': 'checkout-account-name' }, shared), copyButton(shared, 'checkout-copy-name', 'account name'))) : null,
+          banks.map(b => row(el('span', { class: 'checkout-bank' }, b.name), el('span', { class: 'checkout-copy checkout-copy--end' },
+            el('span', { class: 'checkout-account mono' }, b.accountNo), copyButton(b.accountNo, 'checkout-copy-account', b.name + ' account number')), { sub: shared ? null : 'Account name: ' + b.accountName }))),
         el('p', { class: 'checkout-ref' }, 'Use the order code ', el('span', { class: 'mono' }, order.code), ' as the transfer reference.')));
   }
   function dropzone(slip) {
@@ -296,7 +301,6 @@
       banks.map(b => el('option', { value: b.id }, b.name)),
       el('option', { value: 'other' }, 'Other bank'));
     bankSelect.value = d.bank;
-    const amount = textInput('paidAmount', 'co-amount', { testid: 'paid-amount', attrs: { inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'next' } });
     const submitBtn = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'checkout-submit', disabled: state.busy === 'slip' }, 'Submit payment');
     const slipField = el('div', { class: 'field', 'data-field': 'slip' },
       el('span', { class: 'field__label', id: 'co-slip-label' }, 'Transfer slip'),
@@ -306,10 +310,6 @@
     fields.slip = slipField;
     const form = el('form', { class: 'form checkout-form', novalidate: true, 'data-testid': 'checkout-form', on: { submit: e => { e.preventDefault(); submit(form, submitBtn); } } },
       field('bank', 'co-bank-select', 'Paid from', bankSelect),
-      el('div', { class: 'grid-2' },
-        field('payerName', 'co-payer', 'Account holder name', textInput('payerName', 'co-payer', { testid: 'payer-name', attrs: { autocomplete: 'name', enterkeyhint: 'next' } })),
-        field('paidAmount', 'co-amount', 'Amount transferred', el('div', { class: 'input-affix' }, el('span', { class: 'input-affix__prefix', 'aria-hidden': 'true' }, 'MVR'), amount),
-          { hint: 'Due ' + MDM.pricing.format(order.totals.total) + '. Enter what your bank shows.' })),
       field('reference', 'co-ref', 'Transfer reference or transaction ID', textInput('reference', 'co-ref', { testid: 'reference', attrs: { autocomplete: 'off', enterkeyhint: 'done' } }), { optional: true }),
       slipField,
       el('div', { class: 'field__error', role: 'alert', 'data-testid': 'checkout-form-error', hidden: !state.formError }, state.formError || ''),
@@ -388,8 +388,10 @@
       let biz = null; try { biz = JSON.parse(localStorage.getItem('mdm:business') || 'null'); } catch (e) { biz = null; }
       const name = (order.customer && order.customer.name) || 'the business';
       const cod = order.cod && order.cod.amount > 0 && order.cod.status === 'pending' && ['delivered', 'returned'].indexOf(order.status) < 0 ? order.cod : null;
+      // Only the order's owner sees who arranged it (privacy, 24/10/2026).
+      const by = MDM.ownsOrder && !MDM.ownsOrder(order) ? 'This delivery is billed to the sender.' : 'This delivery is arranged by ' + name + ' and billed to them.';
       const text = biz && biz.accountId && biz.accountId === order.accountId ? 'No payment needed now. This order goes on your monthly business invoice.'
-        : 'Nothing to pay online. This delivery is arranged by ' + name + ' and billed to them.' + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash when the package arrives.' : '');
+        : 'Nothing to pay online. ' + by + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash when the package arrives.' : '');
       show(el('div', { 'data-testid': 'checkout-business' }, notice('info', 'info', text, trackAction(order))), '');
       return;
     }

@@ -23,7 +23,7 @@
   const REQUEST_STATUS = { pending: { label: 'Pending', kind: 'warn' }, approved: { label: 'Approved', kind: 'ok' }, declined: { label: 'Declined', kind: 'danger' } };
   const INVOICE_STATUS = { draft: { label: 'Draft', kind: 'neutral' }, sent: { label: 'Sent', kind: 'info' }, paid: { label: 'Paid', kind: 'ok' } };
   const VOLUMES = { '1-10': '1 to 10 a week', '11-30': '11 to 30 a week', '31-100': '31 to 100 a week', '100+': 'More than 100 a week' };
-  const WINDOWS = { morning: 'Morning 09:00 to 12:00', afternoon: 'Afternoon 13:00 to 17:00', evening: 'Evening 18:00 to 22:00' };
+  const WINDOWS = {}; (MDM.PICKUP_WINDOWS || []).forEach(w => { WINDOWS[w.value] = w.label; });
   const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const money = (n, o) => MDM.pricing.format(n, o);
   const fmtDate = (iso, o) => MDM.ui.fmtDate(iso, o);
@@ -235,7 +235,8 @@
       const rate = el('input', { class: 'input', type: 'number', inputmode: 'numeric', min: '1', step: '1', id: id + '-rate', value: opts.rate(t) == null ? '' : String(opts.rate(t)), 'data-testid': 'tier-rate-' + t.value, disabled: !cb.checked });
       cb.addEventListener('change', () => { rate.disabled = !cb.checked; MDM.ui.setError(rate.closest('.field'), null); if (cb.checked) rate.focus(); });
       const wrap = el('div', { class: 'tier-row', 'data-tier': t.value },
-        el('label', { class: 'checkbox', for: cb.id }, cb, el('span', null, t.label + ' · ' + MDM.pricing.sizeLabel(t.size), t.hint ? el('span', { class: 'hint' }, t.hint) : null)),
+        // Just the name: package sizes differ per business, so no Bag/Box or size description here (24/10/2026).
+        el('label', { class: 'checkbox', for: cb.id }, cb, el('span', null, t.label)),
         el('div', { class: 'field tier-row__rate' }, el('label', { for: rate.id }, 'Rate per package, MVR'), rate));
       return { t, cb, rate, wrap };
     });
@@ -624,7 +625,7 @@
     }
     async function renderList() {
       const [requests, accounts, orders, settings] = await Promise.all([MDM.store.list('business_requests'), MDM.store.list('business_accounts'), MDM.store.list('orders'), MDM.store.settings()]);
-      const files = await loadFiles(requests.map(r => r.packagePhotoId));
+      const files = await loadFiles([].concat.apply([], requests.map(r => MDM.requestPhotos(r).map(p => p.fileId))));
       if (!ctx || !ctx.alive) return;
       const pending = requests.filter(r => r.status === 'pending').length;
       const rc = ui.tabs.querySelector('[data-tab-count="requests"]'), ac = ui.tabs.querySelector('[data-tab-count="accounts"]');
@@ -634,22 +635,31 @@
       // A tab switch eases the new panel in once; live re-renders do not.
       if (enterNext) { enterNext = false; if (MDM.motion) MDM.motion.enter(ui.body); }
     }
-    // The business's own guess of its usual package (small / medium / large) as the size category name.
-    function guessText(r, settings) { const t = tierInfo(r.typicalSize, settings); return t ? t.label + ' · ' + MDM.pricing.sizeLabel(t.size) : (r.typicalSize || 'Not given'); }
+    // Where the business is: its zone, or an atoll island collected from the ferry or a speedboat (pickupFrom 'boat', 24/10/2026).
+    const islandText = r => r.pickupFrom === 'boat' ? 'Atoll island' : MDM.geo.zoneLabel(r.zone);
+    // The request's package photos (several since 24/10/2026, one before) as thumbnails with their notes.
+    function photoStrip(r, files, opts) {
+      opts = opts || {};
+      const photos = MDM.requestPhotos(r);
+      if (!photos.length) return opts.empty ? el('div', { class: 'approve-photo__none' }, 'No photo sent') : null;
+      return el('div', { class: 'row-3 row--wrap row--start', 'data-testid': opts.testid || null }, photos.map((ph, i) => el('figure', { class: 'stack-1', style: { maxWidth: opts.large ? '120px' : '80px', margin: 0 } },
+        photoThumb(files[ph.fileId], 'Package photo ' + (i + 1) + ' from ' + r.name + (ph.note ? ': ' + ph.note : ''), { large: opts.large, testid: opts.photoTestid || 'business-request-photo' }),
+        ph.note ? el('figcaption', { class: 'table__sub wrap-anywhere' }, ph.note) : null)));
+    }
     function requestsCard(requests, settings, files) {
       if (!requests.length) return card(null, empty('No requests yet.'));
       const sorted = requests.slice().sort((a, b) => (a.status === 'pending') === (b.status === 'pending') ? 0 : a.status === 'pending' ? -1 : 1);
       const cols = [
         { label: 'Business', primary: true, render: r => el('span', null, r.name, el('span', { class: 'table__sub nowrap' }, 'Requested ' + fmtDate(r.createdAt)), r.volume ? el('span', { class: 'table__sub nowrap' }, VOLUMES[r.volume] || r.volume) : null) },
         { label: 'Contact', nowrap: true, render: r => el('span', null, r.contactName || '', el('span', { class: 'table__sub' }, telLink(r.phone))) },
-        { label: 'Zone', render: r => el('span', null, MDM.geo.zoneLabel(r.zone), r.pickupAddress ? el('span', { class: 'table__sub table__address request-address', title: r.pickupAddress }, r.pickupAddress) : null) },
-        { label: 'Typical package', render: r => el('span', { class: 'pkg-cell', 'data-testid': 'business-request-package' },
-          el('span', null, r.typicalSize ? el('span', { class: 'nowrap' }, guessText(r, settings)) : 'No size given', el('span', { class: 'table__sub nowrap' }, r.typicalSize ? 'their guess' : (r.packagePhotoId ? '' : 'no photo sent')),
-            r.status === 'approved' && r.rates ? el('span', { class: 'table__sub' }, 'Agreed ' + Object.keys(r.rates).map(k => tierName(k, settings) + ' ' + money(r.rates[k])).join(' · ')) : null),
-          r.packagePhotoId ? photoThumb(files[r.packagePhotoId], 'Typical package from ' + r.name, { testid: 'business-request-photo' }) : null) },
+        { label: 'Zone', render: r => el('span', null, islandText(r), r.pickupAddress ? el('span', { class: 'table__sub table__address request-address', title: r.pickupAddress }, r.pickupAddress) : null,
+          r.pickupFrom === 'boat' ? el('span', { class: 'table__sub' }, 'From the ferry or speedboat') : null) },
+        { label: 'Packages', render: r => el('span', { class: 'stack-2', 'data-testid': 'business-request-package' },
+          photoStrip(r, files) || el('span', { class: 'table__sub nowrap' }, 'No photo sent'),
+          r.status === 'approved' && r.rates ? el('span', { class: 'table__sub' }, 'Agreed ' + Object.keys(r.rates).map(k => tierName(k, settings) + ' ' + money(r.rates[k])).join(' · ')) : null) },
         { label: 'Status', primary: true, render: r => badge(REQUEST_STATUS, r.status) },
         { label: 'Actions', actions: true, render: r => r.status !== 'pending' ? el('span', { class: 'table__sub' }, r.status === 'declined' && r.declineReason ? r.declineReason : '') : el('div', { class: 'table__actions-row actions-stack' },
-          el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-approve', on: { click: () => approve(r, files[r.packagePhotoId]) } }, 'Approve'),
+          el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-approve', on: { click: () => approve(r, files) } }, 'Approve'),
           el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'business-decline', on: { click: () => decline(r) } }, 'Decline')) },
       ];
       return card(null, table(cols, sorted.map(r => ({ data: r, attrs: { 'data-testid': 'business-request-row', 'data-request-id': r.id, 'data-status': r.status } })), { testid: 'business-requests' }));
@@ -668,8 +678,9 @@
       ];
       return card(null, table(cols, accounts.map(a => ({ data: a, attrs: { class: 'is-clickable', 'data-testid': 'business-account-row', 'data-account-id': a.id, 'data-status': a.status, on: { click: e => { if (e.target.closest('a, button')) return; navigate('#/business/' + a.id); } } } })), { testid: 'business-accounts' }));
     }
-    // §1.3: look at the typical package photo, pick the size categories the business sends and agree a fixed rate for each.
-    async function approve(r, photo) {
+    // §1.3: look at the package photos, pick the size categories the business sends and agree a fixed rate for each. The business no
+    // longer picks a size (24/10/2026), so every size starts ticked at its default rate; untick the ones they do not send.
+    async function approve(r, files) {
       try {
         const [settings, accounts] = await Promise.all([MDM.store.settings(), MDM.store.list('business_accounts')]);
         const existing = accounts.find(a => a.phone === r.phone);
@@ -682,21 +693,20 @@
           return;
         }
         const tiers = MDM.pricing.businessTiers(settings);
-        const guess = tiers.some(t => t.value === r.typicalSize) ? r.typicalSize : (tiers[0] || {}).value;
-        const editor = tierEditor(tiers, { picked: t => t.value === guess, rate: t => t.rate });
+        const editor = tierEditor(tiers, { picked: () => true, rate: t => t.rate });
         const notes = textarea('assessment', '', { rows: 2, placeholder: 'Cake boxes about 1 ft, fragile', 'data-testid': 'approve-assessment' });
+        const facts = [r.volume ? VOLUMES[r.volume] || r.volume : '', r.pickupFrom === 'boat' ? 'Atoll island, from the ferry or speedboat' : ''].filter(Boolean);
         const content = [
-          el('div', { class: 'approve-photo' },
-            photo ? photoThumb(photo, 'Typical package from ' + r.name, { large: true, testid: 'approve-photo' }) : el('div', { class: 'approve-photo__none' }, 'No photo sent'),
-            el('div', { class: 'approve-photo__text' },
-              el('p', null, el('strong', null, 'Their guess: '), r.typicalSize ? guessText(r, settings) : 'not given'),
-              r.volume ? el('p', { class: 'muted small' }, VOLUMES[r.volume] || r.volume) : null,
-              r.notes ? el('p', { class: 'muted small' }, r.notes) : null)),
+          el('div', { class: 'stack-3' },
+            photoStrip(r, files, { large: true, empty: true, testid: 'approve-photos', photoTestid: 'approve-photo' }),
+            facts.length || r.notes ? el('div', { class: 'approve-photo__text' },
+              facts.length ? el('p', { class: 'muted small' }, facts.join(' · ')) : null,
+              r.notes ? el('p', { class: 'muted small' }, r.notes) : null) : null),
           el('fieldset', { class: 'tier-fieldset' }, el('legend', { class: 'field__label' }, 'Package sizes and agreed rates'), editor.el),
           field('Assessment', notes, { optional: true, hint: 'Kept on the account' }),
         ];
         let account = null;
-        const ok = await formDialog({ title: 'Approve ' + r.name, message: 'Pick the sizes they send and agree a rate for each.', content, wide: true, okLabel: 'Approve and open account',
+        const ok = await formDialog({ title: 'Approve ' + r.name, message: 'Untick the sizes they do not send. Agree a rate for each.', content, wide: true, okLabel: 'Approve and open account',
           onOk: async () => { const rates = editor.read(); if (!rates) return false; account = await MDM.store.approveBusinessRequest(r.id, { rates, notes: notes.value.trim(), by: actor() }); return true; } });
         if (ok && account) toast('Account opened for ' + r.name + ': ' + ratesText(account, settings));
       } catch (e) { toast(storeMessage(e), 'danger'); }
@@ -734,7 +744,7 @@
     }
     async function renderAccount() {
       const [account, orders, invoices, settings] = await Promise.all([MDM.store.get('business_accounts', accountId), MDM.store.list('orders'), MDM.store.list('invoices', { where: { accountId } }), MDM.store.settings()]);
-      const files = account ? await loadFiles([account.packagePhotoId]) : {};
+      const files = account ? await loadFiles(MDM.requestPhotos(account).map(p => p.fileId)) : {};
       if (!ctx || !ctx.alive) return;
       if (!account) {
         root.replaceChildren(pageHead('Business account', null, null, BACK), card(null, empty('No account with this link.', 'It may have gone with a demo reset.')));
@@ -746,7 +756,7 @@
       const bulk = canView('bulk') ? el('a', { class: 'btn btn--secondary', href: '#/bulk?account=' + encodeURIComponent(account.id), 'data-testid': 'business-bulk' }, 'Bulk orders') : null;
       const head = pageHead(account.name, 'Since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · invoiced monthly' + (account.priorityAllowed ? ' · may request priority' : ''), [allOrders, bulk, generate].filter(Boolean), BACK);
       ui.head.replaceWith(head); ui.head = head;
-      renderRates(account, settings, files[account.packagePhotoId]);
+      renderRates(account, settings, files);
       renderPoints(account);
       renderCod(account, orders);
       const l = phone.links(account.phone);
@@ -756,7 +766,7 @@
         account.landline ? rateRow('Landline', phone.format(account.landline), { mono: true }) : null,
         rateRow('Email', account.email ? wrapValue(el('a', { href: 'mailto:' + account.email }, account.email)) : ''),
         account.tin ? rateRow('TIN', account.tin, { mono: true }) : null,
-        rateRow('Island', MDM.geo.zoneLabel(account.zone)),
+        rateRow('Island', account.pickupFrom === 'boat' ? 'Atoll island, from the ferry or speedboat' : MDM.geo.zoneLabel(account.zone)),
         rateRow('Pickup address', wrapValue(account.pickupAddress || '')),
         rateRow('Pickup window', WINDOWS[account.pickupWindow] || account.pickupWindow || ''),
         rateRow('Status', badge({ approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } }, account.status)),
@@ -790,19 +800,21 @@
         ui.invoices.replaceChildren(table(cols, invoices.map(i => ({ data: i, attrs: { 'data-testid': 'business-invoice-row', 'data-invoice-id': i.id, 'data-status': i.status } })), { testid: 'business-invoices' }));
       }
     }
-    // Package photo + assessment and the agreed rate per size category, with "Edit rates" (MDM.store.setBusinessRates).
-    function renderRates(account, settings, photo) {
+    // Package photos + assessment and the agreed rate per size category, with "Edit rates" (MDM.store.setBusinessRates).
+    function renderRates(account, settings, files) {
+      const photos = MDM.requestPhotos(account);
       const tiers = MDM.pricing.accountTiers(account, settings);
       const agreed = account.rates && Object.keys(account.rates).length;
       ui.ratesAction.replaceChildren(el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-edit-rates', on: { click: () => editRates(account, settings) } }, 'Edit rates'));
       const rows = el('div', { class: 'rate-table', 'data-testid': 'business-rates' },
         tiers.map(t => el('div', { class: 'rate-table__row', 'data-tier': t.value },
-          el('div', { class: 'rate-table__label' }, t.label + ' · ' + MDM.pricing.sizeLabel(t.size), t.hint ? el('small', null, t.hint) : null),
+          el('div', { class: 'rate-table__label' }, t.label),
           el('div', { class: 'rate-table__value mono', 'data-testid': 'business-rate-' + t.value }, money(t.rate)))),
         agreed ? null : el('p', { class: 'muted small' }, 'No agreed sizes yet: default rates apply.'));
       ui.rates.replaceChildren(el('div', { class: 'card__body account-rates' },
         el('div', { class: 'account-rates__photo' },
-          photoThumb(photo, 'Typical package from ' + account.name, { large: true, testid: 'business-package-photo' }),
+          photos.length > 1 ? el('div', { class: 'row-2 row--wrap row--start' }, photos.map((ph, i) => photoThumb(files[ph.fileId], 'Package photo ' + (i + 1) + ' from ' + account.name + (ph.note ? ': ' + ph.note : ''), { testid: 'business-package-photo' })))
+            : photoThumb(photos[0] ? files[photos[0].fileId] : null, 'Typical package from ' + account.name, { large: true, testid: 'business-package-photo' }),
           el('div', { class: 'account-rates__assess' }, el('div', { class: 'field__label' }, 'Assessment'), el('p', { 'data-testid': 'business-assessment' }, account.assessment || 'No assessment yet.'))),
         rows));
     }
@@ -905,7 +917,8 @@
 
   // ==== #/rates ================================================================================================================
   MDM.admin.views.rates = (function () {
-    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [], slot = null;
+    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [], slot = null, bankCount = 4;
+    const BANK_ROWS = 4;
     const SECTIONS = [{ id: 'rates-sizes', label: 'Package rates' }, { id: 'rates-fees', label: 'Fees' }, { id: 'rates-tiers', label: 'Business sizes' }, { id: 'rates-rules', label: 'Rules' },
       { id: 'rates-size-guide', label: 'Size guide' }, { id: 'rates-ops', label: 'Operations' }, { id: 'rates-banks', label: 'Bank accounts' }, { id: 'rates-terms', label: 'Terms and invoicing' }];
     async function mount(host) {
@@ -939,40 +952,44 @@
       }
       return { el: box, update };
     }
-    // Business size categories (§1.3, §5.2): label, hint, matching size and default rate. Edited in place; saved with the rest of the form.
+    // Business size categories (§1.3, §5.2): label, hint, matching size, default rate and the top of the range the business page shows
+    // ("from MVR 40–45", rateTo, 24/10/2026). Edited in place; saved with the rest of the form.
     function tierBlock(t, i) {
       const id = 'tier-' + (++fieldSeq);
       const sizeSel = select('tierSize', t.size || 'bag', [{ value: 'bag', label: 'Bag' }, { value: 'box', label: 'Box' }, { value: 'xl', label: 'XL' }], { id: id + '-size', 'data-testid': 'tier-size' });
       const row = { value: t.value || null, label: input('tierLabel', t.label, { id: id + '-label', 'data-testid': 'tier-label', placeholder: 'Medium' }), size: sizeSel,
-        rate: numInput('tierRate', t.rate, { id: id + '-rate', 'data-testid': 'tier-default-rate', min: '1' }), hint: input('tierHint', t.hint, { id: id + '-hint', 'data-testid': 'tier-hint', placeholder: 'A box up to about 2 ft' }) };
+        rate: numInput('tierRate', t.rate, { id: id + '-rate', 'data-testid': 'tier-default-rate', min: '1' }), rateTo: numInput('tierRateTo', t.rateTo == null ? '' : t.rateTo, { id: id + '-rate-to', 'data-testid': 'tier-rate-to', min: '1', placeholder: 'No range' }),
+        hint: input('tierHint', t.hint, { id: id + '-hint', 'data-testid': 'tier-hint', placeholder: 'A box up to about 2 ft' }) };
       const users = row.value ? accounts.filter(a => a.rates && a.rates[row.value] != null) : [];
       row.el = el('div', { class: 'tier-block', 'data-testid': 'rates-tier', 'data-tier': row.value || 'new' },
         el('div', { class: 'tier-block__head' }, el('span', { class: 'tier-block__title' }, 'Size category ' + (i + 1)),
           users.length ? el('span', { class: 'muted small' }, 'Agreed with ' + users.map(a => a.name).join(', ')) : null,
           el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'tier-remove', 'aria-label': 'Remove size category ' + (i + 1), on: { click: () => removeTier(row) } }, 'Remove')),
         el('div', { class: 'grid-2' }, field('Name', row.label), field('Matching size', row.size)),
-        el('div', { class: 'grid-2' }, field('Default rate, MVR', row.rate), field('Description', row.hint, { optional: true })));
+        el('div', { class: 'grid-2' }, field('From, MVR', row.rate), field('Up to, MVR', row.rateTo, { optional: true })),
+        field('Description', row.hint, { optional: true }));
       row.users = users;
       return row;
     }
     function drawTiers() { tierList.replaceChildren(...tierRows.map(r => r.el)); }
-    function renumber() { tierRows = tierRows.map((r, i) => { const keep = { value: r.value, label: r.label.value, size: r.size.value, rate: r.rate.value, hint: r.hint.value }; return tierBlock(keep, i); }); drawTiers(); }
+    function renumber() { tierRows = tierRows.map((r, i) => { const keep = { value: r.value, label: r.label.value, size: r.size.value, rate: r.rate.value, rateTo: r.rateTo.value, hint: r.hint.value }; return tierBlock(keep, i); }); drawTiers(); }
     async function removeTier(row) {
       if (row.users.length) { toast('Agreed with ' + row.users.map(a => a.name).join(', ') + '. Change their rates on the business account first.', 'warn'); return; }
       if (tierRows.length <= 1) { toast('Keep at least one size category', 'warn'); return; }
       tierRows = tierRows.filter(r => r !== row); dirty = true; renumber();
     }
-    function addTier() { tierRows.push(tierBlock({ label: '', size: 'box', rate: '', hint: '' }, tierRows.length)); dirty = true; drawTiers(); tierRows[tierRows.length - 1].label.focus(); }
+    function addTier() { tierRows.push(tierBlock({ label: '', size: 'box', rate: '', rateTo: '', hint: '' }, tierRows.length)); dirty = true; drawTiers(); tierRows[tierRows.length - 1].label.focus(); }
     function readTiers() {
       let bad = null; const used = new Set();
       const out = tierRows.map(r => {
-        const lbl = r.label.value.trim(), rate = String(r.rate.value || '').trim();
-        MDM.ui.setError(r.label.closest('.field'), null); MDM.ui.setError(r.rate.closest('.field'), null);
+        const lbl = r.label.value.trim(), rate = String(r.rate.value || '').trim(), to = String(r.rateTo.value || '').trim();
+        MDM.ui.setError(r.label.closest('.field'), null); MDM.ui.setError(r.rate.closest('.field'), null); MDM.ui.setError(r.rateTo.closest('.field'), null);
         if (!lbl) { MDM.ui.setError(r.label.closest('.field'), 'Enter a name'); bad = bad || r.label; }
         else if (used.has(lbl.toLowerCase())) { MDM.ui.setError(r.label.closest('.field'), 'Two categories have this name'); bad = bad || r.label; }
         used.add(lbl.toLowerCase());
         if (!/^\d+$/.test(rate) || Number(rate) < 1) { MDM.ui.setError(r.rate.closest('.field'), 'Enter a whole number above 0'); bad = bad || r.rate; }
-        return { value: r.value, label: lbl, hint: r.hint.value.trim(), size: r.size.value, rate: Number(rate) };
+        else if (to && (!/^\d+$/.test(to) || Number(to) <= Number(rate))) { MDM.ui.setError(r.rateTo.closest('.field'), 'Enter a whole number above the from rate, or leave it empty'); bad = bad || r.rateTo; }
+        return { value: r.value, label: lbl, hint: r.hint.value.trim(), size: r.size.value, rate: Number(rate), rateTo: to ? Number(to) : null };
       });
       if (bad) return { bad };
       const keys = new Set(out.filter(t => t.value).map(t => t.value));
@@ -991,8 +1008,9 @@
       const ranges = rangesPreview();
       tierRows = MDM.pricing.businessTiers(s).map(tierBlock);
       tierList = el('div', { class: 'tier-list', 'data-testid': 'rates-tiers' });
-      const ops = s.ops || {}, hours = ops.hours || {}, banks = (s.banks || []).slice(0, 2);
-      while (banks.length < 2) banks.push({ id: banks.length ? 'bank2' : 'bank1', name: '', accountName: '', accountNo: '' });
+      const ops = s.ops || {}, hours = ops.hours || {}, banks = (s.banks || []).slice();
+      bankCount = Math.max(BANK_ROWS, banks.length);
+      while (banks.length < bankCount) banks.push({ id: 'bank' + (banks.length + 1), name: '', accountName: '', accountNo: '' });
       // Same section rhythm as #/settings (SPEC §2.5): <section aria-labelledby> → .section-head (H2 + caption as its desc) → full-width card,
       // with the fields inside capped at the 640px form width by .form-card__body.
       // One <section aria-labelledby> per group: an H2 (with a "To confirm" tag where the figure is an assumption), a short note, one
@@ -1006,7 +1024,7 @@
           el('div', { class: 'rates-cargo' }, field('Maldivian Cargo fee, MVR', numInput('cargo', s.rates.cargo), { hint: 'Once per Maldivian Cargo order' })),
           el('div', { class: 'grid-2' }, field('Airport fee, MVR', numInput('airport', s.rates.airport), { hint: 'Per order or package, see Rules' }), field('Shopping fee, % of receipt', numInput('shoppingPct', s.rates.shoppingPct, { max: '100' }))),
           el('div', { class: 'grid-2' }, field('Extra vehicle, MVR', numInput('vehicle', s.rates.vehicle == null ? '' : s.rates.vehicle, { placeholder: 'Ask each time' }), { optional: true, hint: 'Empty: enter it each time' }), field('Business rate, no sizes, MVR', numInput('business', s.rates.business), { hint: 'Older accounts only' }))]),
-        formSection('rates-tiers', 'Business sizes', 'The default rate is the starting offer to a business.', [
+        formSection('rates-tiers', 'Business sizes', 'From is the default offer. Up to shows a range: from MVR 40–45.', [
           tierList,
           el('div', null, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'rates-tier-add', on: { click: addTier } }, icon('plus'), 'Add size'))]),
         formSection('rates-rules', 'Rules', null, [
@@ -1024,8 +1042,10 @@
           el('div', { class: 'grid-3' }, field('City speed, km/h', numInput('speedCityKmh', ops.speedCityKmh)), field('Bridge speed, km/h', numInput('speedHighwayKmh', ops.speedHighwayKmh)), field('Peak buffer, minutes', numInput('peakBufferMin', ops.peakBufferMin))),
           field('Peak windows', input('peakWindows', (ops.peakWindows || []).join(', ')), { hint: '24 h, comma separated: 08:00-09:30' }),
           field('Closed windows', input('closedWindows', (ops.closedWindows || []).join(', ')), { hint: 'Optional day first: Fri 12:00-13:30' })], MDM.store._live ? null : 'Demo defaults'),
-        formSection('rates-banks', 'Bank accounts', 'On checkout and invoices. The reference is the order or invoice number.', banks.map((b, i) => el('div', { class: 'grid-3' },
-          field('Bank ' + (i + 1), input('banks.' + i + '.name', b.name)), field('Account name', input('banks.' + i + '.accountName', b.accountName)), field('Account number', input('banks.' + i + '.accountNo', b.accountNo, { class: 'input mono', inputmode: 'numeric' }))))),
+        // Four accounts (24/10/2026): BML and MIB, each in MVR and USD. The currency is part of the name ("BML USD") so every page shows it.
+        formSection('rates-banks', 'Bank accounts', 'On checkout and invoices, with the currency in the name.', banks.map((b, i) => el('div', { class: 'grid-3', 'data-testid': 'rates-bank' },
+          field('Account ' + (i + 1), input('banks.' + i + '.name', b.name, { placeholder: i % 2 ? 'BML USD' : 'BML MVR' })), field('Account name', input('banks.' + i + '.accountName', b.accountName)),
+          field('Account number', input('banks.' + i + '.accountNo', b.accountNo, { class: 'input mono', inputmode: 'numeric' }))))),
         formSection('rates-terms', 'Terms and invoicing', null, [
           field('What we carry', textarea('terms', s.terms), { hint: 'Shown at sign-up and guest checkout' }),
           el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides GST on invoices' }))]),
@@ -1045,7 +1065,12 @@
         'hours.open': timeRule, 'hours.close': timeRule, slotStart: timeRule, slotEnd: timeRule, peakWindows: windowsRule, closedWindows: windowsRule,
         'guide.bag': textRule, 'guide.box': textRule, 'guide.xl': textRule, terms: textRule, asapText: textRule, reviewText: textRule, businessReplyText: textRule, days: textRule };
       ['bag', 'box', 'xl'].forEach(size => ['same', 'cross'].forEach(side => { rules['sizes.' + size + '.' + side] = intRule; }));
-      [0, 1].forEach(i => { rules['banks.' + i + '.name'] = textRule; rules['banks.' + i + '.accountName'] = textRule; rules['banks.' + i + '.accountNo'] = textRule; });
+      // The first account is required; any other row is either empty (dropped) or complete.
+      const bankRow = i => ['name', 'accountName', 'accountNo'].map(k => val(form, 'banks.' + i + '.' + k));
+      for (let i = 0; i < bankCount; i++) {
+        const filled = i === 0 || bankRow(i).some(Boolean);
+        ['name', 'accountName', 'accountNo'].forEach(k => { rules['banks.' + i + '.' + k] = filled ? textRule : () => null; });
+      }
       rules.vehicle = v => v === '' ? null : intRule(v);
       const r = MDM.ui.validate(form, rules);
       const t = readTiers();
@@ -1061,7 +1086,7 @@
         ops: { hours: { open: v['hours.open'], close: v['hours.close'] }, days: v.days, asapText: v.asapText, reviewText: v.reviewText, businessReplyText: v.businessReplyText,
           slotStart: v.slotStart, slotEnd: v.slotEnd, slotMinutes: n('slotMinutes'), speedCityKmh: n('speedCityKmh'), speedHighwayKmh: n('speedHighwayKmh'), peakBufferMin: n('peakBufferMin'),
           peakWindows: list('peakWindows'), closedWindows: list('closedWindows') },
-        banks: [0, 1].map(i => ({ id: (cur.banks && cur.banks[i] && cur.banks[i].id) || ('bank' + (i + 1)), name: v['banks.' + i + '.name'], accountName: v['banks.' + i + '.accountName'], accountNo: v['banks.' + i + '.accountNo'] })),
+        banks: Array.from({ length: bankCount }, (x, i) => i).filter(i => v['banks.' + i + '.name']).map(i => ({ id: (cur.banks && cur.banks[i] && cur.banks[i].id) || ('bank' + (i + 1)), name: v['banks.' + i + '.name'], accountName: v['banks.' + i + '.accountName'], accountNo: v['banks.' + i + '.accountNo'] })),
         terms: v.terms, invoiceDueDays: n('invoiceDueDays'), gstPercent: n('gstPercent'),
       };
       const btn = form.querySelector('[data-testid="rates-save"]');

@@ -3,18 +3,20 @@
 // mount() runs once at load, fills the static markup right away and completes the settings-dependent parts after MDM.store.ready.
 (function (MDM) { 'use strict';
   const BRAND = 'Mr. Delivery Man';
-  // Four main links; the phone menu adds the e-store and the account link. Section links point at the home page's sections.
+  // Four main links left of the centred logo; the phone menu adds Questions and the account link. Section links point at the home
+  // page's sections. Delivery rates are not on the public pages (client, 24 Oct): they show when an order is placed.
   const PUBLIC_NAV = [
     { label: 'Services', href: '#services', page: null },
-    { label: 'Rates', href: '#rates', page: null },
     { label: 'Track', href: 'track/', page: 'track' },
+    { label: 'Store', href: 'store/', page: 'store' },
     { label: 'Business', href: 'business/', page: 'business' },
   ];
-  const MENU_MORE = [{ label: 'E-store', href: 'store/', page: 'store' }, { label: 'Questions', href: '#faq', page: null }];
+  const MENU_MORE = [{ label: 'Questions', href: '#faq', page: null }];
+  // Public links only: drivers, staff and the office have their own addresses (login/?as=…, admin/).
   const FOOTER_COLUMNS = [
-    { title: 'Services', links: [{ label: 'Pick & Deliver', href: 'request/?category=pick' }, { label: 'Shop & Deliver', href: 'request/?type=shop_buy' }, { label: 'Postal & courier', href: 'request/?type=postal' }, { label: 'Business Delivery', href: 'business/' }, { label: 'E-store', href: 'store/' }] },
+    { title: 'Services', links: [{ label: 'Pick & Deliver', href: 'request/?category=pick' }, { label: 'Shop & Deliver', href: 'request/?type=shop_buy' }, { label: 'Business Delivery', href: 'business/' }, { label: 'E-store', href: 'store/' }] },
     { title: 'Orders', links: [{ label: 'Request a delivery', href: 'request/' }, { label: 'Track an order', href: 'track/' }, { label: 'My orders', href: 'account/' }, { label: 'Questions', href: '#faq' }] },
-    { title: 'Sign in', links: [{ label: 'Customers', href: 'login/' }, { label: 'Businesses', href: 'login/?as=business' }, { label: 'Drivers', href: 'login/?as=driver' }, { label: 'Staff', href: 'login/?as=staff' }, { label: 'Office', href: 'login/?as=admin' }] },
+    { title: 'Sign in', links: [{ label: 'Customers', href: 'login/' }, { label: 'Businesses', href: 'login/?as=business' }] },
   ];
   const ADMIN_NAV = [
     { view: 'overview', label: 'Overview', icon: 'dashboard', group: 'Operations' },
@@ -136,7 +138,13 @@
     }
     return null;
   }
-  // hoursLine(settings?, date?) → 'Open today 09:00 to 23:00 · Malé and Hulhumalé' or 'Closed now, open from 09:00' in local time.
+  // '09:00' → '9am', '23:00' → '11pm', '13:30' → '1:30pm'.
+  function clock12(t) {
+    const m = toMin(t); if (m == null) return String(t || '');
+    const h = Math.floor(m / 60) % 24, min = m % 60;
+    return ((h % 12) || 12) + (min ? ':' + String(min).padStart(2, '0') : '') + (h < 12 ? 'am' : 'pm');
+  }
+  // hoursLine(settings?, date?) → 'Open 9am to 11pm' or 'Closed now · opens 9am' in local time.
   function hoursLine(s, date) {
     s = s || settingsCache || {};
     const ops = s.ops || {}, hours = ops.hours || {};
@@ -146,9 +154,9 @@
     const a = toMin(open), b = toMin(close);
     const isOpen = a == null || b == null ? true : (a <= b ? cur >= a && cur < b : cur >= a || cur < b);
     const pause = closedWindowEnd(ops, d);
-    if (pause) return 'Closed now, open from ' + pause;
-    if (!isOpen) return 'Closed now, open from ' + open;
-    return 'Open today ' + open + ' to ' + close + ' · Malé and Hulhumalé';
+    if (pause) return 'Closed now · opens ' + clock12(pause);
+    if (!isOpen) return 'Closed now · opens ' + clock12(open);
+    return 'Open ' + clock12(open) + ' to ' + clock12(close);
   }
 
   // ---- Theme: light / dark, remembered per device; the inline <head> snippet applies it before first paint ----------
@@ -184,16 +192,26 @@
   if (!document.documentElement.dataset.theme) document.documentElement.dataset.theme = currentTheme();
 
   // ---- Public header ------------------------------------------------------------------------------------------------------
-  // The account link follows whoever is signed in on this device: a customer's orders, a business portal, the office, a driver's
-  // jobs or the staff portal; visitors get "Sign in".
+  // The logo drives in: once per visit (first page of a browser session) a short intro shows the mark full screen, the rider rides
+  // across and the page appears; on every page the header mark then rolls in. Pointer events pass through, so nothing waits on it;
+  // reduced motion skips both, and automated browsers (the regression scripts) skip the full-screen part.
+  function introOnce(brand) {
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) return;
+    brand.classList.add('brand--enter');
+    let seen = true; try { seen = !!sessionStorage.getItem('mdm:intro'); sessionStorage.setItem('mdm:intro', '1'); } catch (e) { seen = true; }
+    if (seen || navigator.webdriver) return;
+    const intro = el('div', { class: 'intro', 'aria-hidden': 'true' }, el('span', { class: 'intro__mark', html: RIDER }), el('span', { class: 'intro__road' }));
+    document.body.appendChild(intro);
+    setTimeout(() => intro.classList.add('is-out'), 1250);
+    setTimeout(() => intro.remove(), 1900);
+  }
+  // The account link follows a signed-in customer (their orders) or business (its portal); everyone else gets "Sign in". The team's
+  // own pages (office, drivers, staff) are never advertised on the public site.
   function accountLink(page) {
     const read = (store, key) => { try { return JSON.parse(store.getItem(key) || 'null'); } catch (e) { return null; } };
-    const me = read(localStorage, 'mdm:me'), biz = read(localStorage, 'mdm:business'), office = read(localStorage, 'mdm:session');
-    let drv = null; try { drv = read(sessionStorage, 'mdm:driver'); } catch (e) { drv = null; }
-    const staff = read(localStorage, 'mdm:staff');
-    const pick = me && me.phone ? ['My orders', 'account/', 'account'] : biz && biz.accountId ? ['Business portal', 'business/', 'business']
-      : office && office.user ? ['Office', 'admin/', 'admin'] : drv && drv.driverId ? ['My jobs', 'driver/', 'driver']
-      : staff && staff.staffId ? ['Staff portal', 'staff/', 'staff'] : ['Sign in', 'login/', 'login'];
+    const me = read(localStorage, 'mdm:me'), biz = read(localStorage, 'mdm:business');
+    const pick = me && me.phone ? ['My orders', 'account/', 'account'] : biz && biz.accountId ? ['Business portal', 'business/', 'business'] : ['Sign in', 'login/', 'login'];
     return el('a', { class: 'btn btn--ghost site-header__account', href: MDM.href(pick[1]), 'aria-current': page === pick[2] ? 'page' : null }, pick[0]);
   }
   function renderHeader(header) {
@@ -215,8 +233,11 @@
     Array.from(nav.children).forEach((n, i) => n.style.setProperty('--i', String(i)));
     const toggle = el('button', { type: 'button', class: 'btn btn--ghost btn--icon site-header__toggle', 'aria-expanded': 'false', 'aria-controls': 'site-nav', 'aria-label': 'Menu' }, iconNode('menu', 20));
     const cta = el('a', { class: 'btn btn--brand', href: MDM.href('request/') }, el('span', { class: 'site-header__cta-long' }, 'Request a delivery'), el('span', { class: 'site-header__cta-short' }, 'Request'));
-    const actions = el('div', { class: 'site-header__actions' }, themeToggle(), accountLink(page), cta, toggle);
-    header.appendChild(el('div', { class: 'container' }, brandLink(MDM.href('')), nav, actions));
+    const actions = el('div', { class: 'site-header__actions' }, themeToggle(), accountLink(page), cta);
+    // Links left, the logo in the middle, account and CTA right (phones: menu left, logo middle, CTA right).
+    const brand = brandLink(MDM.href(''));
+    header.appendChild(el('div', { class: 'container' }, toggle, nav, brand, actions));
+    introOnce(brand);
     // The hairline under the bar shows once the page has scrolled.
     const onScroll = () => header.classList.toggle('is-scrolled', window.scrollY > 4);
     window.addEventListener('scroll', onScroll, { passive: true }); onScroll();
@@ -237,7 +258,7 @@
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && open) { setOpen(false); toggle.focus(); } });
     // The toggle swaps its icon on click, which detaches e.target; composedPath() still resolves the click to the header.
     document.addEventListener('click', e => { if (open && !e.composedPath().includes(header)) setOpen(false); });
-    const mq = window.matchMedia('(min-width: 861px)');
+    const mq = window.matchMedia('(min-width: 961px)');
     const onMq = () => { if (mq.matches && open) setOpen(false); };
     if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
   }

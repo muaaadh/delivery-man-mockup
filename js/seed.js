@@ -17,11 +17,8 @@
         businessTiers: MDM.DEFAULT_BUSINESS_TIERS.map(x => Object.assign({}, x)) },
       rules: { airportReplacesCross: true, cargoFeePer: 'order', airportFeePer: 'order', paymentTiming: 'after_delivery', upfrontOptional: true, naaluBillable: false },
       sizeGuide: { bag: 'Fits in a carrier bag, under about 1 ft (30 cm): documents, food, small parcels', box: 'A carton up to about 2 ft (60 cm) a side, strapped on the bike', xl: 'Bigger than a box or needs two hands; may need a vehicle, price confirmed first' },
-      ops: { hours: { open: '09:00', close: '23:00' }, days: 'Every day', asapText: 'Usually within 60 to 90 minutes in Malé and Hulhumalé', reviewText: 'about 30 minutes', businessReplyText: 'within 1 working day', slotStart: '09:00', slotEnd: '23:00', slotMinutes: 120, speedCityKmh: 18, speedHighwayKmh: 40, peakBufferMin: 10, peakWindows: ['08:00-09:30', '17:00-19:30'], closedWindows: ['Fri 12:00-13:30'] },
-      banks: [
-        { id: 'bml', name: 'Bank of Maldives', accountName: 'Mr. Delivery Man', accountNo: '7730 0000 12345' },
-        { id: 'mib', name: 'Maldives Islamic Bank', accountName: 'Mr. Delivery Man', accountNo: '9010 0000 67890' },
-      ],
+      ops: { hours: { open: '09:00', close: '23:00' }, days: 'Every day', asapText: 'Usually within 60 to 90 minutes in Malé and Hulhumalé', reviewText: 'about 30 minutes', businessReplyText: 'within 3 working hours', slotStart: '09:00', slotEnd: '23:00', slotMinutes: 120, speedCityKmh: 18, speedHighwayKmh: 40, peakBufferMin: 10, peakWindows: ['08:00-09:30', '17:00-19:30'], closedWindows: ['Fri 12:00-13:30'] },
+      banks: MDM.DEFAULT_BANKS.map(x => Object.assign({}, x)),
       contact: { phone: '7770000', whatsapp: '7770000', viber: '7770000', email: 'hello@example.com' },
       terms: "We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.",
       notice: { text: 'Sinamalé Bridge closed to motorcycles during heavy rain, Hulhumalé deliveries may be delayed', active: false },
@@ -661,7 +658,9 @@
         ] },
     ];
     const business_requests = [
-      { id: 'breq_shifa', name: "Shifa's Cakes", contactName: 'Shifa Ibrahim', phone: '7556677', landline: '', email: 'shifa.cakes@example.com', zone: 'hulhumale_p1', pickupAddress: 'Rehendhi Flat 2, Apt 108', pickupWindow: 'afternoon', volume: '11-30', notes: 'Home baker, mostly cake boxes to Phase 1 and 2. Fragile.', status: 'pending', typicalSize: 'medium', packagePhotoId: photo('file_breq_shifa', 'business_package', null, 'Typical package: a cake box', t(days(1, 2)), 'box'), createdAt: t(days(1, 2)), updatedAt: t(days(1, 2)) },
+      { id: 'breq_shifa', name: "Shifa's Cakes", contactName: 'Shifa Ibrahim', phone: '7556677', landline: '', email: 'shifa.cakes@example.com', zone: 'hulhumale_p1', pickupAddress: 'Rehendhi Flat 2, Apt 108', pickupWindow: 'afternoon', volume: '11-30', notes: 'Home baker, mostly cake boxes to Phase 1 and 2. Fragile.', status: 'pending',
+        photos: [{ fileId: photo('file_breq_shifa', 'business_package', null, 'Typical package: a cake box', t(days(1, 2)), 'box'), note: 'Cake box, about 1 ft' }, { fileId: photo('file_breq_shifa_2', 'business_package', null, 'Cupcakes in a carrier bag', t(days(1, 2)), 'bag'), note: 'Cupcakes, 6 in a bag' }],
+        packagePhotoId: 'file_breq_shifa', createdAt: t(days(1, 2)), updatedAt: t(days(1, 2)) },
       { id: 'breq_kandu', name: 'Kandu Books & Stationery', contactName: 'Ahmed Shafeeu', phone: '7801122', landline: '3321122', email: 'orders@kandubooks.example', zone: 'male', pickupAddress: A.kandu.address, pickupWindow: 'afternoon', volume: '11-30', notes: 'School textbook season is busiest.', status: 'approved', createdAt: t(days(42)), updatedAt: t(days(40)) },
     ];
     const invLines = [];

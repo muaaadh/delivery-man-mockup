@@ -6,7 +6,8 @@
 // staff → localStorage mdm:staff, office → localStorage mdm:session { user, staffId, role, name }.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
-  // The customer's mobile-number sign-in is the default; the other four are a quiet row of chips under the form ("Not a customer?").
+  // The customer's mobile-number sign-in is the default; business sign-in is a quiet chip under the form. The team's sign-ins open
+  // from their own links (?as=driver|staff|admin).
   const ROLES = [
     { value: 'customer', label: 'Customer', title: 'Sign in', icon: 'user' },
     { value: 'business', label: 'Business', title: 'Business sign-in', icon: 'building' },
@@ -14,6 +15,7 @@
     { value: 'staff', label: 'Staff', title: 'Staff sign-in', icon: 'clock' },
     { value: 'admin', label: 'Office', title: 'Office sign-in', icon: 'dashboard' },
   ];
+  const PUBLIC_ROLES = ['customer', 'business'];
   const params = new URLSearchParams(location.search);
   const asParam = params.get('as') === 'rider' ? 'driver' : params.get('as');
   const state = { role: ROLES.some(r => r.value === asParam) ? asParam : 'customer', phone: params.get('phone') || '', step: 1, next: params.get('next') || '', reset: null };
@@ -38,10 +40,13 @@
     const role = ROLES.find(r => r.value === state.role);
     const forms = { customer: () => (state.step === 3 ? signupForm() : phoneForm('customer')), business: () => phoneForm('business'), driver: driverForm, staff: staffForm, admin: state.reset ? resetForm : officeForm };
     const v = forms[state.role]();
-    const others = state.step === 1 && !state.reset ? el('nav', { class: 'login-other', 'aria-labelledby': 'login-other-h' },
-      el('h2', { id: 'login-other-h', class: 'login-other__title' }, state.role === 'customer' ? 'Not a customer?' : 'Other sign-ins'),
+    // Only the public sign-ins are offered here: customers and businesses. Drivers, staff and the office keep their own addresses
+    // (login/?as=driver|staff|admin, admin/) and are never listed on the public site.
+    const offered = ROLES.filter(r => PUBLIC_ROLES.indexOf(r.value) >= 0 && r.value !== state.role);
+    const others = state.step === 1 && !state.reset && offered.length ? el('nav', { class: 'login-other', 'aria-labelledby': 'login-other-h' },
+      el('h2', { id: 'login-other-h', class: 'login-other__title' }, state.role === 'customer' ? 'Have a business account?' : state.role === 'business' ? 'Ordering for yourself?' : 'Other sign-ins'),
       el('div', { class: 'login-roles', role: 'group', 'aria-labelledby': 'login-other-h', 'data-testid': 'login-role' },
-        ROLES.map(r => el('button', { type: 'button', class: 'chip login-role', 'aria-pressed': r.value === state.role ? 'true' : 'false', hidden: r.value === state.role, 'data-testid': 'login-role-' + r.value,
+        offered.map(r => el('button', { type: 'button', class: 'chip login-role', 'aria-pressed': r.value === state.role ? 'true' : 'false', hidden: r.value === state.role, 'data-testid': 'login-role-' + r.value,
           on: { click: () => { state.role = r.value; state.step = 1; state.reset = null; render(); const first = view.querySelector('.login-form input, .login-form select'); if (first) first.focus(); } } },
           html(MDM.icon(r.icon, 16)), r.label)))) : null;
     view.replaceChildren(el('div', { class: 'login' }, head(v.title || role.title, v.desc), v.form, others));

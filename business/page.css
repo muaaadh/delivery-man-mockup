@@ -1,5 +1,8 @@
 /* For businesses: public page + business portal. Components (rate-table, steps, form, card, alert, kpi, table) come from css/base.css. */
 body.page-business .business-note { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
+/* Public rates: the prices in brand red (24/10/2026) */
+body.page-business .biz-price { color: var(--brand); font-weight: 600; }
+body.page-business .biz-rates-public .rate-table__label { font-size: 15px; color: var(--text); }
 
 /* Public page: sign-in strip, feature tiles, request form */
 body.page-business .biz-public .page-head { margin-bottom: 28px; }
@@ -111,6 +114,20 @@ body.page-business .field.is-invalid .dropzone { border-color: var(--danger); }
 body.page-business .biz-photo .dropzone__preview { flex-wrap: wrap; }
 body.page-business .biz-received-photo, body.page-business .biz-photo-note { gap: 12px; align-items: center; }
 body.page-business .biz-received-photo p, body.page-business .biz-photo-note p { flex: 1 1 200px; min-width: 0; }
+/* Several package photos, each with a note (24/10/2026) */
+body.page-business .biz-photos { display: grid; gap: 10px; margin: 0 0 16px; padding: 0; list-style: none; }
+body.page-business .biz-photos[hidden] { display: none; }
+body.page-business .biz-photos__item { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+body.page-business .biz-photos__thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--card); }
+body.page-business .biz-photos__note { min-width: 0; background: var(--card); }
+body.page-business .biz-photos__remove { margin-top: 0; }
+body.page-business .biz-received-photos { display: flex; flex-wrap: wrap; gap: 8px; }
+html[data-theme="dark"] body.page-business .biz-photos__thumb { background: var(--surface); }
+@media (max-width: 480px) {
+  body.page-business .biz-photos__item { grid-template-columns: 48px minmax(0, 1fr); row-gap: 6px; }
+  body.page-business .biz-photos__thumb { width: 48px; height: 48px; grid-row: span 2; }
+  body.page-business .biz-photos__remove { justify-self: start; min-height: 44px; padding-left: 0; }
+}
 
 /* Collection block */
 body.page-business .biz-point-summary { margin-top: 6px; overflow-wrap: anywhere; }

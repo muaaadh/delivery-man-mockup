@@ -27,3 +27,5 @@ body.page-checkout .checkout-panel .btn--primary { margin-top: 20px; }
 }
 body.page-checkout .checkout-account { white-space: nowrap; }
 body.page-checkout .checkout-banks .rate-table__row { grid-template-columns: minmax(0, 1fr) auto; }
+/* Bank name with its currency ("BML USD"), level with the account number */
+body.page-checkout .checkout-banks .checkout-bank { font-size: 15px; font-weight: 500; color: var(--text); }

@@ -15,3 +15,5 @@ body.page-order-invoice .invoice-foot { margin-top: 32px; font-size: 13px; line-
 body.page-order-invoice .invoice-drop { display: block; }
 body.page-order-invoice .invoice-drop + .invoice-drop { margin-top: 4px; }
 body.page-order-invoice .invoice-actions .btn, body.page-order-invoice .empty .btn { min-height: 44px; }
+body.page-order-invoice .invoice-private__actions { margin-top: 16px; }
+body.page-order-invoice .invoice-bank { font-weight: 500; color: var(--text); }
