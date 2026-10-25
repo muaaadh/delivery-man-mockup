@@ -40,7 +40,13 @@ body.page-home .hero__actions { display: flex; flex-wrap: wrap; gap: 12px; margi
 /* The phone stands in front of a red panel; on load the panel opens out and the phone rises into place, then scrolling lifts
    the phone a little (a scrubbed scene in home.js sets --lift on the wrapper, never on the animated node). */
 body.page-home .hero__visual { position: relative; display: flex; flex-direction: column; align-items: center; padding: 8px 0; }
-body.page-home .hero__panel { position: absolute; left: 0; right: 0; top: 96px; bottom: 96px; background: var(--red); border-radius: 36px; }
+body.page-home .hero__panel { position: absolute; left: 0; right: 0; top: 96px; bottom: 96px; overflow: hidden; background: var(--red); border-radius: 36px; isolation: isolate; }
+/* The bridge from the air, toned to the brand red: the photo's light and shade over the red panel, a soft sheen across the top. */
+body.page-home .hero__photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 42%; filter: grayscale(1) contrast(1.15) brightness(1.05); mix-blend-mode: luminosity; opacity: .78; }
+body.page-home .hero__panel::after { content: ""; position: absolute; inset: 0; background: linear-gradient(160deg, rgba(255, 255, 255, .14), transparent 45%), linear-gradient(0deg, rgba(120, 0, 24, .35), transparent 55%); }
+html[data-theme="dark"] body.page-home .hero__photo { filter: grayscale(1) contrast(1.2) brightness(.82); }
+html.motion:not(.reduce-motion) body.page-home .hero__photo { transform: scale(1.12); transition: transform 2.4s var(--ease-out) .15s; }
+html.motion body.page-home .hero__visual.is-in .hero__photo { transform: none; }
 body.page-home .hero__lift { position: relative; transform: translate3d(0, var(--lift, 0px), 0); will-change: transform; }
 html.motion:not(.reduce-motion) body.page-home .hero__panel { opacity: 0; transform: scale(.9); transition: opacity .8s ease .15s, transform 1.2s var(--ease-out) .15s; }
 html.motion:not(.reduce-motion) body.page-home .hero__float { opacity: 0; transform: translateY(80px) scale(.96); transition: opacity .9s ease .3s, transform 1.3s var(--ease-out) .3s; }
@@ -49,13 +55,20 @@ html.motion body.page-home .hero__visual.is-in .hero__panel, html.motion body.pa
 /* The road along the bottom edge of the hero: it draws in from the left, the centre line appears, a small rider rides it once. */
 body.page-home .hero__road { position: absolute; left: 0; right: 0; bottom: 0; height: 12px; background: var(--red); transform-origin: left center; }
 body.page-home .hero__lane { position: absolute; left: 0; right: 0; top: 5px; height: 2px; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .7) 0 18px, transparent 18px 36px); }
-body.page-home .hero__rider { position: absolute; left: 0; bottom: 100%; margin-bottom: 1px; width: 42px; height: 34px; background: var(--red); -webkit-mask: url(assets/logo-rider.svg) center / contain no-repeat; mask: url(assets/logo-rider.svg) center / contain no-repeat; opacity: 0; }
-html.motion:not(.reduce-motion) body.page-home .hero__road { animation: road-draw 1.4s var(--ease-out) .45s both; }
-html.motion:not(.reduce-motion) body.page-home .hero__lane { animation: lane-in .8s ease 1.4s both; }
-html.motion:not(.reduce-motion) body.page-home .hero__rider { animation: road-ride 4.6s var(--ease-in-out) 1.9s both; }
-@keyframes road-draw { from { transform: scaleX(0); } to { transform: none; } }
-@keyframes lane-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes road-ride { from { opacity: 1; transform: translateX(-60px); } to { opacity: 1; transform: translateX(calc(100vw + 20px)); } }
+/* The logo's rider (home.js fills it): it rolls onto the road at the left edge of the content, wheels spinning down, then rides
+   along with the scroll (--rx on the inner span; the wheels turn with the distance). */
+body.page-home .hero__rider { position: absolute; left: max(var(--gutter), calc(50% - var(--container) / 2)); bottom: 100%; margin-bottom: -2px; width: 60px; color: var(--red); }
+body.page-home .hero__rider-go { display: block; transform: translate3d(var(--rx, 0px), 0, 0); will-change: transform; }
+body.page-home .hero__rider .rider { width: 100%; height: auto; }
+html.motion:not(.reduce-motion) body.page-home .hero__rider { opacity: 0; }
+html.motion:not(.reduce-motion):not(.is-intro) body.page-home .hero__rider { animation: rider-roll-in 1.7s cubic-bezier(.2, .8, .3, 1) 1.1s both; }
+html.motion:not(.reduce-motion):not(.is-intro) body.page-home .hero__rider .rider__wheel { animation: rider-spin-in 1.7s cubic-bezier(.2, .8, .3, 1) 1.1s both; }
+html.motion:not(.reduce-motion):not(.is-intro) body.page-home .hero__rider .rider__box { animation: rider-hop .26s ease-in-out 1.1s 6 alternate; }
+html.motion:not(.reduce-motion):not(.is-intro) body.page-home .hero__rider .rider__box--a { animation-delay: 1.23s; }
+@keyframes rider-roll-in { from { opacity: 1; transform: translateX(-160px); } to { opacity: 1; transform: none; } }
+/* While the scroll moves it (home.js sets .is-rolling), the load bounces again. */
+html.motion:not(.reduce-motion):not(.is-intro) body.page-home .hero__rider .rider.is-rolling .rider__box--b { animation: rider-hop .26s ease-in-out infinite alternate; }
+html.motion:not(.reduce-motion):not(.is-intro) body.page-home .hero__rider .rider.is-rolling .rider__box--a { animation: rider-hop .26s ease-in-out -.13s infinite alternate; }
 
 /* ---------- Phone (hero trip and the story screens) ---------- */
 body.page-home .phone { position: relative; width: 290px; padding: 10px; background: var(--ink); border-radius: 46px; box-shadow: 0 50px 90px -40px rgba(17, 17, 20, .6), 0 0 0 1px rgba(17, 17, 20, .35), inset 0 0 0 2px #2b2b33; }
@@ -108,6 +121,8 @@ body.page-home .trip.is-done .trip__ring { animation: ring-out 1.2s var(--ease-o
 @keyframes pin-pop { 40% { transform: scale(1.18); } }
 @keyframes ring-out { from { opacity: .8; transform: scale(.4); } to { opacity: 0; transform: scale(1.7); } }
 
+@keyframes icon-pop { 40% { transform: scale(1.12) rotate(-6deg); } }
+
 /* ---------- Section rhythm ---------- */
 body.page-home .section { padding: 100px 0; }
 body.page-home .section--tint { background: var(--tint); }
@@ -115,8 +130,8 @@ body.page-home .section__title { margin: 0 auto 56px; text-align: center; font-s
 
 /* ---------- Services: three tiles, each one line, a small visual and a link ---------- */
 body.page-home .services { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-body.page-home .tile { display: flex; flex-direction: column; min-width: 0; padding: 32px 30px 22px; background: var(--tile); border-radius: 28px; }
-body.page-home .tile__icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 14px; background: var(--red-soft); color: var(--brand); }
+body.page-home .tile { display: flex; flex-direction: column; min-width: 0; padding: 32px 30px 22px; background: var(--tile); border-radius: 28px; transition: transform .45s var(--ease-out), box-shadow .45s var(--ease-out); }
+body.page-home .tile__icon { display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 16px; background: var(--red); color: #fff; box-shadow: 0 10px 22px -10px rgba(210, 0, 47, .7); }
 body.page-home .tile__icon svg { width: 24px; height: 24px; }
 body.page-home .tile h3 { margin-top: 22px; font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -.025em; }
 body.page-home .tile__line { margin-top: 8px; font-size: 17px; line-height: 1.45; color: var(--text-2); }
@@ -141,6 +156,8 @@ body.page-home .tile__link::after { content: ""; width: 7px; height: 7px; border
   body.page-home .chips a:hover { background: var(--text); color: var(--bg); text-decoration: none; }
   body.page-home .tile__link:hover { text-decoration: none; }
   body.page-home .tile__link:hover::after { transform: translateX(3px) rotate(45deg); }
+  body.page-home .tile:hover { transform: translateY(-4px); box-shadow: 0 24px 50px -30px rgba(17, 17, 20, .35); }
+  body.page-home .tile:hover .tile__icon { animation: icon-pop .5s var(--ease-out); }
 }
 
 /* Delivery methods (§3): the four places we hand the package over, names only */
@@ -266,6 +283,16 @@ body.page-home .biz h2 { font-size: clamp(36px, 4.6vw, 56px); }
 body.page-home .biz p { margin: 16px auto 32px; font-size: 19px; line-height: 1.5; color: rgba(255, 255, 255, .72); max-width: 28em; }
 body.page-home .biz__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
 @media (hover: hover) { body.page-home .biz .btn--on-dark:hover { background: rgba(255, 255, 255, .1); color: #fff; } }
+
+/* ---------- Photo band: the bridge at sunset, full width, the line over it in white ---------- */
+body.page-home .band { position: relative; display: flex; align-items: flex-end; min-height: min(78vh, 760px); margin-top: 100px; overflow: hidden; background: #1a0d10; color: #fff; isolation: isolate; }
+body.page-home .band__media { position: absolute; inset: -10% 0; z-index: -1; transform: translate3d(0, var(--band-y, 0px), 0); will-change: transform; }
+body.page-home .band__media picture, body.page-home .band__photo { display: block; width: 100%; height: 100%; }
+body.page-home .band__photo { object-fit: cover; object-position: 50% 60%; }
+body.page-home .band::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(0deg, rgba(10, 6, 8, .72), rgba(10, 6, 8, .1) 55%, rgba(10, 6, 8, .25)); }
+body.page-home .band__inner { padding-top: 96px; padding-bottom: 72px; }
+body.page-home .band__title { font-size: clamp(44px, 7vw, 104px); line-height: .98; letter-spacing: -.05em; color: #fff; }
+body.page-home .band__note { margin-top: 18px; font-size: 21px; color: rgba(255, 255, 255, .82); max-width: none; }
 
 /* ---------- Split sections: the heading column beside the map (coverage) or the answers (questions) ---------- */
 body.page-home .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 56px; align-items: start; }
@@ -395,4 +422,70 @@ body.page-home .quickbar { display: none; }
   body.page-home .finale__reach { display: flex; gap: 8px; width: 100%; }
   body.page-home .finale__reach .btn { flex: 1 1 0; min-width: 0; padding: 0 8px; }
   body.page-home .finale__num { display: none; }
+}
+
+/* ---------- Bridge intro (index.html; first visit of a session) ----------
+   Timeline from the first frame: the slanted window opens (0.15s), "We pick." over the Sinamalé arch, "We shop." over the bridge
+   traffic (1.1s), "We deliver." over the bridge from the air (2s); the rider crosses Malé to Hulhumalé along the bottom (0.35-2.95s)
+   and pops a wheelie on arrival; the window opens to the whole screen (2.75s). The inline script then swaps html.is-intro for
+   html.intro-leaving: the cover lifts from the bottom behind a red road and the page plays its own entrance underneath. */
+.intro { display: none; }
+html.is-intro, html.is-intro body { overflow: hidden; }
+html:is(.is-intro, .intro-leaving) .intro { display: block; position: fixed; inset: 0; z-index: 300; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.intro__cover { position: absolute; inset: 0; overflow: hidden; background: #0B0B0C; color: #fff; }
+html.intro-leaving .intro__cover { animation: intro-lift 1s cubic-bezier(.76, 0, .24, 1) forwards; }
+.intro__road { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; background: var(--red); opacity: 0; }
+html.intro-leaving .intro__road { animation: intro-road 1s cubic-bezier(.76, 0, .24, 1) forwards; }
+@keyframes intro-lift { to { clip-path: inset(0 0 100% 0); } }
+@keyframes intro-road { from { opacity: 1; bottom: 0; } to { opacity: 1; bottom: 100%; } }
+
+.intro__window { position: absolute; inset: 0; clip-path: polygon(52% 22%, 52% 22%, 48% 78%, 48% 78%); animation: intro-open .9s cubic-bezier(.7, 0, .2, 1) .15s forwards, intro-full .8s cubic-bezier(.7, 0, .2, 1) 2.75s forwards; }
+.intro__window::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, .3), rgba(0, 0, 0, .08) 38%, rgba(0, 0, 0, .55)); }
+@keyframes intro-open { to { clip-path: polygon(30% 22%, 74% 22%, 70% 78%, 26% 78%); } }
+@keyframes intro-full { from { clip-path: polygon(30% 22%, 74% 22%, 70% 78%, 26% 78%); } to { clip-path: polygon(-6% -2%, 106% -2%, 106% 102%, -6% 102%); } }
+.intro__shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .45s ease; }
+.intro__shot.is-ready { opacity: 1; }
+.intro__shot--1 { animation: intro-zoom 4.4s cubic-bezier(.2, .6, .3, 1) .15s both; }
+.intro__shot--2 { animation: intro-wipe .8s cubic-bezier(.7, 0, .2, 1) 1.1s both, intro-zoom 3.4s cubic-bezier(.2, .6, .3, 1) 1.1s both; }
+.intro__shot--3 { animation: intro-wipe .8s cubic-bezier(.7, 0, .2, 1) 2s both, intro-zoom 3.6s cubic-bezier(.2, .6, .3, 1) 2s both; }
+@keyframes intro-wipe { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+@keyframes intro-zoom { from { transform: scale(1.2); } to { transform: scale(1.02); } }
+
+.intro__words { position: absolute; left: 0; right: 0; top: 50%; display: grid; justify-items: center; height: 1.12em; margin: -.56em 0 0; max-width: none; overflow: hidden; font-size: clamp(54px, 10.5vw, 172px); font-weight: 700; line-height: 1.08; letter-spacing: -.055em; pointer-events: none; }
+.intro__word { grid-area: 1 / 1; white-space: nowrap; transform: translateY(110%); text-shadow: 0 8px 48px rgba(0, 0, 0, .35); }
+.intro__word i { font-style: normal; color: var(--red); }
+.intro__word--1 { animation: intro-word-in .65s cubic-bezier(.2, .9, .3, 1) .3s both, intro-word-out .45s cubic-bezier(.7, 0, .8, .4) 1.02s forwards; }
+.intro__word--2 { animation: intro-word-in .65s cubic-bezier(.2, .9, .3, 1) 1.2s both, intro-word-out .45s cubic-bezier(.7, 0, .8, .4) 1.92s forwards; }
+.intro__word--3 { animation: intro-word-in .65s cubic-bezier(.2, .9, .3, 1) 2.1s both; }
+@keyframes intro-word-in { from { transform: translateY(110%); } to { transform: none; } }
+@keyframes intro-word-out { from { transform: none; } to { transform: translateY(-110%); } }
+
+/* The trip: a thin bridge line, the red trail behind the rider, the two ends under it. */
+.intro__trip { position: absolute; left: max(28px, 8vw); right: max(28px, 8vw); bottom: max(32px, 7vh); animation: intro-fade .6s ease .15s both; }
+.intro__line { position: relative; display: block; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .22); }
+.intro__fill { position: absolute; inset: 0; border-radius: inherit; background: var(--red); transform-origin: left center; transform: scaleX(0); animation: intro-fill 2.6s cubic-bezier(.45, 0, .25, 1) .35s forwards; }
+.intro__rider { position: absolute; left: 0; bottom: 1px; width: 68px; color: #fff; animation: intro-ride 2.6s cubic-bezier(.45, 0, .25, 1) .35s both; }
+.intro__rider .rider { width: 100%; height: auto; }
+.intro__rider .rider__wheel { animation: rider-spin .4s linear .35s 7; }
+.intro__rider .rider__box--b { animation: rider-hop .3s ease-in-out .35s 8 alternate; }
+.intro__rider .rider__box--a { animation: rider-hop .3s ease-in-out .5s 8 alternate; }
+.intro__rider .rider__body { animation: rider-bob .3s ease-in-out .42s 8 alternate; }
+.intro__rider .rider__streak { animation: rider-flick .5s ease-in-out .35s 5; }
+.intro__rider .rider__all { animation: rider-wheelie .9s var(--ease-out) 2.9s both; }
+.intro__places { display: flex; justify-content: space-between; margin-top: 12px; font-size: 14px; font-weight: 600; letter-spacing: -.005em; color: rgba(255, 255, 255, .6); }
+.intro__to { display: inline-flex; align-items: center; gap: 8px; animation: intro-arrive .4s ease 2.9s both; }
+.intro__to::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--red); transform: scale(0); animation: intro-pin .5s cubic-bezier(.3, 1.6, .5, 1) 2.9s both; }
+@keyframes intro-fade { from { opacity: 0; } }
+@keyframes intro-fill { to { transform: none; } }
+@keyframes intro-ride { from { left: 0%; transform: translateX(-20%); } to { left: 100%; transform: translateX(-92%); } }
+@keyframes intro-arrive { to { color: #fff; } }
+@keyframes intro-pin { to { transform: none; } }
+
+/* Portrait screens: a taller window, smaller words, the portrait crops (chosen by the script). */
+@media (max-aspect-ratio: 1/1) {
+  .intro__window { clip-path: polygon(52% 20%, 52% 20%, 48% 70%, 48% 70%); animation-name: intro-open-tall, intro-full-tall; }
+  @keyframes intro-open-tall { to { clip-path: polygon(14% 20%, 92% 20%, 86% 70%, 8% 70%); } }
+  @keyframes intro-full-tall { from { clip-path: polygon(14% 20%, 92% 20%, 86% 70%, 8% 70%); } to { clip-path: polygon(-8% -2%, 108% -2%, 108% 102%, -8% 102%); } }
+  .intro__words { top: 45%; font-size: clamp(44px, 14vw, 120px); }
+  .intro__rider { width: 54px; }
 }

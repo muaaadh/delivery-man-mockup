@@ -156,6 +156,43 @@
       },
     });
   }
+  // The road under the hero: the logo's rider rides along it with the scroll, from the content edge to off the right end by the time
+  // the road reaches the header. The wheels turn with the distance (--roll); while it moves the boxes hop (.is-rolling).
+  function heroRoad() {
+    const holder = document.querySelector('.hero__rider-go'), road = document.querySelector('.hero__road');
+    if (!holder || !road || !MDM.shell || !MDM.shell.RIDER) return;
+    holder.innerHTML = MDM.shell.RIDER;
+    const rider = holder.firstChild, box = holder.parentNode;
+    let roadY = 1, travel = 0, last = '', idle = 0;
+    MDM.motion.addScene({
+      measure() {
+        roadY = Math.max(1, MDM.motion.pageTop(road) - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--header-h')) || 60));
+        travel = road.offsetWidth - box.offsetLeft + 20;
+      },
+      update(y) {
+        const x = travel * MDM.motion.clamp(y / roadY, 0, 1), v = x.toFixed(1);
+        if (v === last) return;
+        last = v;
+        holder.style.setProperty('--rx', v + 'px');
+        rider.style.setProperty('--roll', (x / box.offsetWidth * 426 % 360).toFixed(1) + 'deg');   // rolls without slipping: 86-unit wheels on a 640-unit logo
+        rider.classList.add('is-rolling');
+        clearTimeout(idle); idle = setTimeout(() => rider.classList.remove('is-rolling'), 160);
+      },
+    });
+  }
+  // Photo band: the photo drifts against the scroll (the media box is 20% taller than the band, so it never shows an edge).
+  function bandScene() {
+    const band = document.querySelector('.band'), media = band && band.querySelector('.band__media');
+    if (!media) return;
+    let top = 0, h = 1, last = '';
+    MDM.motion.addScene({
+      measure() { top = MDM.motion.pageTop(band); h = Math.max(1, band.offsetHeight); },
+      update(y, vh) {
+        const p = MDM.motion.clamp((y + vh - top) / (vh + h), 0, 1), v = ((p - 0.5) * 0.18 * h).toFixed(1) + 'px';
+        if (v !== last) { media.style.setProperty('--band-y', v); last = v; }
+      },
+    });
+  }
 
   // ---- How it works: the step on screen picks the phone screen ---------------------------------------------------------------
   // Desktop: the step crossing the middle of the screen, beside the sticky phone. Phones: the phone sits above a plain list and the
@@ -307,7 +344,9 @@
     heroTrip();
     story();
     heroScene();
+    heroRoad();
     bizScene();
+    bandScene();
     navSpy();
     quickbar();
     await MDM.store.ready;

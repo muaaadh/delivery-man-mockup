@@ -35,6 +35,10 @@
             w.appendChild(wi); frag.appendChild(w);
           });
           child.replaceWith(frag);
+        } else if (child.nodeType === 1 && child.classList.contains('dot')) {
+          // A coloured full stop rides with the word before it (one mask, no break between them).
+          const words = el.querySelectorAll('.wi');
+          if (words.length) words[words.length - 1].appendChild(child);
         } else if (child.nodeType === 1 && child.tagName !== 'BR') walk(child);
       });
     };
@@ -82,7 +86,11 @@
 
   // ---- Reveal observer ----
   let io = null;
+  // While the home page's bridge intro covers the screen (html.is-intro), reveals wait and play as it lifts.
+  const held = new Set();
+  if (root.classList.contains('is-intro')) document.addEventListener('mdm:intro-leave', () => { const els = Array.from(held); held.clear(); els.forEach(reveal); }, { once: true });
   function reveal(el) {
+    if (root.classList.contains('is-intro')) { held.add(el); return; }
     el.classList.add('is-in');
     if (el.hasAttribute('data-countup')) countUp(el);
     el.querySelectorAll('[data-countup]').forEach(countUp);

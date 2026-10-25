@@ -596,25 +596,60 @@ body.page-track .maplibregl-ctrl-group button, body.page-driver .maplibregl-ctrl
 @media (max-width: 400px) { .site-header .brand__word { display: none; } }   /* phones: the mark alone in the middle */
 @keyframes menu-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
 
-/* The logo drives in (shell.js introOnce): the mark rolls in from the left on every page; the first page of a visit opens with the
-   mark full screen, the rider crossing a red road, then the page. */
+/* ---------- The rider (shell.js RIDER): the logo in parts, so the bike can ride ----------
+   Parts: .rider__all > streaks, two boxes, body (with the helmet), frame and two wheels. Every part transforms about its own box
+   (fill-box), so a wheel turns about its centre and a box hops from its base. Lengths inside the SVG are logo units (the logo is
+   640 wide), so the same keyframes read the same at every size. --roll (deg) turns the wheels and --jig (px) lifts the boxes from
+   script (the header follows the scroll); the classes below play the moves:
+   .rider-enter (an ancestor) rides the logo in once: the bike rolls in on its back wheel, the wheels spin down, the boxes drop
+   onto the rack one after the other and the streaks flick out. Hovering a brand link pops a wheelie. .is-riding loops a ride;
+   .is-rolling only bounces the load (the wheels follow --roll). */
+.rider { display: block; overflow: visible; }
+.rider g, .rider path { transform-box: fill-box; }
+.rider__all { transform-origin: 21% 100%; }
+.rider__wheel, .rider__wheel > path { transform-origin: 50% 50%; }
+.rider__wheel > path { transform: rotate(var(--roll, 0deg)); }
+.rider__box { transform-origin: 50% 100%; }
+.rider__box > path { transform: translateY(var(--jig, 0px)); }
+.rider__streak { transform-origin: 100% 50%; }
+.rider__helmet { transform-origin: 30% 90%; }
+.rider-enter .rider__all { animation: rider-in 1.15s cubic-bezier(.2, .85, .25, 1) both; }
+.rider-enter .rider__wheel { animation: rider-spin-in 1.3s cubic-bezier(.2, .8, .3, 1) both; }
+.rider-enter .rider__box { animation: rider-drop .8s cubic-bezier(.3, 1.45, .5, 1) .55s both; }
+.rider-enter .rider__box--a { animation-delay: .72s; }
+.rider-enter .rider__streak { animation: rider-streak-in .5s var(--ease-out) 1.05s both; }
+.rider-enter .rider__helmet { animation: rider-nod .55s ease-in-out 1s both; }
+@keyframes rider-in { 0% { transform: translateX(-160%); } 58% { transform: translateX(4%) rotate(-14deg); } 80% { transform: translateX(-1%) rotate(2deg); } 100% { transform: none; } }
+@keyframes rider-spin-in { from { transform: rotate(-1080deg); } to { transform: none; } }
+@keyframes rider-drop { 0% { opacity: 0; transform: translateY(-460px) rotate(-14deg); } 25% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+@keyframes rider-streak-in { from { opacity: 0; transform: scaleX(0); } to { opacity: 1; transform: none; } }
+@keyframes rider-nod { 50% { transform: rotate(9deg); } }
+@media (hover: hover) {
+  :is(.brand, .site-footer__logo):hover .rider__all { animation: rider-wheelie .95s var(--ease-out); }
+  :is(.brand, .site-footer__logo):hover .rider__wheel { animation: rider-spin-in 1s cubic-bezier(.2, .8, .3, 1); }
+  :is(.brand, .site-footer__logo):hover .rider__box { animation: rider-jolt .75s var(--ease-out); }
+  :is(.brand, .site-footer__logo):hover .rider__box--a { animation-delay: .07s; }
+  :is(.brand, .site-footer__logo):hover .rider__streak { animation: rider-flick .6s ease-in-out; }
+}
+@keyframes rider-wheelie { 35% { transform: rotate(-17deg); } 72% { transform: rotate(3deg); } 100% { transform: none; } }
+@keyframes rider-jolt { 30% { transform: translateY(-70px) rotate(-9deg); } 62% { transform: translateY(10px); } 100% { transform: none; } }
+@keyframes rider-flick { 45% { opacity: .35; transform: translateX(-46px) scaleX(1.4); } }
+.rider.is-riding .rider__wheel { animation: rider-spin .42s linear infinite; }
+.rider.is-riding .rider__box--b { animation: rider-hop .3s ease-in-out infinite alternate; }
+.rider.is-riding .rider__box--a { animation: rider-hop .3s ease-in-out -.15s infinite alternate; }
+.rider.is-riding .rider__body { animation: rider-bob .3s ease-in-out -.08s infinite alternate; }
+.rider.is-riding .rider__streak { animation: rider-flick .5s ease-in-out infinite; }
+.rider.is-rolling .rider__box--b { animation: rider-hop .26s ease-in-out infinite alternate; }
+.rider.is-rolling .rider__box--a { animation: rider-hop .26s ease-in-out -.13s infinite alternate; }
+.rider.is-rolling .rider__body { animation: rider-bob .26s ease-in-out infinite alternate; }
+@keyframes rider-spin { to { transform: rotate(360deg); } }
+@keyframes rider-hop { to { transform: translateY(-24px) rotate(-3deg); } }
+@keyframes rider-bob { to { transform: translateY(-8px); } }
+/* The header logo rides in on every page (shell.js rideLogo): the tile pops, the rider arrives, then the name slides in. */
 .brand--enter .brand__mark { animation: mark-in .9s var(--ease-out) both; }
-.brand--enter .brand__mark svg { animation: rider-in 1s var(--ease-out) .1s both; }
-.brand--enter .brand__word { animation: word-in .8s var(--ease-out) .25s both; }
-@keyframes mark-in { from { opacity: 0; transform: scale(.7) rotate(-8deg); } to { opacity: 1; transform: none; } }
-@keyframes rider-in { from { transform: translateX(-140%); } 70% { transform: translateX(8%); } to { transform: none; } }
+.brand--enter .brand__word { animation: word-in .8s var(--ease-out) .45s both; }
+@keyframes mark-in { from { opacity: 0; transform: scale(.6) rotate(-10deg); } to { opacity: 1; transform: none; } }
 @keyframes word-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-@media (hover: hover) { .brand:hover .brand__mark svg { animation: rider-rev .6s var(--ease-out); } }
-@keyframes rider-rev { 30% { transform: translateX(10%) rotate(-4deg); } 60% { transform: translateX(-4%); } to { transform: none; } }
-.intro { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: var(--bg); pointer-events: none; transition: opacity .6s ease, visibility 0s linear .6s; }
-.intro.is-out { opacity: 0; visibility: hidden; }
-.intro__mark { width: 112px; height: 112px; border-radius: 28px; background: var(--red); color: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; animation: intro-mark .7s var(--ease-out) both; }
-.intro__mark svg { width: 88px; height: auto; animation: intro-ride 1.1s var(--ease-out) .15s both; }
-.intro__road { width: min(260px, 60vw); height: 4px; border-radius: 4px; background: var(--red); transform-origin: left center; animation: intro-road .9s var(--ease-out) .2s both; }
-@keyframes intro-mark { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
-@keyframes intro-ride { from { transform: translateX(-160%); } 75% { transform: translateX(6%); } to { transform: none; } }
-@keyframes intro-road { from { transform: scaleX(0); } to { transform: none; } }
-@media (prefers-reduced-motion: reduce) { .intro { display: none; } }
 
 /* ---------- Mobile bar (request page < 960px) ---------- */
 .mobile-bar { display: none; }
@@ -711,9 +746,10 @@ body.page-home .radio, body.page-request .radio, body.page-checkout .radio, body
 
 /* ---------- Brand layer: logo, red accent, footer, portal chrome ---------- */
 .brand { gap: 10px; }
-.brand__mark { flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--red); color: #fff; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
-.brand__mark svg { width: 25px; height: auto; }
+.brand__mark { flex: none; width: 34px; height: 34px; border-radius: 10px; background: var(--red); color: #fff; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
+.brand__mark svg { width: 27px; height: auto; }
 .brand__word { font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.dot { color: var(--brand); }   /* the red full stop on headlines */
 .btn--brand { background: var(--red); color: var(--on-red); font-weight: 600; border-color: var(--red); }
 .btn--on-dark { background: transparent; color: #fff; border-color: rgba(255, 255, 255, .28); }
 .btn--pill { padding: 0 22px; }
@@ -856,8 +892,8 @@ main .page-head > * + * { animation-delay: .07s; }
 .theme-toggle { color: var(--text-2); border-radius: 999px; }
 .theme-toggle .icon { width: 18px; height: 18px; }
 @media (hover: hover) { .theme-toggle:hover { color: var(--text); background: var(--surface); } }
-.site-footer__logo { display: inline-block; border-radius: 16px; overflow: hidden; line-height: 0; }
-.site-footer__logo img { width: 64px; height: 64px; }
+.site-footer__logo { display: inline-block; border-radius: 18px; overflow: hidden; line-height: 0; }
+.site-footer__logo .rider { width: 72px; height: 72px; overflow: hidden; }
 html[data-theme="dark"] .maplibregl-ctrl-group { background: var(--card); box-shadow: 0 0 0 1px var(--border); }
 html[data-theme="dark"] .maplibregl-ctrl-group button + button { border-top-color: var(--border); }
 html[data-theme="dark"] .maplibregl-ctrl-group .maplibregl-ctrl-icon { filter: invert(1); }
