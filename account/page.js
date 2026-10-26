@@ -66,7 +66,7 @@
   }
   // Extra collection points of a multi-collection order (updates 17/10/2026), packed with the rest: '+ 1 more stop' in the table and
   // 'Also Lifeline Pharmacy (shop), Majeedhee Magu' in the drawer.
-  const extraStops = o => (o.extraCollections || []).map(c => c.kind === 'shop' ? ((c.shop && c.shop.name) || 'Shop') + ' (shop), ' + c.address : place(c));
+  const extraStops = o => (o.extraCollections || []).map(c => c.kind === 'shop' ? [MDM.shopName(c.shop) + ' (shop)', c.address].filter(Boolean).join(', ') : place(c));
   const moreStops = o => { const n = (o.extraCollections || []).length; return n ? '+ ' + n + ' more ' + (n === 1 ? 'stop' : 'stops') : ''; };
   function reorderLink(o) {
     const stop = e => e.stopPropagation();   // the row itself opens the drawer on click and Enter

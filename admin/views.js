@@ -917,10 +917,10 @@
 
   // ==== #/rates ================================================================================================================
   MDM.admin.views.rates = (function () {
-    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [], slot = null, bankCount = 4;
+    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [], slot = null, bankCount = 4, courierList = null, courierRows = [];
     const BANK_ROWS = 4;
     const SECTIONS = [{ id: 'rates-sizes', label: 'Package rates' }, { id: 'rates-fees', label: 'Fees' }, { id: 'rates-tiers', label: 'Business sizes' }, { id: 'rates-rules', label: 'Rules' },
-      { id: 'rates-size-guide', label: 'Size guide' }, { id: 'rates-ops', label: 'Operations' }, { id: 'rates-banks', label: 'Bank accounts' }, { id: 'rates-terms', label: 'Terms and invoicing' }];
+      { id: 'rates-size-guide', label: 'Size guide' }, { id: 'rates-ops', label: 'Operations' }, { id: 'rates-couriers', label: 'Couriers' }, { id: 'rates-banks', label: 'Bank accounts' }, { id: 'rates-terms', label: 'Terms and invoicing' }];
     async function mount(host) {
       ctx = context(); root = host; dirty = false;
       slot = el('div', { class: 'settings-main' }, el('div', { class: 'skeleton', style: 'height: 96px' }));
@@ -930,7 +930,7 @@
       ctx.sub('*', m => { if (m && m.op === 'reset') { dirty = false; ctx.schedule(render); } });
       await render();
     }
-    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; form = null; tierList = null; tierRows = []; slot = null; }
+    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; form = null; tierList = null; tierRows = []; courierList = null; courierRows = []; slot = null; }
     const grid = (s) => {
       const sizes = s.rates.sizes;
       const cell = (size, side) => numInput('sizes.' + size + '.' + side, sizes[size][side], { 'aria-label': MDM.pricing.sizeLabel(size) + ', ' + (side === 'same' ? 'within one island' : 'crossing the bridge'), 'data-testid': 'rates-size-' + size + '-' + side });
@@ -1001,6 +1001,37 @@
       });
       return { tiers: out };
     }
+    // Couriers (round 4, 26/10/2026): each is listed on its own under Postal & courier collection on the request form, in this order.
+    // The office address is where the driver collects; empty, the order says "<name> office, Malé".
+    function courierRow(c) {
+      const id = 'courier-' + (++fieldSeq);
+      const zones = MDM.geo.zoneOptions().filter(z => z.value !== 'airport');
+      const row = { name: input('courierName', c.name, { id: id + '-name', 'data-testid': 'courier-name', placeholder: 'FedEx', maxlength: '40' }),
+        address: input('courierAddress', c.address, { id: id + '-address', 'data-testid': 'courier-address', placeholder: 'Building name, street', maxlength: '120' }),
+        zone: select('courierZone', c.zone || 'male', zones, { id: id + '-zone', 'data-testid': 'courier-zone' }) };
+      row.el = el('div', { class: 'courier-row', 'data-testid': 'rates-courier' },
+        el('div', { class: 'grid-3' }, field('Courier', row.name), field('Office address', row.address, { optional: true }), field('Area', row.zone)),
+        el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'courier-remove', on: { click: () => { courierRows = courierRows.filter(r => r !== row); dirty = true; drawCouriers(); } } }, 'Remove', el('span', { class: 'sr-only' }, ' courier')));
+      return row;
+    }
+    function drawCouriers() { courierList.replaceChildren(...courierRows.map(r => r.el)); }
+    function addCourier() {
+      if (courierRows.length >= MDM.MAX_COURIERS) { toast('Up to ' + MDM.MAX_COURIERS + ' couriers', 'warn'); return; }
+      courierRows.push(courierRow({ name: '', address: '', zone: 'male' })); dirty = true; drawCouriers(); courierRows[courierRows.length - 1].name.focus();
+    }
+    function readCouriers() {
+      let bad = null; const used = new Set(), out = [];
+      courierRows.forEach(r => {
+        const name = r.name.value.trim(), address = r.address.value.trim();
+        MDM.ui.setError(r.name.closest('.field'), null);
+        if (!name && !address) return;   // an empty row is dropped
+        if (!name) { MDM.ui.setError(r.name.closest('.field'), 'Enter the courier name'); bad = bad || r.name; return; }
+        if (used.has(name.toLowerCase()) || name.toLowerCase() === MDM.OTHER_COURIER.toLowerCase()) { MDM.ui.setError(r.name.closest('.field'), 'This courier is listed already'); bad = bad || r.name; return; }
+        used.add(name.toLowerCase());
+        out.push({ name, address, zone: r.zone.value || 'male' });
+      });
+      return bad ? { bad } : { couriers: out };
+    }
     async function render() {
       const [s, accs] = await Promise.all([MDM.store.settings(), MDM.store.list('business_accounts')]);
       if (!ctx || !ctx.alive) return;
@@ -1008,6 +1039,8 @@
       const ranges = rangesPreview();
       tierRows = MDM.pricing.businessTiers(s).map(tierBlock);
       tierList = el('div', { class: 'tier-list', 'data-testid': 'rates-tiers' });
+      courierRows = MDM.couriers(s).map(courierRow);
+      courierList = el('div', { class: 'courier-list', 'data-testid': 'rates-couriers' });
       const ops = s.ops || {}, hours = ops.hours || {}, banks = (s.banks || []).slice();
       bankCount = Math.max(BANK_ROWS, banks.length);
       while (banks.length < bankCount) banks.push({ id: 'bank' + (banks.length + 1), name: '', accountName: '', accountNo: '' });
@@ -1042,6 +1075,9 @@
           el('div', { class: 'grid-3' }, field('City speed, km/h', numInput('speedCityKmh', ops.speedCityKmh)), field('Bridge speed, km/h', numInput('speedHighwayKmh', ops.speedHighwayKmh)), field('Peak buffer, minutes', numInput('peakBufferMin', ops.peakBufferMin))),
           field('Peak windows', input('peakWindows', (ops.peakWindows || []).join(', ')), { hint: '24 h, comma separated: 08:00-09:30' }),
           field('Closed windows', input('closedWindows', (ops.closedWindows || []).join(', ')), { hint: 'Optional day first: Fri 12:00-13:30' })], MDM.store._live ? null : 'Demo defaults'),
+        formSection('rates-couriers', 'Couriers', 'Listed one by one under Postal & courier collection, with Other courier last. DHL and the post are listed already.', [
+          courierList,
+          el('div', null, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'rates-courier-add', on: { click: addCourier } }, icon('plus'), 'Add courier'))]),
         // Four accounts (24/10/2026): BML and MIB, each in MVR and USD. The currency is part of the name ("BML USD") so every page shows it.
         formSection('rates-banks', 'Bank accounts', 'On checkout and invoices, with the currency in the name.', banks.map((b, i) => el('div', { class: 'grid-3', 'data-testid': 'rates-bank' },
           field('Account ' + (i + 1), input('banks.' + i + '.name', b.name, { placeholder: i % 2 ? 'BML USD' : 'BML MVR' })), field('Account name', input('banks.' + i + '.accountName', b.accountName)),
@@ -1051,7 +1087,7 @@
           el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides GST on invoices' }))]),
         el('div', { class: 'form-actions save-bar' }, el('span', { class: 'form-caption' }, 'Applies to new requests and quotes.'), el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'rates-save' }, 'Save rates')));
       slot.replaceChildren(form);
-      drawTiers(); ranges.update();
+      drawTiers(); drawCouriers(); ranges.update();
       dirty = false;
     }
     const intRule = v => /^\d+$/.test(v) ? null : 'Enter a whole number, 0 or more';
@@ -1073,8 +1109,8 @@
       }
       rules.vehicle = v => v === '' ? null : intRule(v);
       const r = MDM.ui.validate(form, rules);
-      const t = readTiers();
-      if (!r.ok || t.bad) { if (r.ok && t.bad) t.bad.focus(); else MDM.ui.focusFirstInvalid(form); toast('Check the highlighted fields', 'warn'); return; }
+      const t = readTiers(), k = readCouriers();
+      if (!r.ok || t.bad || k.bad) { if (r.ok && (t.bad || k.bad)) (t.bad || k.bad).focus(); else MDM.ui.focusFirstInvalid(form); toast('Check the highlighted fields', 'warn'); return; }
       const v = r.values, n = k => Number(v[k]), list = k => v[k] ? v[k].split(',').map(x => x.trim()).filter(Boolean) : [];
       const cur = await MDM.store.settings();
       const patch = {
@@ -1085,7 +1121,7 @@
         sizeGuide: { bag: v['guide.bag'], box: v['guide.box'], xl: v['guide.xl'] },
         ops: { hours: { open: v['hours.open'], close: v['hours.close'] }, days: v.days, asapText: v.asapText, reviewText: v.reviewText, businessReplyText: v.businessReplyText,
           slotStart: v.slotStart, slotEnd: v.slotEnd, slotMinutes: n('slotMinutes'), speedCityKmh: n('speedCityKmh'), speedHighwayKmh: n('speedHighwayKmh'), peakBufferMin: n('peakBufferMin'),
-          peakWindows: list('peakWindows'), closedWindows: list('closedWindows') },
+          peakWindows: list('peakWindows'), closedWindows: list('closedWindows'), couriers: k.couriers },
         banks: Array.from({ length: bankCount }, (x, i) => i).filter(i => v['banks.' + i + '.name']).map(i => ({ id: (cur.banks && cur.banks[i] && cur.banks[i].id) || ('bank' + (i + 1)), name: v['banks.' + i + '.name'], accountName: v['banks.' + i + '.accountName'], accountNo: v['banks.' + i + '.accountNo'] })),
         terms: v.terms, invoiceDueDays: n('invoiceDueDays'), gstPercent: n('gstPercent'),
       };

@@ -691,19 +691,21 @@
     };
     return Object.keys(h.to || {}).map(k => (BOAT_FIELD[k] || k) + ': ' + val(k, (h.from || {})[k]) + ' to ' + val(k, h.to[k])).join(' · ');
   }
-  // Extra collection points on one order (updates 17/10/2026): everything is packed together and delivered to the one address.
+  // Extra collection points on one order (updates 17/10/2026): each stop with the packages counted there (round 4), all delivered to
+  // the one address. Orders from before per-stop counts carry every package on the first collection.
   function buildCollections(o) {
     const extra = o.extraCollections || [];
     if (!extra.length) return null;
-    const c0 = o.collection || {};
-    const rows = [row('Collection 1', [c0.address, c0.zone ? MDM.geo.zoneLabel(c0.zone) : ''].filter(Boolean).join(', '), { valueSub: c0.contactName || null })];
+    const c0 = o.collection || {}, ids = extra.map(c => c.id);
+    const count = id => { const n = {}; (o.packages || []).forEach(p => { const at = ids.indexOf(p.collectionId) >= 0 ? p.collectionId : null; if (at === id) n[p.size] = (n[p.size] || 0) + 1; }); return ['bag', 'box', 'xl'].filter(k => n[k]).map(k => n[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(', '); };
+    const rows = [row('Stop 1', [c0.address, c0.zone ? MDM.geo.zoneLabel(c0.zone) : ''].filter(Boolean).join(', '), { valueSub: [count(null), c0.contactName].filter(Boolean).join(' · ') || null })];
     extra.forEach((c, i) => {
-      const where = [c.address, c.zone ? MDM.geo.zoneLabel(c.zone) : ''].filter(Boolean).join(', ');
-      if (c.kind === 'shop' && c.shop) rows.push(row('Shop: ' + (c.shop.name || 'shop'), where, { valueSub: [c.shop.list, c.shop.budget ? 'budget ' + fmt(c.shop.budget) : ''].filter(Boolean).join(' · ') || null }));
-      else rows.push(row('Collection ' + (i + 2), where, { valueSub: [c.contactName, c.instructions].filter(Boolean).join(' · ') || null }));
+      const shop = c.kind === 'shop' && c.shop;
+      const where = shop ? [MDM.shopName(c.shop), c.zone ? MDM.geo.zoneLabel(c.zone) : ''].filter(Boolean).join(', ') : [c.address, c.zone ? MDM.geo.zoneLabel(c.zone) : ''].filter(Boolean).join(', ');
+      rows.push(row('Stop ' + (i + 2), (shop ? 'Buy at ' : '') + where, { valueSub: [count(c.id), shop ? c.shop.list : c.contactName, shop ? '' : c.instructions].filter(Boolean).join(' · ') || null }));
     });
     return section('track-collections-h', 'Collections', el('div', { class: 'rate-table', 'data-testid': 'track-collections' }, rows),
-      el('p', { class: 'track-summary-note small muted' }, 'Packed together, delivered to one address.'));
+      el('p', { class: 'track-summary-note small muted' }, 'Delivered together, to one address.'));
   }
   function buildDelivery(o) {
     const d = o.delivery || {}, method = d.method || 'home';
@@ -777,10 +779,12 @@
     const firstFrom = {};
     changes.forEach(c => { if (!firstFrom[c.pkgId]) firstFrom[c.pkgId] = c.from; });
     const lines = [];
-    // Shop & Deliver, or a shop stop on a multi-collection order: the shopping budget (then the receipt) is part of the price.
-    const budget = o.service === 'shop' || extraShop(o) ? o.totals.budget || 0 : 0;
+    // Shop & Deliver, or a shop stop on a multi-collection order: the items (their cost agreed on our call, then the receipt) are part of
+    // the price. Until that call (round 4: no budget) the estimate is the delivery only.
+    const shopping = o.service === 'shop' || extraShop(o);
+    const budget = shopping ? o.totals.budget || 0 : 0;
     const receipt = (o.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) || (o.extraCollections || []).some(c => c.shop && c.shop.receiptTotal > 0);
-    const budgetLine = sub => priceLine(receipt ? 'Shopping receipt' : 'Shopping budget', sub, budget, { testid: 'track-budget-line' });
+    const budgetLine = sub => priceLine(receipt ? 'Shopping receipt' : 'Items', sub, budget, { testid: 'track-budget-line' });
     // Before the price is confirmed: the fixed fees, plus any charge already billed (naalu or Maldivian Cargo charges paid for a
     // no-photo order before our team priced it), which add to the estimate.
     const fees = feeRows(o).filter(f => confirmed || FIXED_FEES.indexOf(f.key) >= 0 || /^charge-/.test(f.key));
@@ -798,6 +802,7 @@
       const fixed = fees.reduce((n, f) => n + (Number(f.amount) || 0), 0) + budget;
       lines.push(priceLine('Delivery', pkgText(o), rangeText(Math.max(0, est.min - fixed), Math.max(0, est.max - fixed)), { testid: 'track-delivery-line' }));
       if (budget) lines.push(budgetLine('Paid upfront; we refund what is not spent'));
+      else if (shopping) lines.push(priceLine('Items and shopping fee', 'Agreed on a call before we buy', 'By phone', { fee: true, testid: 'track-items-line' }));
     }
     fees.forEach(f => lines.push(priceLine(f.label, f.key === 'cargo' ? 'Charged only for this delivery method' : f.reason, f.amount, { fee: true, key: f.key, testid: f.key === 'cargo' ? 'track-cargo-fee' : null })));
     const total = confirmed ? fmt(o.totals.total) : rangeText(est.min, est.max);
@@ -887,10 +892,10 @@
       add('Shop', d.shopName); add('Proof', { invoice: 'Invoice', quotation: 'Quotation and payment slip', order_no: 'Order number' }[d.proof]); add('Order number', d.orderNo);
     } else if (t === 'shop_buy' || o.service === 'shop') {
       const shop = (o.packages.find(p => p.shop) || {}).shop || {}, ds = d.shop || {};
-      add('Shop', [ds.name || shop.name || d.shopName, ds.address || shop.address].filter(Boolean).join(', '));
+      add('Shop', [ds.name || shop.name || d.shopName || 'Any shop, we choose', ds.address || shop.address].filter(Boolean).join(', '));
       if (!(d.items && d.items.length)) add('List', shop.list || d.list);
-      const budget = d.budget || shop.budget;
-      add('Budget', budget ? fmt(budget) : '');
+      const budget = shop.budget || d.budget;
+      add(d.budget && !shop.receiptTotal ? 'Budget' : 'Items agreed', budget ? fmt(budget) : '');
     } else if (t === 'bulk' || t === 'business' || o.service === 'business') {
       add('Sender', businessName(o));
       add('Reference', d.reference);

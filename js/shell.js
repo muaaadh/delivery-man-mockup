@@ -308,7 +308,7 @@
     if (c.tel) reach.appendChild(el('a', { class: 'btn btn--secondary btn--sm', href: c.tel }, iconNode('phone', 16), c.display));
     const about = el('div', { class: 'site-footer__about' },
       footerLogo(),
-      el('p', { class: 'site-footer__tagline' }, 'Pick up, shop and deliver across Greater Malé.'),
+      el('p', { class: 'site-footer__tagline' }, 'Pick, Shop, Deliver across Greater Malé.'),
       reach,
       el('p', { class: 'site-footer__hours', 'data-shell': 'hours' }, hoursLine(s)),
       c.mailto ? el('p', { class: 'site-footer__mail' }, el('a', { href: c.mailto }, c.email)) : null);

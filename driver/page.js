@@ -132,10 +132,12 @@
       return [what.trim(), money(c.amount) + (note ? ' · ' + note : ''), null, c];
     });
   }
-  function packagesLine(o) {
-    const n = {}; (o.packages || []).forEach(p => { n[p.size] = (n[p.size] || 0) + 1; });
+  function packagesLine(o, list) {
+    const n = {}; (list || o.packages || []).forEach(p => { n[p.size] = (n[p.size] || 0) + 1; });
     return Object.keys(n).map(k => n[k] + ' × ' + sizeName(k)).join(', ');
   }
+  // The packages a collection stop hands over (round 4: counted per stop, so each stop's are confirmed on collection).
+  const stopPackages = (o, stop) => (o.packages || []).filter(p => (stop.packageIds || [stop.packageId]).indexOf(p.id) >= 0);
   function priorityOf(o) {
     const p = o.priority || {};
     if (p.status === 'approved') return { rank: p.level === 'urgent' ? 0 : 1, label: optLabel(MDM.PRIORITY_LEVELS, p.level) || 'Priority' };
@@ -208,7 +210,7 @@
   }
   function addressText(o, stop) {
     const sh = shopOf(o, stop);
-    if (sh) return sh.address ? sh.name + ', ' + sh.address : sh.name;
+    if (sh) return sh.address ? MDM.shopName(sh) + ', ' + sh.address : MDM.shopName(sh) + (sh.name ? '' : ' (we choose, see the list)');
     return stop.address || '';
   }
   function contactRow(name, phone, testid) {
@@ -268,7 +270,7 @@
   function shopRows(o, stop) {
     const s = shopOf(o, stop);
     if (!s) return [];
-    return [['Shopping list', s.list || ''], ['Budget', MDM.pricing.format(s.budget), 'mono'], ['If unavailable', { call: 'Call the customer', skip: 'Skip it', closest: 'Buy the closest match' }[s.unavailable] || s.unavailable || '']];
+    return [['Shopping list', s.list || ''], s.budget ? ['Agreed cost', MDM.pricing.format(s.budget), 'mono'] : null, ['If unavailable', { call: 'Call the customer', skip: 'Skip it', closest: 'Buy the closest match' }[s.unavailable] || s.unavailable || '']].filter(Boolean);
   }
   function dl(rows) {
     if (!rows.length) return null;
@@ -296,6 +298,8 @@
     return el('div', { class: ['job__stop', state.nearId === stop.id && 'is-near'], 'data-testid': testid, 'data-stop-id': stop.id, 'data-stop-status': stop.status },
       el('div', { class: 'job__label' }, title, stop.status === 'done' ? el('span', { class: 'job__ok' }, icon('check', 14), ' Done ' + MDM.ui.fmtTime(stop.at)) : stop.status === 'failed' ? el('span', { class: 'job__bad' }, 'Problem reported') : state.nearId === stop.id ? el('span', { class: 'job__near' }, 'You are here') : null),
       el('div', { class: 'job__address' }, addressText(o, stop)),
+      isPickup && stopPackages(o, stop).length && (o.route.stops || []).filter(x => x.type === 'pickup').length > 1
+        ? el('div', { class: 'job__line job__collect', 'data-testid': testid + '-packages' }, icon('package', 14), el('span', null, 'Collect ' + packagesLine(o, stopPackages(o, stop)))) : null,
       place ? el('div', { class: 'job__line' }, place) : null,
       phone ? contactRow(name, phone, testid) : (name ? el('div', { class: 'job__line' }, name) : null),
       fallback,
@@ -970,11 +974,15 @@
   // Collected: proof photo is required; the driver can correct each package's category (Bag / Box / XL, no measurements: §2.2, §2.3)
   // and record a naalu paid to collect it from a boat (§6.1).
   async function onCollected(btn, o, stop) {
-    const pkgs = (o.packages || []).filter(p => (stop.packageIds || [stop.packageId]).indexOf(p.id) >= 0);
+    const pkgs = stopPackages(o, stop);
     const fields = [];
+    // Several collections: the driver confirms this stop's count before leaving it (client, 25/10/2026: "1 bag from stop 1, 2 boxes
+    // from stop 2").
+    if (pkgs.length && o.route.stops.filter(x => x.type === 'pickup').length > 1) fields.push({ name: 'countOk', label: 'I have ' + packagesLine(o, pkgs) + ' from this stop', type: 'checkbox', required: true,
+      requiredMessage: 'Check the packages, then tick. If something is missing, report a problem instead.' });
     if (stop.shop) {
       const sh = shopOf(o, stop);
-      fields.push({ name: 'receiptTotal', label: 'Receipt total (MVR)', type: 'number', required: true, min: 0, step: 'any', inputmode: 'decimal', validate: wholeMvr('receiptTotal', true), hint: sh ? 'Budget ' + MDM.pricing.format(sh.budget) : null, requiredMessage: 'Enter the receipt total' });
+      fields.push({ name: 'receiptTotal', label: 'Receipt total (MVR)', type: 'number', required: true, min: 0, step: 'any', inputmode: 'decimal', validate: wholeMvr('receiptTotal', true), hint: sh && sh.budget ? 'Agreed with the customer: ' + MDM.pricing.format(sh.budget) : null, requiredMessage: 'Enter the receipt total' });
       fields.push({ name: 'receiptPhoto', label: 'Receipt photo', type: 'file', required: true, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', requiredMessage: 'Take a photo of the receipt' });
     }
     // No customer photo (updates 17/10/2026): the office sets this order's price from the proof of collection. An extra collection

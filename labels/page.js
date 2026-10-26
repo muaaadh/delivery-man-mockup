@@ -83,7 +83,7 @@
 
   function label(o, pkg, i, n, ctx) {
     const drop = pkg.dropoff || {}, rec = drop.recipient || {}, deliv = o.delivery || {};
-    const pick = pkg.shop ? { address: pkg.shop.name + ', ' + (pkg.shop.address || ''), zone: pkg.shop.zone } : (pkg.pickup || {});
+    const pick = pkg.shop ? { address: [MDM.shopName(pkg.shop), pkg.shop.address].filter(Boolean).join(', '), zone: pkg.shop.zone } : (pkg.pickup || {});
     const col = o.collection || {};
     const fromName = ctx.account ? ctx.account.name : (col.contactName || (pick.contact && pick.contact.name) || o.customer.name);
     const fromPhone = (pick.contact && pick.contact.phone) || col.contactPhone || o.customer.phone;

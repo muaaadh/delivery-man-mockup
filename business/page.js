@@ -158,22 +158,7 @@
   // =========================================================================================================================
   // Public page
   // =========================================================================================================================
-  // 'MVR 40–45' for a size with a range (rateTo, Admin → Rates), 'MVR 25' otherwise.
-  function tierPrice(t) { const to = Number(t.rateTo); return to > Number(t.rate) ? 'MVR ' + Math.round(t.rate) + '–' + Math.round(to) : money(t.rate); }
-  const price = text => el('span', { class: 'biz-price' }, text);
-  function ratesBlock(s) {
-    const rates = s.rates || {};
-    const row = MDM.ui.rateRow;
-    const tiers = MDM.pricing.businessTiers(s);
-    return el('div', null,
-      el('div', { class: 'rate-table biz-rates-public', 'data-slot': 'rates', 'data-testid': 'business-tiers' },
-        row('Package size', null, { head: true }),
-        tiers.map(t => row(t.label, price('from ' + tierPrice(t)), { mono: true })),
-        row('Cargo fee', price('+ ' + money(rates.cargo)), { mono: true }),
-        row('Airport fee', price('+ ' + money(rates.airport)), { mono: true }),
-        row('Billing', 'Weekly', { valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') })),
-      el('p', { class: 'business-note' }, 'Your agreed rates show in your portal.'));
-  }
+  // No rates on the public page (client, 25/10/2026): each business agrees its own, and sees them in its portal.
   // What a business account gets, as six short tiles.
   const FEATURES = [
     ['package', 'Fixed rate per size', 'Agreed once, from a photo.'],
@@ -420,7 +405,6 @@
         el('div', { class: 'page-head__actions' }, applyBtn)),
       signinCard(),
       el('section', { class: 'section', 'aria-label': 'What you get' }, featuresBlock()),
-      section('Rates', null, ratesBlock(s)),
       section('How it works', null, stepsBlock(s)),
       el('section', { class: 'section biz-request', id: 'apply', 'aria-labelledby': 'biz-request-account' },
         el('div', { class: 'section-head' }, el('h2', { id: 'biz-request-account' }, 'Request an account'), el('p', { class: 'section-head__desc' }, 'We call you to agree your rates.')),

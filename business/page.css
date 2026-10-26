@@ -1,8 +1,5 @@
 /* For businesses: public page + business portal. Components (rate-table, steps, form, card, alert, kpi, table) come from css/base.css. */
 body.page-business .business-note { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text-2); }
-/* Public rates: the prices in brand red (24/10/2026) */
-body.page-business .biz-price { color: var(--brand); font-weight: 600; }
-body.page-business .biz-rates-public .rate-table__label { font-size: 15px; color: var(--text); }
 
 /* Public page: sign-in strip, feature tiles, request form */
 body.page-business .biz-public .page-head { margin-bottom: 28px; }

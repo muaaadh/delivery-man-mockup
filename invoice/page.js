@@ -159,7 +159,7 @@
     const extraShops = (o.extraCollections || []).filter(c => c.kind === 'shop' && c.shop);
     const shopList = shopItems.length ? shopItems.map(i => (i.qty || 1) + ' × ' + i.name).join(', ') : extraShops.map(c => [c.shop.name, c.shop.list].filter(Boolean).join(': ')).join('; ');
     const receipt = o.packages.some(x => x.shop && x.shop.receiptTotal > 0) || extraShops.some(c => c.shop.receiptTotal > 0);
-    if ((o.service === 'shop' || extraShops.length) && o.totals.budget) lines.push(line(receipt ? 'Shopping receipt' : 'Shopping budget', shopList || null, o.totals.budget, false, 'shop-budget'));
+    if ((o.service === 'shop' || extraShops.length) && o.totals.budget) lines.push(line(receipt ? 'Shopping receipt' : 'Items', shopList || null, o.totals.budget, false, 'shop-budget'));
     feeRows(o, settings).forEach(f => lines.push(line(f.label, f.reason || null, f.amount, true, f.key)));
     const summary = el('div', { class: 'summary', 'data-testid': 'invoice-summary' }, lines, el('div', { class: 'summary__rule' }),
       el('div', { class: 'summary__total' }, el('span', null, confirmed ? 'Total' : 'Estimated total'), el('span', { class: 'mono', 'data-testid': 'invoice-total' }, money(o.totals.total))),

@@ -139,6 +139,10 @@ body.page-admin .card > .list > .list__item .list__title { display: flex; flex-w
 /* ---------- Rates: website ranges and the business size categories ---------- */
 body.page-admin .rates-ranges { padding: 4px 0 0; }
 body.page-admin .tier-list { display: grid; gap: 12px; }
+body.page-admin .courier-list { display: grid; gap: 10px; }
+body.page-admin .courier-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+body.page-admin .courier-row .field { margin: 0; }
+@media (max-width: 640px) { body.page-admin .courier-row { grid-template-columns: 1fr; } body.page-admin .courier-row > .btn { justify-self: start; } }
 body.page-admin .tier-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px 16px; background: var(--surface); }
 body.page-admin .tier-block > * + * { margin-top: 12px; }
 body.page-admin .tier-block__head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }

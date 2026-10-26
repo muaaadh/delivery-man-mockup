@@ -126,7 +126,8 @@
   MDM.priceToFinalise = o => MDM.priceAfterCollection(o) && ['cancelled', 'returned'].indexOf(o.status) < 0 && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
   // Extra collection points on one order (updates 17/10/2026): collect from an address or buy at a shop, all packed together and
   // delivered to the one delivery address. order.extraCollections = [{ id, kind: 'collect'|'shop', address, zone, landmark,
-  // contactName, contactPhone, instructions, shop: { name, phone, list, budget, unavailable, receiptTotal, receiptPhotoId } }].
+  // contactName, contactPhone, instructions, shop: { name, phone, list, budget, unavailable, receiptTotal, receiptPhotoId } }]. Since round 4
+  // (26/10/2026) shop.budget is the items' cost our team agrees with the customer on a call (confirmPrice), not a customer budget.
   MDM.EXTRA_COLLECTION_KINDS = [{ value: 'collect', label: 'Collect an item' }, { value: 'shop', label: 'Buy from a shop' }];
   MDM.MAX_EXTRA_COLLECTIONS = 4;
   // Cash on delivery for business orders (§5.6): collected by the driver, handed to the office, paid to the business.
@@ -147,14 +148,27 @@
     { value: 'express', label: 'Express',       hint: 'Faster, subject to availability and confirmation' },
     { value: 'advance', label: 'Advance order', hint: 'Choose a future collection and delivery time' },
   ];
+  // group: where the request form lists it ('post': post and lockers, 'courier': couriers). The 'courier' carrier is every courier in
+  // MDM.couriers(settings), each listed on its own and saved as details.courierName (round 4, 26/10/2026).
   MDM.CARRIERS = [
-    { value: 'redbox_maafannu', label: 'Redbox (Maafannu)', zone: 'male', address: 'Redbox collection point, Maafannu' },
-    { value: 'redbox_main',     label: 'Redbox (Main office)', zone: 'male', address: 'Redbox main office, Malé' },
-    { value: 'pikpost',         label: 'Pikpost', zone: 'male', address: 'Pikpost locker' },
-    { value: 'post_office',     label: 'Post Office', zone: 'male', address: 'Maldives Post' },
-    { value: 'courier',         label: 'FedEx, CPEX, PDU, UPS, Aramex or other', zone: 'male', address: 'Courier office' },
-    { value: 'dhl',             label: 'DHL', zone: 'male', address: 'DHL office, Malé' },
+    { value: 'redbox_maafannu', label: 'Redbox (Maafannu)', group: 'post', zone: 'male', address: 'Redbox collection point, Maafannu' },
+    { value: 'redbox_main',     label: 'Redbox (Main office)', group: 'post', zone: 'male', address: 'Redbox main office, Malé' },
+    { value: 'pikpost',         label: 'Pikpost', group: 'post', zone: 'male', address: 'Pikpost locker' },
+    { value: 'post_office',     label: 'Post Office', group: 'post', zone: 'male', address: 'Maldives Post' },
+    { value: 'dhl',             label: 'DHL', group: 'courier', zone: 'male', address: 'DHL office, Malé' },
+    { value: 'courier',         label: 'Courier', group: 'courier', zone: 'male', address: 'Courier office' },
   ];
+  // Couriers the office lists (Rates → Couriers, kept in settings.ops.couriers): a name, and the office the driver collects from
+  // (empty address: "<name> office, Malé"). A courier outside the list is typed by the customer under OTHER_COURIER.
+  MDM.DEFAULT_COURIERS = ['FedEx', 'CPEX', 'PDU', 'UPS', 'Aramex'].map(name => ({ name, address: '', zone: 'male' }));
+  MDM.OTHER_COURIER = 'Other courier';
+  MDM.MAX_COURIERS = 16;
+  MDM.couriers = function (settings) {
+    const list = settings && settings.ops && Array.isArray(settings.ops.couriers) ? settings.ops.couriers : MDM.DEFAULT_COURIERS;
+    return list.filter(c => c && String(c.name || '').trim()).map(c => ({ name: String(c.name).trim(), address: String(c.address || '').trim(), zone: c.zone || 'male' }));
+  };
+  // A shopping stop the customer left without a shop name: our team chooses the shop on the confirmation call.
+  MDM.shopName = sh => (sh && String(sh.name || '').trim()) || 'Any shop';
   MDM.PIKPOST_LOCATIONS = [
     { value: 'velaanaage', label: 'Velaanaage', zone: 'male' }, { value: 'bus_terminal', label: 'Bus Terminal', zone: 'male' },
     { value: 'museum', label: 'National Museum', zone: 'male' }, { value: 'hm_nirolhu', label: 'Hulhumalé, Nirolhu Magu', zone: 'hulhumale_p1' },
@@ -361,8 +375,10 @@
   }
   // Settings that changed after a visitor's demo was seeded reach them on boot, without wiping their orders (meta.settingsRev).
   // Only figures still at the old demo value are replaced, so anything the office edited stays. Rev 1 (24/10/2026): the four real
-  // bank accounts, business size ranges (rateTo; Medium 35 → 40, Large 60 → 55) and the business reply time.
-  const SETTINGS_REV = 1;
+  // bank accounts, business size ranges (rateTo; Medium 35 → 40, Large 60 → 55) and the business reply time. Rev 2 (26/10/2026): no
+  // food in the bag size guide (the client does not shop groceries).
+  const SETTINGS_REV = 2;
+  const OLD_BAG_GUIDE = 'Fits in a carrier bag, under about 1 ft (30 cm): documents, food, small parcels';
   const OLD_DEMO_ACCOUNTS = ['7730 0000 12345', '9010 0000 67890'];
   const OLD_TIER_RATES = { small: 25, medium: 35, large: 60 };
   function upgradeSettings() {
@@ -383,6 +399,7 @@
         });
       }
       if (s.ops && s.ops.businessReplyText === 'within 1 working day') s.ops.businessReplyText = 'within 3 working hours';
+      if (s.sizeGuide && s.sizeGuide.bag === OLD_BAG_GUIDE) s.sizeGuide.bag = 'Fits in a carrier bag, under about 1 ft (30 cm): documents, small parcels';
       writeRaw(PREFIX + 'settings', s); settingsCache = null;
     }
     writeMeta(Object.assign({}, m, { settingsRev: SETTINGS_REV }));
@@ -505,13 +522,27 @@
     pushEvent(o, makeEvent('adjustment', (visible ? 'Price updated: ' : 'Adjustment: ') + label + ' ' + fmt(adj.amount), a.by, visible ? 'public' : 'internal', { adjustmentId: adj.id }));
     return save(o);
   }
+  // shopsOf(o) → [{ key, shop }]: the shops on an order, 'main' for the Shop & Deliver shop, then each shop stop by its collection id.
+  function shopsOf(o) {
+    const main = o.service === 'shop' ? (o.packages || []).find(p => p.shop) : null;
+    return (main ? [{ key: 'main', shop: main.shop }] : []).concat((o.extraCollections || []).filter(c => c.kind === 'shop' && c.shop).map(c => ({ key: c.id, shop: c.shop })));
+  }
+  MDM.orderShops = shopsOf;
   // confirmPrice: the operator finalises the price after reviewing the package photo (or the driver's proof of collection).
+  // Shopping (round 4, 26/10/2026): the customer sends a list without a budget and our team calls to agree the items and their cost
+  // before buying. q.itemCosts { main | <collection id>: MVR } records that cost on each shop (shop.budget: what we spend; the receipt
+  // replaces it later), the shopping fee follows it, and q.delivery (or q.total, the whole price) sets the rest.
   function confirmPrice(orderId, q) {
     const o = orderOrThrow(orderId);
     const before = o.totals.total;
-    const total = q.total == null || q.total === '' ? before : Math.round(Number(q.total));
-    if (total !== before) {
-      o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: MDM.id('adj'), preset: q.preset || 'quote', label: q.label || 'Price confirmation', amount: total - before, at: now(), by: q.by || 'admin', remarks: q.remarks || '' }]);
+    if (q.itemCosts) {
+      shopsOf(o).forEach(x => { const v = q.itemCosts[x.key]; if (v != null && v !== '') x.shop.budget = Math.max(0, Math.round(Number(v) || 0)); });
+      recalc(o);
+    }
+    const now0 = o.totals.total, shopping = (o.totals.budget || 0) + ((o.fees && o.fees.shopping) || 0);
+    const total = q.delivery != null && q.delivery !== '' ? Math.round(Number(q.delivery)) + shopping : q.total == null || q.total === '' ? now0 : Math.round(Number(q.total));
+    if (total !== now0) {
+      o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: MDM.id('adj'), preset: q.preset || 'quote', label: q.label || 'Price confirmation', amount: total - now0, at: now(), by: q.by || 'admin', remarks: q.remarks || '' }]);
       recalc(o);
     }
     const fromProof = MDM.priceToFinalise(o);
@@ -786,18 +817,22 @@
       const s = Object.assign({ id: MDM.id('stp'), packageId: pkg.id, packageIds: [pkg.id], type, label, address: end.address || '', landmark: end.landmark || '', instructions: end.instructions || '', zone, lat: p.lat, lng: p.lng, contact: contact || { name: o.customer.name, phone: o.customer.phone }, cargo: end.cargo || null, meetAt: end.meetAt || '', status: 'pending', at: null, attempts: 0 }, extra || {});
       byKey[key] = s; stops.push(s);
     };
+    // Packages counted at an extra stop (package.collectionId, round 4) are collected there, not at the first collection.
+    const extraIds = (o.extraCollections || []).map(c => c.id);
+    const atExtra = pkg => !!pkg.collectionId && extraIds.indexOf(pkg.collectionId) >= 0;
     (o.packages || []).forEach(pkg => {
-      if (o.service === 'shop' && pkg.shop) add('pickup', 'Shop: ' + pkg.shop.name, { address: pkg.shop.address || pkg.shop.name, lat: pkg.shop.lat, lng: pkg.shop.lng }, pkg.shop.zone || 'male', { name: pkg.shop.name, phone: '' }, pkg, { shop: true });
+      if (atExtra(pkg)) return;
+      if (o.service === 'shop' && pkg.shop) add('pickup', 'Shop: ' + MDM.shopName(pkg.shop), { address: pkg.shop.address || MDM.shopName(pkg.shop), lat: pkg.shop.lat, lng: pkg.shop.lng }, pkg.shop.zone || 'male', { name: MDM.shopName(pkg.shop), phone: pkg.shop.phone || '' }, pkg, { shop: true });
       else if (pkg.pickup) add('pickup', 'Collection', pkg.pickup, pkg.pickup.zone || 'male', pkg.pickup.contact, pkg);
     });
-    // Extra collection points (multi collection): each is its own stop; what is collected or bought there is packed with the rest, so
-    // the stop carries no package of its own.
+    // Extra collection points (multi collection): each is its own stop with the packages counted there, so the driver confirms each
+    // stop's packages as they collect them. Orders from before per-stop counts packed everything with the first collection.
     (o.extraCollections || []).forEach(c => {
-      const shop = c.kind === 'shop';
-      const end = { address: shop ? [c.shop && c.shop.name, c.address].filter(Boolean).join(', ') : c.address, landmark: c.landmark || '', instructions: c.instructions || '', lat: c.lat, lng: c.lng };
+      const shop = c.kind === 'shop', mine = (o.packages || []).filter(p => p.collectionId === c.id).map(p => p.id);
+      const end = { address: shop ? [MDM.shopName(c.shop), c.address].filter(Boolean).join(', ') : c.address, landmark: c.landmark || '', instructions: c.instructions || '', lat: c.lat, lng: c.lng };
       const p = pointFor(end, c.zone || 'male', end.address);
-      stops.push({ id: MDM.id('stp'), packageId: null, packageIds: [], collectionId: c.id, type: 'pickup', label: shop ? 'Shop: ' + ((c.shop && c.shop.name) || 'shop') : 'Collection', address: end.address || '', landmark: end.landmark, instructions: end.instructions,
-        zone: c.zone || 'male', lat: p.lat, lng: p.lng, contact: shop ? { name: (c.shop && c.shop.name) || '', phone: (c.shop && c.shop.phone) || '' } : { name: c.contactName || o.customer.name, phone: c.contactPhone || o.customer.phone },
+      stops.push({ id: MDM.id('stp'), packageId: mine[0] || null, packageIds: mine, collectionId: c.id, type: 'pickup', label: shop ? 'Shop: ' + MDM.shopName(c.shop) : 'Collection', address: end.address || '', landmark: end.landmark, instructions: end.instructions,
+        zone: c.zone || 'male', lat: p.lat, lng: p.lng, contact: shop ? { name: MDM.shopName(c.shop), phone: (c.shop && c.shop.phone) || '' } : { name: c.contactName || o.customer.name, phone: c.contactPhone || o.customer.phone },
         cargo: null, meetAt: '', status: 'pending', at: null, attempts: 0, shop: shop || undefined });
     });
     (o.packages || []).forEach(pkg => { const d = pkg.dropoff || {}; add('dropoff', 'Delivery', d, d.zone || 'male', d.recipient, pkg); });
@@ -1189,10 +1224,12 @@
       const acc = readCol('business_accounts').find(a => a.id === d.accountId);
       if (acc) d.packages = (d.packages || []).map(p => p.tier && p.tierRate == null ? Object.assign({}, p, { tierRate: MDM.pricing.businessRate(acc, p.tier, s) }) : p);
     }
-    // Extra collection points (multi collection): cleaned here so every page stores the same shape.
-    const extraCollections = (Array.isArray(d.extraCollections) ? d.extraCollections : []).filter(c => c && String(c.address || '').trim()).slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(c => {
+    // Extra collection points (multi collection): cleaned here so every page stores the same shape. A shop stop needs no address
+    // (round 4): the customer names the shop, or leaves it to us, and lists what to buy; our team confirms both on a call.
+    const usable = c => c && (String(c.address || '').trim() || (c.kind === 'shop' && c.shop && (String(c.shop.list || '').trim() || String(c.shop.name || '').trim())));
+    const extraCollections = (Array.isArray(d.extraCollections) ? d.extraCollections : []).filter(usable).slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(c => {
       const shop = c.kind === 'shop';
-      return { id: c.id || MDM.id('col'), kind: shop ? 'shop' : 'collect', address: String(c.address).trim(), zone: c.zone && c.zone !== 'airport' ? c.zone : 'male', landmark: String(c.landmark || '').trim(),
+      return { id: c.id || MDM.id('col'), kind: shop ? 'shop' : 'collect', address: String(c.address || '').trim(), zone: c.zone && c.zone !== 'airport' ? c.zone : 'male', landmark: String(c.landmark || '').trim(),
         contactName: shop ? '' : String(c.contactName || '').trim(), contactPhone: shop ? '' : normPhone(c.contactPhone) || String(c.contactPhone || '').trim(), instructions: String(c.instructions || '').trim(),
         shop: shop ? { name: String((c.shop || {}).name || '').trim(), phone: normPhone((c.shop || {}).phone) || '', list: String((c.shop || {}).list || '').trim(), budget: Math.round(Number((c.shop || {}).budget) || 0), unavailable: (c.shop || {}).unavailable || 'call', receiptTotal: null, receiptPhotoId: null } : null };
     });

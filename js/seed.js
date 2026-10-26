@@ -16,7 +16,7 @@
       rates: { sizes: { bag: { same: 35, cross: 45 }, box: { same: 45, cross: 60 }, xl: { same: 60, cross: 60, quoted: true } }, cargo: 20, airport: 40, shoppingPct: 10, business: 25, express: 25, vehicle: null,
         businessTiers: MDM.DEFAULT_BUSINESS_TIERS.map(x => Object.assign({}, x)) },
       rules: { airportReplacesCross: true, cargoFeePer: 'order', airportFeePer: 'order', paymentTiming: 'after_delivery', upfrontOptional: true, naaluBillable: false },
-      sizeGuide: { bag: 'Fits in a carrier bag, under about 1 ft (30 cm): documents, food, small parcels', box: 'A carton up to about 2 ft (60 cm) a side, strapped on the bike', xl: 'Bigger than a box or needs two hands; may need a vehicle, price confirmed first' },
+      sizeGuide: { bag: 'Fits in a carrier bag, under about 1 ft (30 cm): documents, small parcels', box: 'A carton up to about 2 ft (60 cm) a side, strapped on the bike', xl: 'Bigger than a box or needs two hands; may need a vehicle, price confirmed first' },
       ops: { hours: { open: '09:00', close: '23:00' }, days: 'Every day', asapText: 'Usually within 60 to 90 minutes in Malé and Hulhumalé', reviewText: 'about 30 minutes', businessReplyText: 'within 3 working hours', slotStart: '09:00', slotEnd: '23:00', slotMinutes: 120, speedCityKmh: 18, speedHighwayKmh: 40, peakBufferMin: 10, peakWindows: ['08:00-09:30', '17:00-19:30'], closedWindows: ['Fri 12:00-13:30'] },
       banks: MDM.DEFAULT_BANKS.map(x => Object.assign({}, x)),
       contact: { phone: '7770000', whatsapp: '7770000', viber: '7770000', email: 'hello@example.com' },
@@ -133,6 +133,7 @@
         dropoff: endpoint(o.dropoff, { recipient: o.recipient || null, cargo: o.dropCargo || null, meetAt: o.dropCargo ? '' : (o.meetAt || 'door'), instructions: o.dropNote || '' }),
         shop: o.shop ? Object.assign({ address: '', unavailable: 'call', receiptTotal: null, receiptPhotoId: null }, o.shop, MDM.geo.geocodeZone(o.shop.zone, o.shop.name)) : null,
         notes: o.notes || '',
+        ...(o.collectionId ? { collectionId: o.collectionId } : {}),
       };
     }
 
@@ -279,9 +280,9 @@
       stops: [pickDone('collected'), dropDone('delivered', 'Ahmed Sobah')] });
 
     order({ code: 'MDM-1026', type: 'shop_buy', service: 'shop', customer: C.nazeeha,
-      details: { shop: { name: "STO People's Choice", address: 'Boduthakurufaanu Magu', zone: 'male', phone: '3314466' }, budget: 450,
-        items: [{ name: 'Rice', details: '2 kg', qty: 1, instructions: '' }, { name: 'Cooking oil', details: '1 L', qty: 1, instructions: '' }, { name: 'Eggs', details: 'Tray of 12', qty: 1, instructions: 'Pack on top' }, { name: 'Onions', details: '1 kg bags', qty: 2, instructions: '' }, { name: 'Dhal', details: '1 kg', qty: 1, instructions: '' }, { name: 'Dried chilli', details: '250 g', qty: 1, instructions: '' }] }, driverId: 'drv_nazim', steps: full(days(5, 4), 'drv_nazim', 15, 10, 2, 5, 20, 40, 2, 30), receipt: 412, settle: 'due',
-      packages: [pkg({ size: 'bag', description: 'Groceries', shop: { name: "STO People's Choice", zone: 'male', address: 'Boduthakurufaanu Magu', list: '2 kg rice, 1 L cooking oil, 12 eggs, 2 kg onions, dhal 1 kg, chilli 250 g', budget: 450, unavailable: 'closest' }, dropoff: A.ranfaru, recipient: { name: 'Mariyam Nazeeha', phone: '9912045' } })],
+      details: { shop: { name: 'Island Electronics', address: 'Boduthakurufaanu Magu', zone: 'male', phone: '3314466' },
+        items: [{ name: 'Phone charger', details: 'USB-C, 20 W', qty: 1, instructions: '' }, { name: 'Screen protector', details: 'iPhone 16', qty: 2, instructions: '' }, { name: 'Extension cord', details: '4 sockets, 3 m', qty: 1, instructions: '' }, { name: 'Desk lamp', details: 'LED, white', qty: 1, instructions: 'Check it works' }] }, driverId: 'drv_nazim', steps: full(days(5, 4), 'drv_nazim', 15, 10, 2, 5, 20, 40, 2, 30), receipt: 412, settle: 'due',
+      packages: [pkg({ size: 'bag', description: 'Electronics', shop: { name: 'Island Electronics', zone: 'male', address: 'Boduthakurufaanu Magu', phone: '3314466', list: 'Phone charger USB-C 20 W ×1, screen protector iPhone 16 ×2, extension cord 4 sockets ×1, desk lamp LED ×1', budget: 450, unavailable: 'call' }, dropoff: A.ranfaru, recipient: { name: 'Mariyam Nazeeha', phone: '9912045' } })],
       payment: paid('confirmed', 'confirmed+4', 'confirmed+9', 'mib', 'Mariyam Nazeeha', { upfront: true, upfrontRequired: true, paidAmount: 540 }),
       stops: [pickDone('collected'), dropDone('delivered', 'Mariyam Nazeeha')] });
 
@@ -327,7 +328,7 @@
       stops: [pickDone('collected'), dropDone('out_for_delivery+20', 'Ali Nasih'), dropDone('delivered', "Sana's mother", 'family')] });
 
     order({ code: 'MDM-1033', type: 'shop_buy', service: 'shop', customer: C.rilwan,
-      details: { shop: { name: 'Lifeline Pharmacy', address: 'Majeedhee Magu', zone: 'male', phone: '3329933' }, budget: 300,
+      details: { shop: { name: 'Lifeline Pharmacy', address: 'Majeedhee Magu', zone: 'male', phone: '3329933' },
         items: [{ name: 'Panadol', details: '500 mg strips', qty: 2, instructions: '' }, { name: 'ORS sachets', details: 'Any brand', qty: 6, instructions: '' }, { name: 'Digital thermometer', details: '', qty: 1, instructions: 'Not the ear type' }] }, driverId: 'drv_shiyam', steps: full(200, 'drv_shiyam', 12, 5, 2, 10, 50, 5, 2, 50), receipt: 300, settle: 'settled',
       packages: [pkg({ size: 'bag', description: 'Pharmacy run', shop: { name: 'Lifeline Pharmacy', zone: 'male', address: 'Majeedhee Magu', list: 'Panadol 2 strips, ORS sachets ×6, thermometer', budget: 300, unavailable: 'call' }, dropoff: A.meerubahuru, recipient: { name: 'Mohamed Rilwan', phone: '7778901' } })],
       payment: paid('confirmed', 'confirmed+2', 'confirmed+8', 'mib', 'Mohamed Rilwan', { upfront: true, upfrontRequired: true }),
@@ -477,7 +478,7 @@
       { id: 'prd_box_l', sku: 'PK-BOX-L', name: 'Shipping box, large', category: 'packaging', price: 40, unit: 'box', stock: 6, active: true, description: '50 × 40 × 40 cm. Travels as XL.' },
       { id: 'prd_tape', sku: 'SP-TAPE', name: 'Packing tape', category: 'supplies', price: 25, unit: 'roll', stock: 60, active: true, description: '48 mm clear tape, 100 m.' },
       { id: 'prd_fragile', sku: 'SP-FRAG', name: 'Fragile stickers', category: 'supplies', price: 10, unit: 'sheet', stock: 200, active: true, description: 'Sheet of 12 red fragile labels.' },
-      { id: 'prd_cooler', sku: 'SP-COOL', name: 'Insulated food bag', category: 'supplies', price: 85, unit: 'bag', stock: 14, active: true, description: 'Keeps cakes and cold food steady across the bridge.' },
+      { id: 'prd_cooler', sku: 'SP-COOL', name: 'Insulated carry bag', category: 'supplies', price: 85, unit: 'bag', stock: 14, active: true, description: 'Keeps parcels cool, dry and steady across the bridge.' },
       { id: 'prd_bundle10', sku: 'BD-10', name: '10 Bag deliveries in Malé', category: 'bundles', price: 320, unit: 'bundle', stock: null, active: true, description: 'Prepaid credits, use within 60 days. Save MVR 30.' },
       { id: 'prd_bundle50', sku: 'BD-50B', name: 'Business starter, 50 packages', category: 'bundles', price: 1150, unit: 'bundle', stock: null, active: true, description: 'For online sellers. Malé and Hulhumalé, under 1 ft.' },
       { id: 'prd_labels', sku: 'SP-LBL', name: 'Shipping label roll', category: 'supplies', price: 120, unit: 'roll', stock: 0, active: true, description: '100 × 150 mm thermal labels, 250 per roll.' },
@@ -522,9 +523,9 @@
     o1070.packages[0].photoId = photo('file_pkg_1070', 'package', o1070.id, 'Package photo from the customer', t(19), 'xl');
     // Shop & deliver with an itemised list.
     order({ code: 'MDM-1071', type: 'shop_buy', service: 'shop', customer: C.zeena, steps: [['requested', 28], ['confirmed', 21]],
-      details: { shop: { name: 'Fantasy Store', address: 'Fareedhee Magu', zone: 'male', phone: '3320001' }, budget: 420,
-        items: [{ name: 'Basmati rice', details: '5 kg bag, any brand', qty: 1, instructions: '' }, { name: 'Fresh milk', details: '1 L, full cream', qty: 4, instructions: 'Check the expiry date' }, { name: 'Eggs', details: 'Tray of 30', qty: 1, instructions: 'Pack separately' }, { name: 'Dates', details: '1 kg box', qty: 1, instructions: '' }] },
-      packages: [pkg({ size: 'box', description: 'Groceries', shop: { name: 'Fantasy Store', zone: 'male', address: 'Fareedhee Magu', list: 'Basmati rice 5 kg ×1, fresh milk 1 L ×4, eggs tray of 30 ×1, dates 1 kg ×1', budget: 420, unavailable: 'call' }, dropoff: A.handhuvaree, recipient: { name: 'Fathimath Zeena', phone: '7654321' } })],
+      details: { shop: { name: 'Gadget Corner', address: 'Fareedhee Magu', zone: 'male', phone: '3320001' },
+        items: [{ name: 'Phone case', details: 'iPhone 16 Pro, clear', qty: 1, instructions: '' }, { name: 'AirPods case', details: 'Silicone, black', qty: 1, instructions: '' }, { name: 'HDMI cable', details: '2 m', qty: 2, instructions: 'Check the length' }, { name: 'Power bank', details: '10,000 mAh', qty: 1, instructions: 'Pack separately' }] },
+      packages: [pkg({ size: 'box', description: 'Phone accessories', shop: { name: 'Gadget Corner', zone: 'male', address: 'Fareedhee Magu', phone: '3320001', list: 'Phone case iPhone 16 Pro ×1, AirPods case ×1, HDMI cable 2 m ×2, power bank 10,000 mAh ×1', budget: 420, unavailable: 'call' }, dropoff: A.handhuvaree, recipient: { name: 'Fathimath Zeena', phone: '7654321' } })],
       payment: { status: 'requested', upfront: true, upfrontRequired: true, requestedAt: 21 } });
     // A single business order with cash on delivery at the medium size rate.
     order({ code: 'MDM-1072', type: 'business', service: 'business', source: 'business', by: 'business:bacc_fonu', accountId: 'bacc_fonu', customer: { id: null, name: 'Fonu Online Store', phone: '7633221', email: 'hello@fonu.example', notify: 'whatsapp' },
@@ -540,14 +541,15 @@
       stops: [pickDone('collected')] });
     o1074.route.stops[0].proofPhotoId = photo('file_col_1074', 'proof_collection', o1074.id, 'Proof of collection', o1074.route.stops[0].at, 'box');
     o1074.packages[0].photoId = o1074.route.stops[0].proofPhotoId; o1074.packages[0].photoSource = 'driver';
-    // Multi collection: clothes from home and baby supplies bought at a pharmacy, packed together and sent on a speedboat. The shop
-    // stop makes it a paid-upfront order; the second stop is priced as an extra collection.
+    // Multi collection: clothes from home (a box) and baby supplies bought at a pharmacy (a bag, counted at that stop), sent together on a
+    // speedboat. The shop stop makes it a paid-upfront order; the second stop is priced as an extra collection.
     const o1075 = order({ code: 'MDM-1075', customer: C.shifza, driverId: 'drv_shiyam', steps: [['requested', 140], ['confirmed', 128], ['assigned', 110], ['dispatched', 100], ['on_the_way', 60], ['arrived', 45],
       ['on_the_way', 33, 'driver:drv_shiyam', 'Ibrahim Shiyam is on the way to the next collection']],
       method: 'boat', methodDetails: { boat: { vesselType: 'speedboat', name: 'Maafushi Express', departureDate: clockDate(-150), departureTime: clock(-150), jetty: 'male_jetties', island: 'Maafushi, Kaafu Atoll', address: 'Hulhangu Villa, Maafushi', contact: '7912377' } },
-      extraCollections: [{ kind: 'shop', address: 'Majeedhee Magu', zone: 'male', shop: { name: 'Lifeline Pharmacy', phone: '3329933', list: 'Baby formula 400 g ×2, baby wipes ×3', budget: 260, unavailable: 'call' } }],
+      extraCollections: [{ kind: 'shop', address: 'Majeedhee Magu', zone: 'male', shop: { name: 'Lifeline Pharmacy', phone: '3329933', list: 'Baby wipes ×3, thermometer ×1, plasters ×2', budget: 260, unavailable: 'call' } }],
       adjustments: [{ preset: 'stop', label: 'Extra collection', amount: 20, min: 128, remarks: 'Second stop at Lifeline Pharmacy' }],
-      packages: [pkg({ size: 'box', description: 'Clothes from home and baby supplies, packed together', pickup: A.kaneeru, pickupContact: { name: 'Aishath Shifza', phone: '7912345' }, dropoff: { address: 'Malé speedboat jetties', zone: 'male' }, recipient: { name: 'Hawwa Shifna', phone: '7912377' } })],
+      packages: [pkg({ size: 'box', description: 'Clothes from home', pickup: A.kaneeru, pickupContact: { name: 'Aishath Shifza', phone: '7912345' }, dropoff: { address: 'Malé speedboat jetties', zone: 'male' }, recipient: { name: 'Hawwa Shifna', phone: '7912377' } }),
+        pkg({ size: 'bag', description: 'Baby supplies from the pharmacy', collectionId: 'col_1075_1', pickup: { address: 'Lifeline Pharmacy, Majeedhee Magu', zone: 'male' }, pickupContact: { name: 'Lifeline Pharmacy', phone: '3329933' }, dropoff: { address: 'Malé speedboat jetties', zone: 'male' }, recipient: { name: 'Hawwa Shifna', phone: '7912377' } })],
       payment: paid('confirmed', 'confirmed+5', 'confirmed+10', 'bml', 'Aishath Shifza', { upfront: true, upfrontRequired: true }),
       extra: [['collected_partial', 'Collected from M. Kaneerumaage, 2nd floor, Majeedhee Magu', 33, 'driver:drv_shiyam']],
       stops: [pickDone(33)] });

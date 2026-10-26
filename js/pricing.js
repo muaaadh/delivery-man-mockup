@@ -45,8 +45,8 @@
     });
     return ctx;
   }
-  // Shops on a multi-collection order (extraCollections of kind 'shop'): their budget, then the receipt, is bought for the customer
-  // and carries the shopping fee the same way a Shop & Deliver order does.
+  // Shops on a multi-collection order (extraCollections of kind 'shop'): the items' cost agreed on the confirmation call (shop.budget),
+  // then the receipt, is bought for the customer and carries the shopping fee the same way a Shop & Deliver order does.
   function extraShops(list) { return (list || []).filter(c => c && c.kind === 'shop' && c.shop).map(c => c.shop); }
   function shopBase(sh) { return sh.receiptTotal != null && sh.receiptTotal > 0 ? round(sh.receiptTotal) : round(sh.budget); }
   function cargoLabel(count, rules) { return 'Maldivian Cargo fee' + (count > 1 && rules.cargoFeePer !== 'order' ? ' × ' + count : ''); }
@@ -94,7 +94,7 @@
     const cargoFee = round(rates.cargo) * (cargoCount ? (rules.cargoFeePer === 'order' ? 1 : cargoCount) : 0);
     if (airportFee) feeLines.push({ key: 'airport', label: 'Airport fee', amount: airportFee, reason: airportReasons[0] || '' });
     if (cargoFee) feeLines.push({ key: 'cargo', label: cargoLabel(cargoCount, rules), amount: cargoFee, reason: cargoReasons[0] || '' });
-    if (shopping) feeLines.push({ key: 'shopping', label: shoppingLabel(rates), amount: shopping, reason: 'of the shopping budget' });
+    if (shopping) feeLines.push({ key: 'shopping', label: shoppingLabel(rates), amount: shopping, reason: 'of the items' });
 
     const fees = { cargo: cargoFee, airport: airportFee, shopping, adjustments: [] };
     const packagesTotal = packages.reduce((n, p) => n + p.price.lineTotal, 0);
@@ -132,7 +132,7 @@
     if (f.cargo) out.push({ key: 'cargo', label: cargoLabel(ctx.cargoCount, rules), amount: f.cargo, reason: ctx.cargoPlaces[0] || ctx.cargoReasons[0] || '' });
     if (f.shopping) {
       const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) || extraShops(order.extraCollections).some(sh => sh.receiptTotal > 0);
-      out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? 'of the receipt' : 'of the shopping budget' });
+      out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? 'of the receipt' : 'of the items' });
     }
     (f.adjustments || []).forEach(a => out.push({ key: 'adjustment', id: a.id, label: a.label, amount: a.amount, reason: '', preset: a.preset }));
     return out;

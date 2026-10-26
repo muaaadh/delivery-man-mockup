@@ -155,6 +155,8 @@ body.page-driver .job__stop.is-done .job__address { font-size: 15px; font-weight
 body.page-driver .job__address { font-size: 17px; font-weight: 500; line-height: 1.35; margin-top: 4px; overflow-wrap: anywhere; }
 body.page-driver .job--hero .job__stop:not(.is-done) .job__address { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
 body.page-driver .job__line { font-size: 13px; line-height: 1.4; color: var(--text-2); margin-top: 4px; overflow-wrap: anywhere; }
+body.page-driver .job__collect { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+body.page-driver .job__collect svg { flex: none; color: var(--red); }
 body.page-driver .job__contact { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
 body.page-driver .job__person { display: flex; flex-direction: column; min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
 body.page-driver .job__phone { font-size: 13px; color: var(--text-2); }

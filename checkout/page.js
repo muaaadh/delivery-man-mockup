@@ -191,7 +191,7 @@
     (order.items || []).forEach(it => lines.unshift(line(it.qty + ' × ' + it.name, null, it.total)));
     const shopItems = Array.isArray((order.details || {}).items) ? order.details.items.filter(i => i && i.name) : [];
     const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0);
-    if (order.totals.budget) lines.push(line(receipt ? 'Shopping receipt' : 'Shopping budget (paid up front)', shopItems.length ? shopItems.map(i => (i.qty || 1) + ' × ' + i.name).join(', ') : null, order.totals.budget, true, 'shop-budget'));
+    if (order.totals.budget) lines.push(line(receipt ? 'Shopping receipt' : 'Items, agreed on our call', shopItems.length ? shopItems.map(i => (i.qty || 1) + ' × ' + i.name).join(', ') : null, order.totals.budget, true, 'shop-budget'));
     feeRows(order, settings).forEach(f => lines.push(line(f.label, f.reason, f.amount, true, f.key)));
     return el('div', { class: 'summary checkout-summary' }, lines, el('div', { class: 'summary__rule' }),
       el('div', { class: 'summary__total' }, el('span', null, 'Amount due'), el('span', { class: 'mono', 'data-testid': 'checkout-amount' }, MDM.pricing.format(order.totals.total))));

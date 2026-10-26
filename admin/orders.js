@@ -390,7 +390,7 @@
     const shop = d.shop && typeof d.shop === 'object' ? d.shop : null;
     const rows = [];
     if (shop) {
-      rows.push(row('Shop', shop.name), row('Shop address', [shop.address, shop.zone ? MDM.geo.zoneLabel(shop.zone) : ''].filter(Boolean).join(' · ')));
+      rows.push(row('Shop', shop.name || 'Any shop, chosen on the call'), row('Shop address', [shop.address, shop.zone ? MDM.geo.zoneLabel(shop.zone) : ''].filter(Boolean).join(' · ')));
       if (shop.phone) rows.push(rowNode('Shop phone', el('span', null, el('span', { class: 'mono' }, phone.format(shop.phone)), contactLinks(shop.phone))));
     }
     if (d.budget != null && d.budget !== '') rows.push(row('Budget', money(d.budget), { mono: true }));
@@ -423,16 +423,23 @@
     return el('div', { class: 'addr' }, el('div', { class: 'addr__label' }, 'Hand over at · ' + MDM.deliveryMethodLabel(m)), el('div', { class: 'addr__line' }, end.address || d.address || ''),
       dest ? el('div', { class: 'addr__meta' }, dest) : null, recipient, note);
   }
+  // Packages counted at a collection (round 4): the extra stop's by package.collectionId, the first collection's are the rest.
+  function stopSizes(o, collectionId) {
+    const ids = (o.extraCollections || []).map(c => c.id), n = {};
+    (o.packages || []).forEach(p => { const at = ids.indexOf(p.collectionId) >= 0 ? p.collectionId : null; if (at === (collectionId || null)) n[p.size] = (n[p.size] || 0) + 1; });
+    return ['bag', 'box', 'xl'].filter(k => n[k]).map(k => n[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(', ');
+  }
   // Multi collection (updates 17/10/2026): each extra point is collected from or bought at, then everything goes to the one delivery.
-  function extraCollectionBlock(c, n) {
-    const sh = c.shop || {}, shop = c.kind === 'shop';
+  function extraCollectionBlock(o, c, n) {
+    const sh = c.shop || {}, shop = c.kind === 'shop', sizes = stopSizes(o, c.id);
     return el('div', { class: 'addr', 'data-testid': 'drawer-extra-collection', 'data-kind': c.kind },
       el('div', { class: 'addr__label' }, 'Collection ' + n + (shop ? ' · buy at a shop' : '')),
-      el('div', { class: 'addr__line' }, shop ? [sh.name, c.address].filter(Boolean).join(', ') : c.address || ''),
+      el('div', { class: 'addr__line' }, shop ? [MDM.shopName(sh), c.address].filter(Boolean).join(', ') : c.address || ''),
+      sizes ? el('div', { class: 'addr__meta', 'data-testid': 'drawer-stop-sizes' }, 'Packages: ' + sizes) : null,
       el('div', { class: 'addr__meta' }, [MDM.geo.zoneLabel(c.zone), c.landmark].filter(Boolean).join(' · ')),
       shop ? (sh.phone ? el('div', { class: 'addr__meta' }, 'Shop phone ' + phone.format(sh.phone)) : null) : el('div', { class: 'addr__meta' }, person(c.contactName, c.contactPhone)),
       shop && sh.list ? el('div', { class: 'addr__note wrap-anywhere' }, 'To buy: ' + sh.list) : null,
-      shop ? el('div', { class: 'addr__meta mono' }, 'Budget ' + money(sh.budget) + (sh.receiptTotal > 0 ? ' · receipt ' + money(sh.receiptTotal) : '')) : null,
+      shop ? el('div', { class: 'addr__meta mono' }, (sh.budget ? 'Items agreed ' + money(sh.budget) : 'Items not agreed yet') + (sh.receiptTotal > 0 ? ' · receipt ' + money(sh.receiptTotal) : '')) : null,
       shop && sh.unavailable ? el('div', { class: 'addr__meta' }, 'If not available: ' + ({ call: 'call the customer', skip: 'skip it', closest: 'buy the closest match' }[sh.unavailable] || sh.unavailable)) : null,
       c.instructions ? el('div', { class: 'addr__note' }, c.instructions) : null);
   }
@@ -442,10 +449,11 @@
     return sec('Collection and delivery', 'drawer-addresses', el('div', { class: 'grid-2 addr-grid' },
       el('div', { class: 'addr', 'data-testid': 'drawer-collection' }, el('div', { class: 'addr__label' }, (extra.length ? 'Collection 1' : 'Collect from') + (c.label ? ' · ' + c.label : '')), el('div', { class: 'addr__line' }, c.address || ''),
         el('div', { class: 'addr__meta' }, [MDM.geo.zoneLabel(c.zone), c.landmark, c.preferredTime ? 'around ' + c.preferredTime : ''].filter(Boolean).join(' · ')),
-        el('div', { class: 'addr__meta' }, person(c.contactName, c.contactPhone)), c.instructions ? el('div', { class: 'addr__note' }, c.instructions) : null),
-      extra.map((x, i) => extraCollectionBlock(x, i + 2)),
+        el('div', { class: 'addr__meta' }, person(c.contactName, c.contactPhone)), extra.length && stopSizes(o, null) ? el('div', { class: 'addr__meta', 'data-testid': 'drawer-stop-sizes' }, 'Packages: ' + stopSizes(o, null)) : null,
+        c.instructions ? el('div', { class: 'addr__note' }, c.instructions) : null),
+      extra.map((x, i) => extraCollectionBlock(o, x, i + 2)),
       deliverToBlock(o)),
-      extra.length ? el('p', { class: 'muted small', style: { marginTop: '8px' }, 'data-testid': 'drawer-multi-note' }, plural(extra.length + 1, 'collection') + ', packed together and delivered to one address.') : null,
+      extra.length ? el('p', { class: 'muted small', style: { marginTop: '8px' }, 'data-testid': 'drawer-multi-note' }, plural(extra.length + 1, 'collection') + ', delivered together to one address.') : null,
       open(o) ? el('div', { class: 'row', style: { marginTop: '12px' } }, smallBtn('Modify order', 'drawer-modify', () => modifyOrder(o))) : null);
   }
   // ---- Delivery method details (§3.2 boat, §3.3 Maldivian Cargo, §3.4 airport), with the boat change log (§5.3) ----------------
@@ -532,7 +540,7 @@
       const lines = [];
       if (o.service === 'shop' && pkg.shop) {
         if (pkg.shop.list) lines.push('List: ' + pkg.shop.list);
-        lines.push('Budget ' + money(pkg.shop.budget) + ' · if unavailable: ' + ({ call: 'call the customer', skip: 'skip it', closest: 'buy the closest match' }[pkg.shop.unavailable] || pkg.shop.unavailable) + (pkg.shop.receiptTotal ? ' · receipt ' + money(pkg.shop.receiptTotal) : ''));
+        lines.push((pkg.shop.budget ? 'Items agreed ' + money(pkg.shop.budget) : 'Items not agreed yet') + ' · if unavailable: ' + ({ call: 'call the customer', skip: 'skip it', closest: 'buy the closest match' }[pkg.shop.unavailable] || pkg.shop.unavailable) + (pkg.shop.receiptTotal ? ' · receipt ' + money(pkg.shop.receiptTotal) : ''));
       } else if (pkg.dropoff && (o.packages || []).length > 1) lines.push('To ' + person(pkg.dropoff.recipient && pkg.dropoff.recipient.name, pkg.dropoff.recipient && pkg.dropoff.recipient.phone) + ' · ' + (pkg.dropoff.address || ''));
       if (pkg.tier) {
         // The store moves a re-categorised business package to the matching size category at the account's rate (§5.2), so the tier on
@@ -601,7 +609,8 @@
       const meta = [MDM.geo.zoneLabel(s.zone)];
       if (s.contact && (s.contact.name || s.contact.phone)) meta.push(person(s.contact.name, s.contact.phone));
       if (s.landmark) meta.push(s.landmark);
-      if ((s.packageIds || []).length > 1) meta.push(plural(s.packageIds.length, 'package'));
+      if (s.type === 'pickup' && (s.packageIds || []).length) { const n = {}; (o.packages || []).forEach(p => { if (s.packageIds.indexOf(p.id) >= 0) n[p.size] = (n[p.size] || 0) + 1; }); meta.push(['bag', 'box', 'xl'].filter(k => n[k]).map(k => n[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(', ')); }
+      else if ((s.packageIds || []).length > 1) meta.push(plural(s.packageIds.length, 'package'));
       if (s.status === 'done' && s.type !== 'pickup') { const h = MDM.HANDED_TO.find(x => x.value === s.handedTo); meta.push('Handed to ' + (s.recipientName || '') + (h && h.value !== 'recipient' ? ' (' + h.label.toLowerCase() + ')' : '') + (s.confirmed ? ', confirmed' : '')); }
       if (s.status === 'done' && s.receiptTotal != null) meta.push('Receipt ' + money(s.receiptTotal));
       if (s.status === 'failed') { const r = MDM.FAIL_REASONS.find(x => x.value === s.failReason); meta.push((r ? r.label : 'Could not complete') + (s.remarks ? ': ' + s.remarks : '')); }
@@ -626,7 +635,7 @@
     const extraShops = (o.extraCollections || []).filter(c => c.kind === 'shop' && c.shop);
     if ((o.service === 'shop' || extraShops.length) && t.budget) {
       const receipt = (o.packages || []).some(x => x.shop && x.shop.receiptTotal) || extraShops.some(c => c.shop.receiptTotal);
-      lines.push(el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, receipt ? 'Receipt total' : 'Shopping budget'), el('div', { class: 'summary__amount mono' }, money(t.budget))));
+      lines.push(el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, receipt ? 'Receipt total' : 'Items agreed'), el('div', { class: 'summary__amount mono' }, money(t.budget))));
     }
     const adjById = {}; ((o.fees || {}).adjustments || []).forEach(a => { adjById[a.id] = a; });
     MDM.pricing.feeLines(o, state.settings).forEach(f => {
@@ -931,17 +940,26 @@
     // Price after collection (17/10/2026): finalised from the proof of collection; once delivered, confirming it sends the invoice.
     const finalise = MDM.priceToFinalise(o), delivered = o.status === 'delivered';
     const canAsk = o.payment && o.payment.method !== 'invoice' && o.payment.status === 'pending' && !delivered;
+    // Shopping (round 4): no budget on the request; the items and their cost are agreed with the customer on a call, entered here per
+    // shop, and the shopping fee follows them. The rest of the price is the delivery.
+    const shopsOn = MDM.orderShops(o), pct = Number(((state.settings || {}).rates || {}).shoppingPct) || 0;
+    const shoppingNow = (o.totals.budget || 0) + ((o.fees || {}).shopping || 0);
+    const priceFields = shopsOn.length
+      ? shopsOn.map(x => ({ name: 'item_' + x.key, label: 'Items at ' + MDM.shopName(x.shop) + ', MVR', type: 'number', required: true, min: 0, step: 1, value: x.shop.budget || '',
+        hint: x.shop.list ? 'To buy: ' + x.shop.list : null, requiredMessage: 'Enter what the items cost, as agreed on the call' }))
+        .concat([{ name: 'delivery', label: 'Delivery price, MVR', type: 'number', required: true, value: o.totals.total - shoppingNow, min: 0, step: 1, hint: 'Packages and fees, without the items' + (pct ? ' and the ' + pct + '% shopping fee' : '') }])
+      : [{ name: 'total', label: 'Final price (MVR)', type: 'number', required: true, value: o.totals.total, min: 0, step: 1 }];
     const v = await dialog({ title: (finalise ? 'Finalise the price for ' : 'Confirm the price for ') + o.code, okLabel: finalise ? 'Finalise price' : 'Confirm price',
-      message: 'Now ' + money(o.totals.total) + ', estimate ' + est + '. ' + (finalise ? 'Set it from the collection photo. ' : '') + 'Include any vehicle fee.' +
+      message: 'Now ' + money(o.totals.total) + ', estimate ' + est + '. ' + (finalise ? 'Set it from the collection photo. ' : '') + (shopsOn.length ? 'Enter the items as agreed with the customer on the call; the ' + pct + '% shopping fee is added to them. ' : '') + 'Include any vehicle fee.' +
         (finalise && delivered && o.payment && o.payment.status === 'pending' ? ' The invoice goes out once you confirm.' : ''),
-      fields: [
-        { name: 'total', label: 'Final price (MVR)', type: 'number', required: true, value: o.totals.total, min: 0, step: 1 },
+      fields: priceFields.concat([
         { name: 'preset', label: 'Reason for any difference', type: 'select', required: true, options: presets,
           value: (o.packages || []).some(p => p.needsVehicle) && !((o.fees || {}).adjustments || []).some(a => a.preset === 'vehicle') ? 'vehicle' : 'quote' },
         { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2, placeholder: 'Checked the photo: 2 boxes, needs the pickup truck' },
-        canAsk ? { name: 'requestPayment', label: 'Ask the customer to pay now', type: 'checkbox', value: upfrontDefault(o), hint: 'Otherwise the invoice goes out after delivery' } : null].filter(Boolean) });
+        canAsk ? { name: 'requestPayment', label: 'Ask the customer to pay now', type: 'checkbox', value: upfrontDefault(o), hint: 'Otherwise the invoice goes out after delivery' } : null]).filter(Boolean) });
     if (!v) return;
-    const upd = await MDM.store.confirmPrice(o.id, { total: v.total, preset: v.preset, label: v.preset === 'quote' ? 'Price confirmation' : label(presets, v.preset), remarks: v.remarks, requestPayment: !!v.requestPayment, by: by() });
+    const itemCosts = shopsOn.length ? shopsOn.reduce((m, x) => { m[x.key] = v['item_' + x.key]; return m; }, {}) : null;
+    const upd = await MDM.store.confirmPrice(o.id, { total: shopsOn.length ? null : v.total, delivery: shopsOn.length ? v.delivery : null, itemCosts, preset: v.preset, label: v.preset === 'quote' ? 'Price confirmation' : label(presets, v.preset), remarks: v.remarks, requestPayment: !!v.requestPayment, by: by() });
     toast('Price confirmed: ' + money(upd.totals.total) + (upd.payment.status === 'requested' ? (delivered ? ', invoice sent' : ', payment requested') : ''), 'ok');
   }
   async function addAdjustment(o) {

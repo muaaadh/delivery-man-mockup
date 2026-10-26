@@ -9,6 +9,10 @@
 <title>Delivery in Malé, Hulhumalé and the airport · Mr. Delivery Man</title>
 <meta name="description" content="We pick, we shop, we deliver: to homes, boats, ferries and speedboats across Greater Malé, Maldivian Cargo and the airport. Pay by bank transfer and follow every step.">
 <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+<!-- Saved to a home screen: the short name and the red rider icon (iOS ignores SVG icons). -->
+<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Mr. Delivery Man">
+<link rel="manifest" href="./manifest.webmanifest">
 <meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -178,13 +182,12 @@
           <span class="tile__icon" data-icon="shopping-bag" aria-hidden="true"></span>
           <h3 data-cat-label="shop">Shop &amp; Deliver</h3>
           <p class="tile__line">We buy your list and deliver it.</p>
-          <div class="receipt" data-testid="home-shop-receipt">
-            <div><span>Samyang Buldak Case × 1</span><span class="mono">MVR 450</span></div>
-            <div><span>TCL 32" Television × 1</span><span class="mono">MVR 2,500</span></div>
-            <div><span>Huawei Smartwatch × 1</span><span class="mono">MVR 1,500</span></div>
-            <div class="receipt__fee"><span data-testid="home-service-fee-shop">Shopping fee 10%</span><span class="mono" data-testid="home-service-fee-amount">MVR 445</span></div>
-            <p class="receipt__paid" data-testid="home-shop-upfront">Paid upfront</p>
-          </div>
+          <ul class="ticks" data-testid="home-shop-points">
+            <li><span data-icon="check" aria-hidden="true"></span>Share your list</li>
+            <li><span data-icon="check" aria-hidden="true"></span>We confirm with price</li>
+            <li><span data-icon="check" aria-hidden="true"></span>Include a special note</li>
+            <li><span data-icon="check" aria-hidden="true"></span>Pack &amp; Deliver</li>
+          </ul>
           <div class="tile__foot">
             <a class="tile__link" href="./request/?type=shop_buy" data-testid="home-shop-request">Start shopping</a>
           </div>
@@ -226,9 +229,9 @@
           <div class="promo__card">
             <p class="promo__card-title">Your list</p>
             <ul class="promo__list">
-              <li><span class="promo__tick"></span>Bread and milk</li>
-              <li><span class="promo__tick"></span>Fresh tuna, 1 kg</li>
-              <li><span class="promo__tick"></span>Phone charger</li>
+              <li><span class="promo__tick"></span>iPhone 18 Pro</li>
+              <li><span class="promo__tick"></span>TCL 55&Prime; TV</li>
+              <li><span class="promo__tick"></span>Huawei Smart Watch</li>
             </ul>
             <p class="promo__status"><span class="promo__bag" data-icon="shopping-bag"></span>Bought, on the way</p>
           </div>
@@ -311,7 +314,7 @@
       <div class="biz-scale">
         <div class="biz" data-reveal>
           <h2 id="business-title">Sending every day?</h2>
-          <p>Bulk upload, cash on delivery and one invoice a month, <span data-testid="home-due-days">due in 7 days</span>.</p>
+          <p>Bulk upload, cash on delivery and weekly billing, <span data-testid="home-due-days">due in 14 days</span>.</p>
           <div class="biz__actions"><a class="btn btn--brand btn--lg btn--pill" href="./business/">Request an account</a><a class="btn btn--on-dark btn--lg btn--pill" href="./login/?as=business">Business sign-in</a></div>
         </div>
       </div>
@@ -327,7 +330,7 @@
     </div>
   </section>
 
-  <!-- Coverage: the places beside a map with Malé, Hulhumalé and the airport highlighted -->
+  <!-- Coverage: the four places beside a map that names them (no outlines, client 25/10/2026) -->
   <section id="coverage" class="section" aria-labelledby="coverage-title">
     <div class="container split">
       <div class="split__side">
@@ -335,8 +338,8 @@
         <ul class="zones" data-testid="home-coverage-text" data-reveal-group>
           <li data-reveal data-zone="male"><strong>Malé</strong><span>All wards and jetties</span></li>
           <li data-reveal data-zone="hulhumale"><strong>Hulhumalé</strong><span>Phase 1 and Phase 2</span></li>
-          <li data-reveal data-zone="airport"><strong>Velana Airport</strong><span>Resort counters and cargo</span></li>
-          <li data-reveal data-zone="villimale"><strong>Villimalé</strong><span>By ferry, quoted first</span></li>
+          <li data-reveal data-zone="airport"><strong>Velana Airport</strong><span>Resort counters &amp; terminals</span></li>
+          <li data-reveal data-zone="villimale"><strong>Villimalé</strong><span>By ferry</span></li>
         </ul>
       </div>
       <div class="map coverage__map" id="coverage-map" data-testid="home-map" data-reveal="scale">

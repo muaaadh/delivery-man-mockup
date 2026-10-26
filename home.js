@@ -1,18 +1,15 @@
 // Home: the three service categories and the delivery methods take their wording from the shared lists (web app updates
-// 11/10/2026 §1, §3); the shopping fee, the review and delivery times, the terms and the contact links come from settings. No
-// delivery rates on this page (client, 24 Oct 2026): they show when an order is placed. It also plays the drawn delivery in the
+// 11/10/2026 §1, §3); the review and delivery times, the invoice terms, the terms and the contact links come from settings. No
+// prices at all on this page (client, 24 and 25 Oct 2026): they show when an order is placed. It also plays the drawn delivery in the
 // hero phone, runs the "How it works" phone that follows the step on screen, two scrubbed scenes (hero phone lift, business
 // panel), the header scroll-spy, the phone quick bar and the coverage map (MapLibre loads only when the map is near). Motion
 // primitives come from js/motion.js.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
-  const fmt = n => MDM.pricing.format(n);
   const node = testid => document.querySelector('[data-testid="' + testid + '"]');
   const setText = (testid, text) => { const n = node(testid); if (n && text != null) n.textContent = String(text); };
   const setKey = (k, text) => document.querySelectorAll('[data-k="' + k + '"]').forEach(n => { if (text != null) n.textContent = String(text); });
   const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-  // The Shop & Deliver example (client, 24 Oct): MVR 450 + 2,500 + 1,500 of shopping; the fee is the settings percentage of it.
-  const SHOP_EXAMPLE = 4450;
 
   // Service categories (§1), collection types and delivery methods (§3) take their wording from the shared lists.
   function renderLabels() {
@@ -27,13 +24,11 @@
 
   async function render() {
     const s = await MDM.store.settings();
-    const rates = s.rates || {}, ops = s.ops || {};
-    const pct = Math.round(Number(rates.shoppingPct) || 0);
+    const ops = s.ops || {}, due = Number(s.invoiceDueDays) || 14;
 
     setHours(MDM.shell.hoursLine(s));
     renderLabels();
-    setText('home-service-fee-shop', 'Shopping fee ' + pct + '%');
-    setText('home-service-fee-amount', fmt(Math.round(SHOP_EXAMPLE * pct / 100)));
+    setText('home-due-days', 'due in ' + due + ' day' + (due === 1 ? '' : 's'));
     setKey('review', ops.reviewText ? ', usually in ' + ops.reviewText : '');
     if (ops.asapText) setText('home-faq-asap', ops.asapText + '. Express jumps the queue; an advance order books a set day and time.');
     if (s.terms) setText('home-terms', s.terms);
@@ -261,8 +256,8 @@
     });
     return mapLibrary;
   }
-  // The three places we cover directly, traced from the basemap as [lat, lng] outlines and rounded off (corner cutting), with
-  // where each name sits beside its island. Villimalé is in the list too, but goes by ferry.
+  // The places we cover, traced from the basemap as [lat, lng] outlines (they set the map's frame; nothing is drawn round them, client
+  // 25/10/2026: names only), with where each name sits beside its island. Villimalé is a name at its ferry side.
   const AREAS = [
     { key: 'male', label: 'Malé', tag: [4.16662, 73.50969],
       outline: [
@@ -284,6 +279,8 @@
         [4.24122, 73.54294], [4.24122, 73.54967], [4.23928, 73.55161], [4.23332, 73.55154], [4.22475, 73.55079],
         [4.22214, 73.54817], [4.22102, 73.54653], [4.21469, 73.54556], [4.20798, 73.54332],
       ] },
+    { key: 'villimale', label: 'Villimalé', tag: [4.17360, 73.48450],
+      outline: [[4.17640, 73.48250], [4.17660, 73.48660], [4.17330, 73.48760], [4.17060, 73.48520], [4.17200, 73.48230]] },
   ];
   // Chaikin corner cutting, two passes: each edge keeps its middle half, so the traced corners become soft curves.
   function rounded(points) {
@@ -305,23 +302,15 @@
     let map;
     try { map = await MDM.map.create(box, { interactive: false, center: MDM.geo.CENTER, zoom: 11.6 }); } catch (e) { showFallback(box); return; }
     const rings = AREAS.map(z => rounded(z.outline));
-    map.addSource('home-areas', { type: 'geojson', data: { type: 'FeatureCollection', features: AREAS.map((z, i) => ({ type: 'Feature', properties: { key: z.key }, geometry: { type: 'Polygon', coordinates: [rings[i]] } })) } });
-    map.addLayer({ id: 'home-areas-fill', type: 'fill', source: 'home-areas', paint: { 'fill-color': '#D2002F', 'fill-opacity': 0.16 } });
-    map.addLayer({ id: 'home-areas-line', type: 'line', source: 'home-areas', paint: { 'line-color': '#D2002F', 'line-width': 1.5, 'line-opacity': 0.75 } });
-    // Our areas survive the light/dark basemap swap (map.js carries the ids it is told about across a style change).
-    if (map.__own) ['home-areas', 'home-areas-fill', 'home-areas-line'].forEach(id => map.__own.add(id));
     AREAS.forEach(z => { const m = MDM.map.marker(map, 'point', z.tag, { label: z.label, testid: 'home-area-' + z.key }); m.el.classList.add('area-tag'); });
     // After every style load (and a light/dark swap): the basemap's own place and street names stay hidden, since they would repeat
-    // ours, and the areas get a stronger tint on the dark basemap. Each property is set only when it differs, so this settles.
+    // ours. Each property is set only when it differs, so this settles.
     let pending = false;
     const set = (kind, id, key, value) => { if (map.getLayer(id) && map[kind === 'layout' ? 'getLayoutProperty' : 'getPaintProperty'](id, key) !== value) map[kind === 'layout' ? 'setLayoutProperty' : 'setPaintProperty'](id, key, value); };
     const tune = () => {
       pending = false;
       try {
         map.getStyle().layers.forEach(l => { if (l.type === 'symbol') set('layout', l.id, 'visibility', 'none'); });
-        const dark = document.documentElement.dataset.theme === 'dark';
-        set('paint', 'home-areas-fill', 'fill-opacity', dark ? 0.34 : 0.16);
-        set('paint', 'home-areas-line', 'line-opacity', dark ? 0.95 : 0.75);
       } catch (e) { /* the style is mid-swap */ }
     };
     tune();

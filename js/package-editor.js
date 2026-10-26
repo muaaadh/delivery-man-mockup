@@ -113,7 +113,7 @@
       const zoneField = field(zoneKey, 'Zone', parts.zone);
       block.append(el('div', { class: 'grid-2' }, addrField, zoneField));
 
-      parts.landmark = input(kind + '-landmark', { value: cur.landmark || '', placeholder: 'Near the STO shop, blue gate' });
+      parts.landmark = input(kind + '-landmark', { value: cur.landmark || '', placeholder: 'Near the mosque, blue gate' });
       block.append(field(kind + '-landmark', 'Landmark or instructions', parts.landmark, { optional: true }));
 
       if (!addressOnly) {
@@ -210,10 +210,10 @@
     if (service === 'shop') {
       const s0 = (value && value.shop) || {};
       shop = {};
-      shop.name = input('shop-name', { value: s0.name || '', placeholder: 'STO People\'s Choice' });
+      shop.name = input('shop-name', { value: s0.name || '', placeholder: 'Island Electronics' });
       shop.zone = select('shop-zone', zoneOptions, { value: s0.zone && zoneOptions.some(z => z.value === s0.zone) ? s0.zone : 'male' });
       shop.address = input('shop-address', { value: s0.address || '', autocomplete: 'street-address', placeholder: 'Boduthakurufaanu Magu' });
-      shop.list = textarea('shop-list', { rows: 4, value: s0.list || '', placeholder: '2 kg rice, 12 eggs, 1 L cooking oil' });
+      shop.list = textarea('shop-list', { rows: 4, value: s0.list || '', placeholder: 'Phone charger, 2 screen protectors, HDMI cable' });
       budgetEl = input('budget', { inputmode: 'decimal', value: s0.budget != null ? String(s0.budget) : '', placeholder: '450' });
       body.append(heading('The shop'),
         el('div', { class: 'grid-2' },
@@ -240,8 +240,8 @@
       descriptionEl = input('description', { value: value ? value.description || '' : '', placeholder: 'Documents in an envelope', maxlength: 120 });
       body.append(field('description', 'What is it', descriptionEl, { rule: () => trim(descriptionEl.value) ? null : 'Tell us what the package is' }));
     } else {
-      descriptionEl = input('description', { value: value ? value.description || '' : '', placeholder: 'Groceries for the week', maxlength: 120 });
-      body.append(field('description', 'Name this run', descriptionEl, { optional: true, hint: 'Shown on your order, for example Groceries' }));
+      descriptionEl = input('description', { value: value ? value.description || '' : '', placeholder: 'Phone accessories', maxlength: 120 });
+      body.append(field('description', 'Name this run', descriptionEl, { optional: true, hint: 'Shown on your order, for example Electronics' }));
     }
 
     if (service === 'business') {
