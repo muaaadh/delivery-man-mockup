@@ -63,13 +63,52 @@
     received:  { label: 'Payment received',  kind: 'info' },
     paid:      { label: 'Paid',              kind: 'ok' },
     refunded:  { label: 'Refunded',          kind: 'neutral' },
-    invoiced:  { label: 'Monthly invoice',   kind: 'neutral' },
+    invoiced:  { label: 'Weekly invoice',    kind: 'neutral' },
+  };
+  // Business billing is weekly (client, 25 Oct 2026): one invoice per billing week, Sunday to Saturday (the Maldives working week
+  // starts on Sunday), on LOCAL dates. An invoice keeps `month` (the month its week starts in: the live column is YYYY-MM) and adds
+  // `period: { from, to }`; invoices from the monthly days have only `month` and still read as that whole month.
+  const BILL_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const BILL_MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const keyOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  // A 'YYYY-MM-DD' key is a local calendar day (new Date('2026-10-25') would be UTC midnight); anything else is a moment in time.
+  const localDate = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || '')); return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(v == null ? Date.now() : v); };
+  MDM.localDayKey = v => { const d = localDate(v); return isNaN(d) ? '' : keyOf(d); };
+  // billingWeek(dateOrKey) → { from, to }: the Sunday and the Saturday of the week that day falls in.
+  MDM.billingWeek = function (v) {
+    const d = localDate(v); if (isNaN(d)) return null;
+    const from = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+    return { from: keyOf(from), to: keyOf(new Date(from.getFullYear(), from.getMonth(), from.getDate() + 6)) };
+  };
+  // invoicePeriod(invoice | { from, to } | 'YYYY-MM') → { from, to }, inclusive day keys (a month runs from its 1st to its last day).
+  MDM.invoicePeriod = function (x) {
+    if (x && x.period && x.period.from) return { from: x.period.from, to: x.period.to || x.period.from };
+    if (x && x.from) return { from: x.from, to: x.to || x.from };
+    const m = /^(\d{4})-(\d{2})$/.exec(typeof x === 'string' ? x : (x && x.month) || '');
+    if (!m) return null;
+    return { from: m[1] + '-' + m[2] + '-01', to: keyOf(new Date(Number(m[1]), Number(m[2]), 0)) };
+  };
+  // inPeriod(periodLike, at) → true when the moment `at` falls on a local day inside the period.
+  MDM.inPeriod = (x, at) => { const p = MDM.invoicePeriod(x), k = at ? MDM.localDayKey(at) : ''; return !!(p && k && k >= p.from && k <= p.to); };
+  // periodLabel(invoice | { from, to } | 'YYYY-MM', { year }) → '19–25 Oct 2026', '26 Oct – 1 Nov 2026', '28 Dec 2026 – 3 Jan 2027';
+  // an invoice with only a month reads 'October 2026'. year: false drops the year when both ends share it.
+  MDM.periodLabel = function (x, o) {
+    const withYear = !(o && o.year === false);
+    if (!(x && (x.from || (x.period && x.period.from)))) {
+      const m = /^(\d{4})-(\d{2})$/.exec(typeof x === 'string' ? x : (x && x.month) || '');
+      return m ? BILL_MONTHS_LONG[Number(m[2]) - 1] + ' ' + m[1] : String((x && x.month) || x || '');
+    }
+    const p = MDM.invoicePeriod(x), a = localDate(p.from), b = localDate(p.to);
+    const y = d => (withYear ? ' ' + d.getFullYear() : '');
+    if (a.getFullYear() !== b.getFullYear()) return a.getDate() + ' ' + BILL_MONTHS[a.getMonth()] + ' ' + a.getFullYear() + ' – ' + b.getDate() + ' ' + BILL_MONTHS[b.getMonth()] + ' ' + b.getFullYear();
+    if (a.getMonth() !== b.getMonth()) return a.getDate() + ' ' + BILL_MONTHS[a.getMonth()] + ' – ' + b.getDate() + ' ' + BILL_MONTHS[b.getMonth()] + y(b);
+    return (a.getDate() === b.getDate() ? '' : a.getDate() + '–') + b.getDate() + ' ' + BILL_MONTHS[b.getMonth()] + y(b);
   };
   // Service categories on the home page and the request form (web app updates 11/10/2026 §1).
   MDM.SERVICE_CATEGORIES = [
     { value: 'pick', label: 'Pick & Deliver', hint: 'We collect from a home, a shop or godown, a post or courier office, or a government office, and deliver it', types: ['home', 'shop_collect', 'postal', 'office'] },
     { value: 'shop', label: 'Shop & Deliver', hint: 'Tell us the shop and the items; we buy them and bring them to you', types: ['shop_buy'] },
-    { value: 'business', label: 'Business Delivery', hint: 'Fixed rates for your package sizes, bulk orders, cash on delivery and one monthly invoice', types: [] },
+    { value: 'business', label: 'Business Delivery', hint: 'Fixed rates for your package sizes, bulk orders, cash on delivery and one weekly invoice', types: [] },
   ];
   MDM.REQUEST_TYPES = [
     { value: 'home',         category: 'pick', label: 'Home collection',              hint: 'Collect from a home address' },
@@ -1225,15 +1264,20 @@
     if (d.status === 'confirmed') { x.pricing.status = 'confirmed'; x.pricing.confirmedAt = now(); x.pricing.confirmedBy = d.by || 'admin'; }
     return save(x);
   }
-  function createInvoice(accountId, month) {
+  // createInvoice(accountId, period): period is a billing week { from, to } (inclusive local day keys, MDM.billingWeek) or a 'YYYY-MM'
+  // month, the way invoices were made before weekly billing. Lines are the account's orders delivered on a local day inside it.
+  function createInvoice(accountId, period) {
     const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Account not found');
+    const span = MDM.invoicePeriod(period); if (!span) throw new StoreError('validation', 'Choose the week to invoice');
+    const weekly = !(typeof period === 'string');
+    const month = span.from.slice(0, 7);
     const s = settings();
     const orders = readCol('orders').filter(o => o.accountId === accountId && o.status === 'delivered');
     const lines = [];
     orders.forEach(o => {
       const ev = (o.events || []).filter(e => e.type === 'delivered').pop();
       const at = ev ? ev.at : o.updatedAt;
-      if (at.slice(0, 7) !== month) return;
+      if (!MDM.inPeriod(span, at)) return;
       (o.packages || []).forEach(pkg => {
         const rate = pkg.price ? pkg.price.lineTotal : (acc.ratePerPackage || s.rates.business);
         lines.push({ kind: 'package', tier: pkg.tier || null, size: pkg.size, date: at, orderCode: o.code, recipient: pkg.dropoff && pkg.dropoff.recipient ? pkg.dropoff.recipient.name : '', description: pkg.description || '', packages: 1, rate, amount: rate });
@@ -1247,8 +1291,8 @@
     const gst = Math.round(subtotal * gstPercent) / 100;
     const m = meta(); const number = 'INV-' + month + '-' + String(m.invoiceSeq).padStart(3, '0'); m.invoiceSeq += 1; writeMeta(m);
     const issued = new Date(); const due = new Date(issued.getTime() + (Number(s.invoiceDueDays) || 14) * 86400000);
-    const inv = insert('invoices', { accountId, month, number, lines, subtotal, gstPercent, gst, total: Math.round((subtotal + gst) * 100) / 100, status: 'draft', issuedAt: issued.toISOString(), dueAt: due.toISOString(), paidAt: null, reference: '' });
-    audit('invoice_created', 'Invoice ' + number + ' for ' + acc.name, 'admin', { invoiceId: inv.id });
+    const inv = insert('invoices', Object.assign({ accountId, month }, weekly ? { period: span } : {}, { number, lines, subtotal, gstPercent, gst, total: Math.round((subtotal + gst) * 100) / 100, status: 'draft', issuedAt: issued.toISOString(), dueAt: due.toISOString(), paidAt: null, reference: '' }));
+    audit('invoice_created', 'Invoice ' + number + ' for ' + acc.name + ', ' + MDM.periodLabel(inv), 'admin', { invoiceId: inv.id });
     return inv;
   }
   function orderByCode(code) {

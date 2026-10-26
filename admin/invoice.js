@@ -2,15 +2,16 @@
 // totals are frozen by MDM.store.createInvoice), with the business account's details and the bank details from settings.
 // The URL is what the admin sends to the business, so the page needs no sign-in. Print styles live in css/base.css (body.page-invoice).
 // Web app updates 11/10/2026: package lines show the agreed size category, the Maldivian Cargo and airport fees the store adds are
-// their own lines and subtotals, and a cash on delivery summary for the month sits below (it is paid separately, not invoiced).
+// their own lines and subtotals, and a cash on delivery summary for the period sits below (it is paid separately, not invoiced).
+// Weekly billing (25 Oct 2026): an invoice covers a billing week, Sunday to Saturday (inv.period); older invoices cover a month.
 (function (MDM) { 'use strict';
   const { el, html } = MDM.ui;
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const BRAND = 'Mr. Delivery Man';
   const slot = document.querySelector('[data-slot="invoice"]');
   const money = n => MDM.pricing.format(n, { cents: true });
   const fmtDate = (iso, o) => MDM.ui.fmtDate(iso, Object.assign({ dateOnly: true, year: true }, o || {}));
-  const monthLabel = key => { const m = /^(\d{4})-(\d{2})$/.exec(key || ''); return m ? MONTHS[Number(m[2]) - 1] + ' ' + m[1] : String(key || ''); };
+  // 'in the week 19–25 Oct 2026', or 'in October 2026' for an invoice from the monthly days.
+  const during = inv => (inv.period ? 'in the week ' : 'in ') + MDM.periodLabel(inv);
   const STATUS = { draft: { label: 'Draft', kind: 'neutral' }, sent: { label: 'Sent', kind: 'info' }, paid: { label: 'Paid', kind: 'ok' } };
   // Line kinds: a package, the Maldivian Cargo fee (once per cargo order), the airport fee, or another charge (price adjustments, packing,
   // naalu billed, extra vehicle). createInvoice stamps l.kind ('package' | 'cargo' | 'airport' | 'adjustment'); invoices issued before
@@ -52,7 +53,7 @@
 
     const invoiceTable = el('div', { class: 'rate-table' },
       rateRow('Invoice number', inv.number, { mono: true }),
-      rateRow('Period', monthLabel(inv.month)),
+      rateRow(inv.period ? 'Week' : 'Period', el('span', { 'data-testid': 'invoice-period' }, MDM.periodLabel(inv))),
       rateRow('Issued', fmtDate(inv.issuedAt)),
       rateRow('Due', inv.status === 'paid' ? 'Paid ' + fmtDate(inv.paidAt) : fmtDate(inv.dueAt)),
       rateRow('Status', html(MDM.ui.badge((STATUS[inv.status] || STATUS.draft).kind, (STATUS[inv.status] || STATUS.draft).label, { 'data-status': inv.status, 'data-testid': 'invoice-status' }))));
@@ -91,7 +92,7 @@
     });
     const table = el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'invoice-lines' },
       el('thead', null, el('tr', null, ['Date', 'Order', 'Details', 'Packages', 'Rate', 'Amount'].map((h, i) => el('th', { scope: 'col', class: i >= 3 ? 'num' : null }, h)))),
-      el('tbody', null, rows.length ? rows : el('tr', null, el('td', { colspan: '6' }, 'No delivered packages in ' + monthLabel(inv.month) + '.')))));
+      el('tbody', null, rows.length ? rows : el('tr', null, el('td', { colspan: '6' }, 'No delivered packages ' + during(inv) + '.')))));
     const packages = lines.filter(l => lineKind(l) === 'package').reduce((n, l) => n + (Number(l.packages) || 1), 0);
     const kindSum = k => lines.filter(l => lineKind(l) === k).reduce((n, l) => n + (Number(l.amount) || 0), 0);
     const kindCount = k => lines.filter(l => lineKind(l) === k).length;
@@ -113,7 +114,7 @@
         el('p', { class: 'section-head__desc' }, inv.status === 'paid' ? 'Received with thanks' + (inv.reference ? ', reference ' + inv.reference : '') + '.' : 'Due by ' + fmtDate(inv.dueAt) + '. Use the invoice number as the transfer reference.')),
       bankTable,
       el('p', { class: 'invoice-reference' }, 'Reference: ', el('span', { class: 'mono', 'data-testid': 'invoice-reference' }, inv.number)));
-    const codBlock = codSummary(orders, inv.month);
+    const codBlock = codSummary(orders, inv);
 
     slot.replaceChildren(head,
       el('div', { class: 'stack-8' },
@@ -121,18 +122,18 @@
           el('section', { 'aria-labelledby': 'inv-details' }, el('h2', { id: 'inv-details' }, 'Invoice'), invoiceTable),
           el('section', { 'aria-labelledby': 'inv-billto' }, el('h2', { id: 'inv-billto' }, 'Billed to'), billTo)),
         el('section', { 'aria-labelledby': 'inv-items' },
-          el('div', { class: 'section-head' }, el('h2', { id: 'inv-items' }, 'Deliveries in ' + monthLabel(inv.month)),
+          el('div', { class: 'section-head' }, el('h2', { id: 'inv-items' }, 'Deliveries ' + during(inv)),
             account ? el('p', { class: 'section-head__desc', 'data-testid': 'invoice-rates' }, 'Agreed rates per package: ' + MDM.pricing.accountTiers(account, settings).map(t => t.label + ' ' + MDM.pricing.format(t.rate)).join(', ') + '.') : null),
           el('div', { class: 'stack-6' }, table, summary)),
         codBlock,
         payBlock));
   }
 
-  // Cash on delivery for the invoice month (§5.6): cash our drivers collected from the business's customers. Orders count when their
-  // cash was due, collected or paid out in the month. It is paid to the business separately, so it is not part of the invoice total.
-  function codSummary(orders, month) {
-    const inMonth = iso => !!iso && String(MDM.ui.monthKey(iso)) === month;
-    const list = orders.filter(o => o.cod && o.cod.amount > 0 && (inMonth(o.createdAt) || inMonth(o.cod.collectedAt) || inMonth(o.cod.remittedAt)));
+  // Cash on delivery for the invoice's week (or month) (§5.6): cash our drivers collected from the business's customers. Orders count
+  // when their cash was due, collected or paid out in the period. It is paid to the business separately, so it is not part of the total.
+  function codSummary(orders, inv) {
+    const inPeriod = iso => MDM.inPeriod(inv, iso);
+    const list = orders.filter(o => o.cod && o.cod.amount > 0 && (inPeriod(o.createdAt) || inPeriod(o.cod.collectedAt) || inPeriod(o.cod.remittedAt)));
     if (!list.length) return null;
     const sum = (arr, k) => arr.reduce((n, o) => n + (k === 'amount' ? o.cod.amount : (o.cod.collectedAmount || 0)), 0);
     const by = st => list.filter(o => o.cod.status === st);
@@ -145,7 +146,7 @@
     paid.forEach(o => { const k = (o.cod.remittanceRef || 'No reference') + '|' + MDM.ui.dayKey(o.cod.remittedAt); const p = pays[k] || (pays[k] = { ref: o.cod.remittanceRef || '', at: o.cod.remittedAt, codes: [], amount: 0 }); p.codes.push(o.code); p.amount += o.cod.collectedAmount || 0; });
     const payRows = Object.keys(pays).map(k => pays[k]).sort((a, b) => a.at < b.at ? -1 : 1);
     return el('section', { 'aria-labelledby': 'inv-cod', 'data-testid': 'invoice-cod' },
-      el('div', { class: 'section-head' }, el('h2', { id: 'inv-cod' }, 'Cash on delivery in ' + monthLabel(month)),
+      el('div', { class: 'section-head' }, el('h2', { id: 'inv-cod' }, 'Cash on delivery ' + during(inv)),
         el('p', { class: 'section-head__desc invoice-cod-note' }, 'Collected from your customers and paid to you separately. Not part of this total.')),
       el('div', { class: 'stack-6' },
         el('div', { class: 'rate-table' },

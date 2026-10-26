@@ -95,7 +95,7 @@
   const PAYMENT_STATUS = {
     pending: ['neutral', 'Payment pending', 'Pay after delivery'], requested: ['warn', 'Payment requested', 'Payment due'],
     received: ['info', 'Payment received', 'Checking your transfer'], paid: ['ok', 'Paid', 'Paid'], refunded: ['neutral', 'Refunded', 'Refunded'],
-    invoiced: ['neutral', 'Monthly invoice', 'On your monthly invoice'],
+    invoiced: ['neutral', 'Weekly invoice', 'On your weekly invoice'],
   };
   // invoiceBadge(status) / paymentBadge(status, { customer }) → HTML string like badge(); unknown values render neutral with the raw status.
   function invoiceBadge(status) { const s = INVOICE_STATUS[status] || ['neutral', String(status == null ? '' : status)]; return badge(s[0], s[1], { 'data-status': status }); }

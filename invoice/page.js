@@ -68,7 +68,7 @@
         : [d.recipientName && to.indexOf(d.recipientName) !== 0 ? d.recipientName : '', to].filter(Boolean).join(', '))];
   }
 
-  // A business order is invoiced to the business every month. Its receiver (who has the order code from the label or a message) never
+  // A business order is invoiced to the business every week. Its receiver (who has the order code from the label or a message) never
   // sees the agreed rate: only the business signed in on this browser (mdm:business) or our office (mdm:session) opens its invoice.
   const isBusinessOrder = o => !!(o.accountId || o.service === 'business' || o.requestType === 'bulk' || o.requestType === 'business');
   function readJson(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } }
@@ -167,7 +167,7 @@
       p.refund ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Refunded'), el('span', { class: 'summary__amount mono' }, money(-p.refund.amount))) : null);
 
     const payBlock = p.method === 'invoice'
-      ? el('section', { class: 'invoice-block' }, el('h2', null, 'Payment'), el('p', null, 'This order is billed on your monthly business invoice.'))
+      ? el('section', { class: 'invoice-block' }, el('h2', null, 'Payment'), el('p', null, 'This order is billed on your weekly business invoice.'))
       : el('section', { class: 'invoice-block', 'aria-labelledby': 'inv-pay' },
         el('h2', { id: 'inv-pay' }, p.status === 'paid' ? 'Paid by bank transfer' : 'Pay by bank transfer'),
         // BML and MIB in MVR and USD (the currency is in each name); one shared account name is printed once.

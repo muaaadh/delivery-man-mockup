@@ -615,11 +615,14 @@
     // Batch child orders that have only one stop done keep the full route so the map can draw them.
     orders.filter(o => o.batchId === 'blk_seed_1001' && o.status === 'out_for_delivery').forEach(o => { o.route.polyline = MDM.geo.routeThrough(o.route.stops); });
 
-    // Keep business orders in this calendar month so the invoice is not empty: pull any that fell into last month forward.
-    const monthKey = NOW.toISOString().slice(0, 7);
+    // Business billing is weekly, Sunday to Saturday (MDM.billingWeek). Business orders delivered before last week are pulled into last
+    // week (its Thursday afternoon), so last week's invoice (inv_seed_01) is never empty, whatever weekday the demo is seeded on.
+    const lastWeek = MDM.billingWeek(new Date(NOW.getTime() - 7 * 864e5)), thisWeek = MDM.billingWeek(NOW);
+    const ymd = key => key.split('-').map(Number);
+    const lw = ymd(lastWeek.from), tw = ymd(thisWeek.from);
     orders.filter(o => o.service === 'business' && o.status === 'delivered').forEach(o => {
       const d = (o.events.filter(e => e.type === 'delivered').pop() || {}).at || o.updatedAt;
-      if (d.slice(0, 7) !== monthKey) { const shift = new Date(NOW.getTime() - 20 * 60000).toISOString(); o.events.forEach(e => { e.at = shift; }); o.statusHistory.forEach(h => { h.at = shift; }); o.updatedAt = shift; o.createdAt = shift; o.route.stops.forEach(s => { s.at = shift; }); if (o.cod) ['collectedAt', 'handedAt', 'remittedAt'].forEach(k => { if (o.cod[k]) o.cod[k] = shift; }); }
+      if (MDM.localDayKey(d) < lastWeek.from) { const shift = new Date(lw[0], lw[1] - 1, lw[2] + 4, 14, 0).toISOString(); o.events.forEach(e => { e.at = shift; }); o.statusHistory.forEach(h => { h.at = shift; }); o.updatedAt = shift; o.createdAt = shift; o.route.stops.forEach(s => { s.at = shift; }); if (o.cod) ['collectedAt', 'handedAt', 'remittedAt'].forEach(k => { if (o.cod[k]) o.cod[k] = shift; }); }
     });
 
     // Pick & deliver orders without the customer's own package photo are priced from the proof of collection (updates 17/10/2026).
@@ -663,13 +666,17 @@
         packagePhotoId: 'file_breq_shifa', createdAt: t(days(1, 2)), updatedAt: t(days(1, 2)) },
       { id: 'breq_kandu', name: 'Kandu Books & Stationery', contactName: 'Ahmed Shafeeu', phone: '7801122', landline: '3321122', email: 'orders@kandubooks.example', zone: 'male', pickupAddress: A.kandu.address, pickupWindow: 'afternoon', volume: '11-30', notes: 'School textbook season is busiest.', status: 'approved', createdAt: t(days(42)), updatedAt: t(days(40)) },
     ];
+    // Last week's invoice for Kandu, sent on Sunday morning (or half an hour ago when the demo is seeded before then).
     const invLines = [];
     orders.filter(o => o.accountId === 'bacc_kandu' && o.status === 'delivered').forEach(o => {
       const at = (o.events.filter(e => e.type === 'delivered').pop() || {}).at || o.updatedAt;
-      o.packages.forEach(p => invLines.push({ date: at, orderCode: o.code, recipient: p.dropoff.recipient ? p.dropoff.recipient.name : '', description: p.description, packages: 1, rate: p.price.lineTotal, amount: p.price.lineTotal }));
+      if (!MDM.inPeriod(lastWeek, at)) return;
+      o.packages.forEach(p => invLines.push({ kind: 'package', tier: p.tier || null, size: p.size, date: at, orderCode: o.code, recipient: p.dropoff.recipient ? p.dropoff.recipient.name : '', description: p.description, packages: 1, rate: p.price.lineTotal, amount: p.price.lineTotal }));
     });
     const subtotal = invLines.reduce((n, l) => n + l.amount, 0);
-    const invoices = [{ id: 'inv_seed_01', accountId: 'bacc_kandu', month: monthKey, number: 'INV-' + monthKey + '-001', lines: invLines, subtotal, gstPercent: 0, gst: 0, total: subtotal, status: 'draft', issuedAt: t(0), dueAt: new Date(NOW.getTime() + 14 * 86400000).toISOString(), paidAt: null, reference: '', createdAt: t(0), updatedAt: t(0) }];
+    const issued = new Date(Math.min(new Date(tw[0], tw[1] - 1, tw[2], 9, 0).getTime(), NOW.getTime() - 30 * 60000)).toISOString();
+    const invoices = [{ id: 'inv_seed_01', accountId: 'bacc_kandu', month: lastWeek.from.slice(0, 7), period: lastWeek, number: 'INV-' + lastWeek.from.slice(0, 7) + '-001', lines: invLines, subtotal, gstPercent: 0, gst: 0, total: subtotal,
+      status: 'sent', sentAt: issued, issuedAt: issued, dueAt: new Date(new Date(issued).getTime() + 14 * 86400000).toISOString(), paidAt: null, reference: '', createdAt: issued, updatedAt: issued }];
 
     // ---- zones and airport service areas (How it works §3; requirements §16) -----------------------------------------------
     const zoneDrivers = { male: ['drv_shiyam', 'drv_rasheed'], hulhumale_p1: ['drv_nazim', 'drv_hamid'], hulhumale_p2: ['drv_faisal'], airport: ['drv_nazim'], villimale: ['drv_rasheed'] };

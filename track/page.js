@@ -616,7 +616,7 @@
     }
     const payDone = p.status === 'paid' || p.status === 'refunded';
     const payCurrent = p.status === 'requested' || p.status === 'received';
-    const payLabel = p.method === 'invoice' ? 'Payment on the monthly invoice' : 'Payment';
+    const payLabel = p.method === 'invoice' ? 'Payment on the weekly invoice' : 'Payment';
     items.push(el('li', { class: ['timeline__item', payDone ? 'is-done' : payCurrent ? 'is-current' : 'is-upcoming'], 'data-status': 'payment', 'data-testid': 'track-step' },
       el('div', { class: 'timeline__label' }, payLabel, ' ', html(MDM.payBadge(p.status))),
       p.verifiedAt && payDone ? el('div', { class: 'timeline__time' }, fmtDate(p.verifiedAt)) : null));
@@ -842,7 +842,7 @@
   }
   function buildPayment(o) {
     const p = o.payment || {};
-    const rows = [row('Status', html(MDM.payBadge(p.status))), row('Method', p.method === 'invoice' ? 'Monthly business invoice' : 'Bank transfer')];
+    const rows = [row('Status', html(MDM.payBadge(p.status))), row('Method', p.method === 'invoice' ? 'Weekly business invoice' : 'Bank transfer')];
     if (p.method !== 'invoice') {
       rows.push(row('When', p.upfrontRequired || p.upfront ? 'Upfront, once the price is confirmed' : 'After delivery'));
       if (p.invoiceNo) rows.push(row('Invoice', p.invoiceNo, { mono: true }));

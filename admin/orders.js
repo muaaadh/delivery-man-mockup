@@ -719,7 +719,7 @@
     const st = p.status || 'pending';
     const rows = [rowNode('Status', el('span', null, html(MDM.payBadge(st).replace('<span ', '<span data-testid="drawer-payment-status" ')), p.upfront ? el('small', null, 'Requested before delivery') : null))];
     if (p.method === 'invoice') {
-      rows.push(row('Method', 'Monthly business invoice'), row('Amount', money(o.totals.total), { mono: true }));
+      rows.push(row('Method', 'Weekly business invoice'), row('Amount', money(o.totals.total), { mono: true }));
       return sec('Payment', 'drawer-payment', el('div', { class: 'rate-table' }, rows), o.accountId && MDM.admin.can('business') ? el('p', { class: 'muted small' }, el('a', { href: '#/business/' + encodeURIComponent(o.accountId) }, 'Open the account invoices')) : null);
     }
     rows.push(row('Method', p.method === 'cash' ? 'Cash' : 'Bank transfer'));
