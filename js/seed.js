@@ -403,7 +403,7 @@
       stops: [pickDone('arrived+6'), pickDone('collected')] });
     o1043.route.stops[1].proofPhotoId = photo('file_col_1043', 'proof_collection', o1043.id, 'Proof of collection', o1043.route.stops[1].at, 'bag');
 
-    // Business account orders (invoiced monthly)
+    // Business account orders (invoiced weekly)
     const kandu = { id: null, name: 'Kandu Books & Stationery', phone: '7801122', email: 'orders@kandubooks.example', notify: 'whatsapp' };
     const bizPkg = (desc, drop, recipient) => pkg({ size: 'bag', tier: 'small', tierRate: 25, description: desc, pickup: A.kandu, pickupContact: { name: 'Ahmed Shafeeu', phone: '7801122' }, dropoff: drop, recipient });
     const biz = (code, createdMin, packages, extra) => order(Object.assign({ code, type: 'business', service: 'business', source: 'business', by: 'business:bacc_kandu', accountId: 'bacc_kandu', customer: kandu, driverId: 'drv_rasheed',
