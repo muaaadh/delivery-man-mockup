@@ -808,7 +808,7 @@
     return el('div', { class: 'request-business card', 'data-testid': 'request-business' },
       el('div', { class: 'card__body stack-4' },
         el('div', null, el('h3', { class: 'request-group__title' }, 'Booked in the business portal'),
-          el('p', { class: 'request-group__desc' }, 'Agreed rates per package size, bulk orders, cash on delivery and one monthly invoice.')),
+          el('p', { class: 'request-group__desc' }, 'Agreed rates per package size, bulk orders, cash on delivery and one weekly invoice.')),
         el('div', { class: 'rate-table', 'data-testid': 'request-business-tiers', 'aria-label': 'Business starting rates by package size' },
           tiers.map(t => MDM.ui.rateRow(t.label + ' (' + MDM.pricing.sizeLabel(t.size) + ')', 'from ' + fmt(t.rate), { mono: true }))),
         el('p', { class: 'small muted' }, 'Starting rates. Each business agrees its own.'),

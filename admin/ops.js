@@ -179,7 +179,7 @@
         Object.keys(byTier).map(k => { const t = byTier[k]; return rowNode(tierName(t.k, settings) + ' × ' + t.n, el('span', { class: 'mono' }, money(t.rate * t.n), el('small', null, money(t.rate) + ' each'))); }),
         cargoFees.n ? rowNode('Maldivian Cargo fee × ' + cargoFees.n, el('span', { class: 'mono', 'data-testid': 'bulk-total-cargo' }, money(cargoFees.amount), el('small', null, 'once per order'))) : null,
         airportFees.n ? rowNode('Airport fee × ' + airportFees.n, el('span', { class: 'mono', 'data-testid': 'bulk-total-airport' }, money(airportFees.amount), el('small', null, 'once per order'))) : null,
-        rowNode('On the monthly invoice', el('span', { class: 'mono', 'data-testid': 'bulk-total-amount' }, money(st.amount))),
+        rowNode('On the weekly invoice', el('span', { class: 'mono', 'data-testid': 'bulk-total-amount' }, money(st.amount))),
         rowNode('Cash on delivery', el('span', { class: 'mono', 'data-testid': 'bulk-total-cod' }, money(cod.amount), el('small', null, plural(cod.n, 'order') + ' · ' + money(cod.collected) + ' collected'))));
       const byZone = {};
       kids.forEach(o => { const z = (o.delivery || {}).zone || 'other'; (byZone[z] = byZone[z] || []).push(o); });

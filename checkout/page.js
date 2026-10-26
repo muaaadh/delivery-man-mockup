@@ -382,7 +382,7 @@
     const pay = order.payment || {};
     if (pay.status === 'refunded') { show(notice('info', 'info', 'Refunded ' + MDM.pricing.format((pay.refund || {}).amount || 0) + '. Nothing to pay.', trackAction(order)), ''); return; }
     if (order.status === 'cancelled') { show(notice('danger', 'alert-circle', 'This order was cancelled. Nothing to pay.', trackAction(order)), ''); return; }
-    // Business orders are invoiced monthly and never pass through payment. Their receiver only pays the cash on delivery, if any,
+    // Business orders are invoiced weekly and never pass through payment. Their receiver only pays the cash on delivery, if any,
     // and is told who arranged the delivery; the business signed in on this browser sees its own wording.
     if (pay.method === 'invoice' || pay.status === 'invoiced') {
       let biz = null; try { biz = JSON.parse(localStorage.getItem('mdm:business') || 'null'); } catch (e) { biz = null; }
@@ -390,7 +390,7 @@
       const cod = order.cod && order.cod.amount > 0 && order.cod.status === 'pending' && ['delivered', 'returned'].indexOf(order.status) < 0 ? order.cod : null;
       // Only the order's owner sees who arranged it (privacy, 24/10/2026).
       const by = MDM.ownsOrder && !MDM.ownsOrder(order) ? 'This delivery is billed to the sender.' : 'This delivery is arranged by ' + name + ' and billed to them.';
-      const text = biz && biz.accountId && biz.accountId === order.accountId ? 'No payment needed now. This order goes on your monthly business invoice.'
+      const text = biz && biz.accountId && biz.accountId === order.accountId ? 'No payment needed now. This order goes on your weekly business invoice.'
         : 'Nothing to pay online. ' + by + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash when the package arrives.' : '');
       show(el('div', { 'data-testid': 'checkout-business' }, notice('info', 'info', text, trackAction(order))), '');
       return;

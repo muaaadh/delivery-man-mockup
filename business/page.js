@@ -531,9 +531,10 @@
   async function tabOverview(opts) {
     const d = await load();
     const acc = state.acc, cu = !!(opts && opts.entering);
-    const month = MDM.ui.monthKey();
+    // Billing is weekly (Sunday to Saturday): the KPIs count this billing week.
+    const week = MDM.billingWeek(new Date());
     const open = d.orders.filter(o => OPEN.indexOf(o.status) >= 0);
-    const delivered = d.orders.filter(o => o.status === 'delivered' && MDM.ui.monthKey(deliveredAt(o)) === month);
+    const delivered = d.orders.filter(o => o.status === 'delivered' && MDM.inPeriod(week, deliveredAt(o)));
     const amount = delivered.reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0);
     const failed = d.orders.filter(o => o.status === 'failed');
     const returning = d.orders.filter(o => o.status === 'cancelled' && o.cancellation && o.cancellation.returnStatus === 'pending');
@@ -548,8 +549,8 @@
       returning.length ? MDM.ui.notice('info', el('div', null, 'Cancelled, coming back to you: ', codes(returning), '.'), { title: 'Returning to you', testid: 'biz-returning' }) : null,
       el('div', { class: 'kpi-row biz-kpis' },
         kpi('Open orders', String(open.length), open.filter(o => o.status === 'out_for_delivery').length + ' out now', 'biz-kpi-open', cu),
-        kpi('Delivered this month', String(delivered.length), plural(delivered.reduce((n, o) => n + (o.packages || []).length, 0), 'package'), null, cu),
-        kpi('This month', money(amount), 'Invoiced monthly', 'biz-kpi-amount', cu),
+        kpi('Delivered this week', String(delivered.length), plural(delivered.reduce((n, o) => n + (o.packages || []).length, 0), 'package'), null, cu),
+        kpi('This week', money(amount), 'Invoiced weekly', 'biz-kpi-amount', cu),
         kpi('Cash to collect', money(codPending.reduce((n, o) => n + o.cod.amount, 0)), held ? money(held) + ' on its way to you' : null, 'biz-kpi-cod', cu)),
       el('div', { class: 'biz-home__grid' },
         el('div', { class: 'stack-6' },
@@ -733,7 +734,7 @@
         el('div', { class: 'biz-sum stack-4' },
           el('h2', { class: 'biz-sum__title' }, 'Summary'),
           priceBox, failure, submit,
-          el('p', { class: 'small muted biz-sum__note' }, 'Invoiced monthly. Nothing to pay now.'))));
+          el('p', { class: 'small muted biz-sum__note' }, 'Invoiced weekly. Nothing to pay now.'))));
     form.elements.dZone.setAttribute('data-testid', 'biz-d-zone');
     form.elements.bJetty.setAttribute('data-testid', 'biz-b-jetty');
     form.elements.aPoint.setAttribute('data-testid', 'biz-a-point');
@@ -819,7 +820,7 @@
   function newOrderDone(o) {
     const m = methodLines(o);
     return doneCard('biz-new-done', 'Delivery booked',
-      [el('span', { class: 'mono--code' }, o.code), ' to ' + o.delivery.recipientName + ' · ', o.status === 'requested' ? 'we confirm the price first.' : money(o.totals.total) + ', invoiced monthly.'],
+      [el('span', { class: 'mono--code' }, o.code), ' to ' + o.delivery.recipientName + ' · ', o.status === 'requested' ? 'we confirm the price first.' : money(o.totals.total) + ', invoiced weekly.'],
       el('div', { class: 'rate-table' },
         MDM.ui.rateRow('Package', tierText(o)),
         MDM.ui.rateRow('Delivery', m[0], { sub: m[1] }),
@@ -877,7 +878,7 @@
       el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, plural(rows.length, 'package'), rows.length ? el('small', null, Object.keys(methods).map(m => MDM.deliveryMethodLabel(m) + ' ' + methods[m]).join(' · ')) : null), el('span', { class: 'summary__amount', 'data-testid': testid + '-total' }, money(total))),
       unpriced ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': testid + '-unpriced' }, el('span', { class: 'summary__desc' }, plural(unpriced, 'package') + ' without a size, not in the total')) : null,
       el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Cash to collect', el('small', null, 'Paid to you after delivery')), el('span', { class: 'summary__amount', 'data-testid': testid + '-cod' }, money(cod))),
-      el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Your agreed rates, plus cargo or airport fees. Invoiced monthly.')));
+      el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Your agreed rates, plus cargo or airport fees. Invoiced weekly.')));
   }
   function bulkDone(b, back) {
     const n = (b.orderIds || []).length;
@@ -1486,7 +1487,7 @@
       panelCard('Account', null, el('div', { class: 'rate-table' },
         MDM.ui.rateRow('Contact', acc.contactName || acc.name, { valueSub: MDM.ui.phone.format(acc.phone) }),
         acc.email ? MDM.ui.rateRow('Invoices to', acc.email) : null,
-        MDM.ui.rateRow('Billing', 'Monthly', { valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') }),
+        MDM.ui.rateRow('Billing', 'Weekly', { valueSub: 'Due in ' + plural(s.invoiceDueDays || 14, 'day') }),
         MDM.ui.rateRow('Priority requests', acc.priorityAllowed === false ? 'Off' : 'On')), { 'data-testid': 'biz-account' }));
   }
 
@@ -1553,30 +1554,30 @@
   }
 
   // ---- Invoices ----------------------------------------------------------------------------------------------------------------
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const monthLabel = key => { const m = /^(\d{4})-(\d{2})$/.exec(key || ''); return m ? MONTHS[Number(m[2]) - 1] + ' ' + m[1] : String(key || ''); };
+  // One invoice per billing week, Sunday to Saturday (MDM.billingWeek); older invoices cover a month and still list by their start.
+  const periodStart = inv => (MDM.invoicePeriod(inv) || {}).from || '';
   async function tabInvoices() {
     const d = await load();
-    const month = MDM.ui.monthKey();
-    const delivered = d.orders.filter(o => o.status === 'delivered' && MDM.ui.monthKey(deliveredAt(o)) === month);
+    const week = MDM.billingWeek(new Date());
+    const delivered = d.orders.filter(o => o.status === 'delivered' && MDM.inPeriod(week, deliveredAt(o)));
     const pkgs = delivered.reduce((n, o) => n + (o.packages || []).length, 0);
     const amount = delivered.reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0);
-    const invoices = d.invoices.slice().sort((a, b) => a.month < b.month ? 1 : -1);
+    const invoices = d.invoices.slice().sort((a, b) => periodStart(a) < periodStart(b) ? 1 : periodStart(a) > periodStart(b) ? -1 : (a.number < b.number ? 1 : -1));
     return el('div', { class: 'stack-6' },
-      panelCard(monthLabel(month) + ' so far', null, el('div', { class: 'rate-table' },
+      panelCard('This week so far', el('span', { class: 'small muted', 'data-testid': 'biz-invoice-week' }, MDM.periodLabel(week)), el('div', { class: 'rate-table' },
         MDM.ui.rateRow('Packages delivered', String(pkgs)), MDM.ui.rateRow('Orders', String(delivered.length)), MDM.ui.rateRow('Amount', money(amount), { mono: true }),
         MDM.ui.rateRow('Payment', 'Bank transfer', { valueSub: 'Due in ' + plural(d.settings.invoiceDueDays || 14, 'day') }))),
       el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Invoices')),
         invoices.length ? el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'biz-invoices' },
-          el('thead', null, el('tr', null, ['Invoice', 'Month', 'Status', 'Due', 'Total', ''].map((h, i) => el('th', { class: i === 4 ? 'num' : null }, h)))),
+          el('thead', null, el('tr', null, ['Invoice', 'Week', 'Status', 'Due', 'Total', ''].map((h, i) => el('th', { class: i === 4 ? 'num' : null }, h)))),
           el('tbody', null, invoices.map(inv => el('tr', null,
             el('td', { class: 'table__primary' }, el('span', { class: 'mono--code' }, inv.number)),
-            el('td', { 'data-label': 'Month' }, monthLabel(inv.month)),
+            el('td', { 'data-label': 'Week' }, MDM.periodLabel(inv)),
             el('td', { 'data-label': 'Status' }, html(MDM.ui.invoiceBadge(inv.status))),
             el('td', { 'data-label': 'Due' }, fmtDate(inv.dueAt, { dateOnly: true })),
             el('td', { class: 'num mono', 'data-label': 'Total' }, MDM.pricing.format(inv.total, { cents: true })),
             el('td', null, el('a', { class: 'btn btn--secondary btn--sm', href: MDM.href('admin/invoice.html?id=' + encodeURIComponent(inv.id)), target: '_blank', rel: 'noopener', 'data-testid': 'biz-invoice-open' }, 'Open')))))))
-          : empty('No invoices yet', 'The first one comes at month end.')));
+          : empty('No invoices yet', 'The first one comes when your first week ends. Weeks run Sunday to Saturday.')));
   }
 
   // ---- Labels (How it works §9) ------------------------------------------------------------------------------------------------

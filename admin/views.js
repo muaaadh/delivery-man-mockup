@@ -16,7 +16,6 @@
   })();
 
   // ---- Shared helpers -------------------------------------------------------------------------------------------------------
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const VEHICLES = { bike: 'Bike', car: 'Car', pickup: 'Pickup' };
   const DRIVER_STATUS = { online: { label: 'Online', kind: 'ok' }, on_route: { label: 'On route', kind: 'info' }, offline: { label: 'Offline', kind: 'neutral' } };
@@ -32,9 +31,9 @@
   const icon = (name, size) => html(MDM.icon(name, size || 16));
   const nowIso = () => new Date().toISOString();
   const plural = (n, word) => n + ' ' + word + (Number(n) === 1 ? '' : 's');
-  const monthLabel = key => { const m = /^(\d{4})-(\d{2})$/.exec(key || ''); return m ? MONTHS[Number(m[2]) - 1] + ' ' + m[1] : String(key || ''); };
   const deliveredAt = o => (((o.events || []).filter(e => e.type === 'delivered').pop() || {}).at) || o.updatedAt || o.createdAt;
-  const thisMonth = () => MDM.ui.monthKey(new Date());
+  // Business billing is weekly, Sunday to Saturday (MDM.billingWeek in store.js).
+  const thisWeek = () => MDM.billingWeek(new Date());
 
   // Router bridge: admin.js provides these; the fallbacks keep the views usable when it has not loaded (test host).
   function navigate(hash) { if (typeof MDM.admin.navigate === 'function') MDM.admin.navigate(hash); else location.hash = hash; }
@@ -260,9 +259,9 @@
   }
   MDM.admin.kit = Object.assign(MDM.admin.kit || {}, { formDialog, loadFiles, photoThumb, showPhoto, tierEditor, tierName, ratesText });
 
-  // Delivered business orders of one account in a month (the same rule createInvoice uses: the delivered event's month).
-  function monthOrders(orders, accountId, month) {
-    return orders.filter(o => o.accountId === accountId && o.service === 'business' && o.status === 'delivered' && String(deliveredAt(o)).slice(0, 7) === month);
+  // Delivered business orders of one account in a billing week (the same rule createInvoice uses: the delivered event's local day).
+  function periodOrders(orders, accountId, period) {
+    return orders.filter(o => o.accountId === accountId && o.service === 'business' && o.status === 'delivered' && MDM.inPeriod(period, deliveredAt(o)));
   }
   const packageCount = orders => orders.reduce((n, o) => n + (o.packages || []).length, 0);
   const orderTotal = orders => orders.reduce((n, o) => n + ((o.totals && o.totals.total) || 0), 0);
@@ -666,12 +665,12 @@
     }
     function accountsCard(accounts, orders, settings) {
       if (!accounts.length) return card(null, empty('No accounts yet.', 'Approve a request to open one.'));
-      const month = thisMonth();
+      const week = thisWeek();
       const cols = [
         { label: 'Business', primary: true, render: a => el('a', { href: '#/business/' + a.id, on: { click: e => { e.preventDefault(); navigate('#/business/' + a.id); } } }, a.name) },
         { label: 'Contact', nowrap: true, render: a => el('span', null, a.contactName || '', el('span', { class: 'table__sub mono' }, phone.format(a.phone))) },
         { label: 'Agreed rates', render: a => el('span', { class: 'business-rates', 'data-testid': 'business-account-rates' }, MDM.pricing.accountTiers(a, settings).map(t => el('span', { class: 'business-rates__line' }, t.label + ' ' + money(t.rate)))) },
-        { label: 'This month', num: true, render: a => { const m = monthOrders(orders, a.id, month); return el('span', null, money(orderTotal(m)), el('span', { class: 'table__sub' }, plural(packageCount(m), 'package') + ' delivered')); } },
+        { label: 'This week', num: true, render: a => { const m = periodOrders(orders, a.id, week); return el('span', null, money(orderTotal(m)), el('span', { class: 'table__sub' }, plural(packageCount(m), 'package') + ' delivered')); } },
         { label: 'Cash to pay', num: true, render: a => { const c = codSummary(orders, a.id).with_office; return c.n ? money(c.amount) : ''; } },
         { label: 'Status', primary: true, render: a => badge({ approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } }, a.status) },
         { label: 'Actions', actions: true, render: a => el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-view', on: { click: () => navigate('#/business/' + a.id) } }, 'View') },
@@ -739,7 +738,7 @@
           el('div', { class: 'admin-grid' },
             el('section', { 'aria-labelledby': 'acc-points' }, sectionHead('acc-points', 'Collection points', null, ui.pointsAction), ui.points),
             el('section', { 'aria-labelledby': 'acc-cod' }, sectionHead('acc-cod', 'Cash on delivery', 'Any date', ui.codAction), ui.cod)),
-          el('section', { 'aria-labelledby': 'acc-orders' }, sectionHead('acc-orders', 'Delivered this month'), ui.orders),
+          el('section', { 'aria-labelledby': 'acc-orders' }, sectionHead('acc-orders', 'Delivered this week'), ui.orders),
           el('section', { 'aria-labelledby': 'acc-invoices' }, sectionHead('acc-invoices', 'Invoices'), ui.invoices)));
     }
     async function renderAccount() {
@@ -750,11 +749,11 @@
         root.replaceChildren(pageHead('Business account', null, null, BACK), card(null, empty('No account with this link.', 'It may have gone with a demo reset.')));
         return;
       }
-      const month = thisMonth(), mine = monthOrders(orders, account.id, month);
-      const generate = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'business-generate-invoice', on: { click: () => generateInvoice(account, mine, invoices, month) } }, icon('receipt'), 'Generate invoice');
+      const week = thisWeek(), mine = periodOrders(orders, account.id, week), weekText = MDM.periodLabel(week);
+      const generate = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'business-generate-invoice', on: { click: () => generateInvoice(account, orders, invoices) } }, icon('receipt'), 'Generate invoice');
       const allOrders = el('a', { class: 'btn btn--secondary', href: '#/orders?account=' + encodeURIComponent(account.id), 'data-testid': 'business-all-orders' }, 'Order history');
       const bulk = canView('bulk') ? el('a', { class: 'btn btn--secondary', href: '#/bulk?account=' + encodeURIComponent(account.id), 'data-testid': 'business-bulk' }, 'Bulk orders') : null;
-      const head = pageHead(account.name, 'Since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · invoiced monthly' + (account.priorityAllowed ? ' · may request priority' : ''), [allOrders, bulk, generate].filter(Boolean), BACK);
+      const head = pageHead(account.name, 'Since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · invoiced weekly' + (account.priorityAllowed ? ' · may request priority' : ''), [allOrders, bulk, generate].filter(Boolean), BACK);
       ui.head.replaceWith(head); ui.head = head;
       renderRates(account, settings, files);
       renderPoints(account);
@@ -771,8 +770,8 @@
         rateRow('Pickup window', WINDOWS[account.pickupWindow] || account.pickupWindow || ''),
         rateRow('Status', badge({ approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } }, account.status)),
         rateRow('Invoice terms', 'Due in ' + plural(settings.invoiceDueDays, 'day') + (Number(settings.gstPercent) > 0 ? ' · GST ' + settings.gstPercent + '%' : '')));
-      // This month's delivered orders
-      if (!mine.length) ui.orders.replaceChildren(empty('Nothing delivered in ' + monthLabel(month) + ' yet.'));
+      // This billing week's delivered orders (Sunday to Saturday)
+      if (!mine.length) ui.orders.replaceChildren(empty('Nothing delivered this week yet.', weekText));
       else {
         const sorted = mine.slice().sort((a, b) => deliveredAt(b) < deliveredAt(a) ? -1 : 1);
         const cols = [
@@ -783,14 +782,14 @@
           { label: 'Amount', num: true, render: o => money(o.totals.total) },
         ];
         ui.orders.replaceChildren(table(cols, sorted.map(o => ({ data: o, attrs: { class: 'is-clickable', 'data-testid': 'business-order-row', 'data-order-id': o.id, 'data-status': o.status, on: { click: e => { if (e.target.closest('button, a')) return; openOrder(o.id); } } } })), { testid: 'business-orders' }),
-          el('div', { class: 'pagination' }, el('span', null, plural(packageCount(mine), 'package') + ' delivered in ' + monthLabel(month)), el('span', { class: 'mono' }, money(orderTotal(mine)))));
+          el('div', { class: 'pagination' }, el('span', null, plural(packageCount(mine), 'package') + ' delivered, ' + weekText), el('span', { class: 'mono' }, money(orderTotal(mine)))));
       }
       // Invoices
-      if (!invoices.length) ui.invoices.replaceChildren(empty('No invoices yet.', 'Generate one when the month is done.'));
+      if (!invoices.length) ui.invoices.replaceChildren(empty('No invoices yet.', 'Generate one when the week is done. Weeks run Sunday to Saturday.'));
       else {
         const cols = [
           { label: 'Number', primary: true, render: i => el('span', { class: 'mono nowrap' }, i.number) },
-          { label: 'Period', nowrap: true, render: i => monthLabel(i.month) },
+          { label: 'Period', nowrap: true, render: i => MDM.periodLabel(i) },
           { label: 'Total', num: true, render: i => money(i.total) },
           { label: 'Status', primary: true, render: i => badge(INVOICE_STATUS, i.status) },
           { label: 'Issued', nowrap: true, render: i => fmtDate(i.issuedAt, { dateOnly: true }) },
@@ -884,7 +883,7 @@
     function invoiceUrl(inv) { return MDM.href('admin/invoice.html?id=' + encodeURIComponent(inv.id)); }
     function invoiceActions(inv, account) {
       const url = invoiceUrl(inv);
-      const text = 'Mr. Delivery Man: invoice ' + inv.number + ' for ' + monthLabel(inv.month) + ', ' + money(inv.total) + ', due ' + fmtDate(inv.dueAt, { dateOnly: true }) + '. ' + url;
+      const text = 'Mr. Delivery Man: invoice ' + inv.number + ' for ' + MDM.periodLabel(inv) + ', ' + money(inv.total) + ', due ' + fmtDate(inv.dueAt, { dateOnly: true }) + '. ' + url;
       const links = phone.links(account.phone, text);
       const markSent = async () => { if (inv.status === 'draft') { try { await MDM.store.update('invoices', inv.id, { status: 'sent', sentAt: nowIso() }); } catch (e) { /* the link still opens */ } } };
       return actionsRow(
@@ -892,16 +891,32 @@
         inv.status !== 'paid' ? el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'invoice-mark-paid', on: { click: () => markPaid(inv) } }, 'Mark paid') : null,
         links ? el('a', { class: 'btn btn--ghost btn--sm', href: links.wa, target: '_blank', rel: 'noopener', title: 'Send on WhatsApp to ' + phone.format(account.phone), 'data-testid': 'invoice-send', on: { click: markSent } }, 'Send') : null);
     }
-    async function generateInvoice(account, mine, invoices, month) {
-      if (!mine.length) { toast('No delivered business orders in ' + monthLabel(month) + ' to invoice yet', 'warn'); return; }
-      const existing = invoices.find(i => i.month === month);
-      if (existing) {
-        const ok = await MDM.ui.confirm({ title: 'Invoice already exists', message: existing.number + ' already covers ' + monthLabel(month) + '. Create another one for the same month?', okLabel: 'Create invoice' });
+    // Weekly billing: pick one of the last 8 billing weeks (Sunday to Saturday) with deliveries for this account. The newest finished
+    // week with no invoice yet is chosen for you; the current week (still running) only when every finished one is invoiced.
+    async function generateInvoice(account, orders, invoices) {
+      const start = MDM.billingWeek(new Date()).from.split('-').map(Number);
+      const covering = w => invoices.find(i => { const p = MDM.invoicePeriod(i); return p && p.from <= w.from && p.to >= w.to; }) || null;
+      const weeks = [];
+      for (let i = 0; i < 8; i++) {
+        const w = MDM.billingWeek(new Date(start[0], start[1] - 1, start[2] - 7 * i));
+        const list = periodOrders(orders, account.id, w);
+        if (list.length) weeks.push({ w, list, existing: covering(w) });
+      }
+      if (!weeks.length) { toast('No delivered business orders in the last 8 weeks to invoice yet', 'warn'); return; }
+      const today = MDM.localDayKey(new Date());
+      const pick = weeks.find(x => !x.existing && x.w.to < today) || weeks.find(x => !x.existing) || weeks[0];
+      const v = await MDM.ui.dialog({ title: 'Invoice ' + account.name, message: 'Business orders delivered in the week you choose. Weeks run Sunday to Saturday.', okLabel: 'Generate invoice',
+        fields: [{ name: 'week', label: 'Week', type: 'select', required: true, value: pick.w.from,
+          options: weeks.map(x => ({ value: x.w.from, label: MDM.periodLabel(x.w, { year: false }) + (x.w.to >= today ? ' (so far)' : '') + ' · ' + plural(packageCount(x.list), 'package') + ' · ' + money(orderTotal(x.list)) + (x.existing ? ' · invoiced' : '') })) }] });
+      if (!v) return;
+      const chosen = weeks.find(x => x.w.from === v.week) || pick;
+      if (chosen.existing) {
+        const ok = await MDM.ui.confirm({ title: 'Invoice already exists', message: chosen.existing.number + ' already covers ' + MDM.periodLabel(chosen.w) + '. Create another one for the same week?', okLabel: 'Create invoice' });
         if (!ok) return;
       }
       try {
-        const inv = await MDM.store.createInvoice(account.id, month);
-        toast('Invoice ' + inv.number + ' created, ' + money(inv.total) + ' due ' + fmtDate(inv.dueAt, { dateOnly: true }));
+        const inv = await MDM.store.createInvoice(account.id, chosen.w);
+        toast('Invoice ' + inv.number + ' for ' + MDM.periodLabel(inv, { year: false }) + ' created, ' + money(inv.total) + ' due ' + fmtDate(inv.dueAt, { dateOnly: true }));
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function markPaid(inv) {
@@ -1163,7 +1178,7 @@
       const rules = s.rules || {}, notif = s.notifications || {}, chans = notif.channels || {}, hr = s.hr || {}, st = s.store || {};
       const saveBtn = (testid, text) => el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': testid }, text));
       const payForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-payment-form', on: { submit: savePayment, input: () => { dirty = true; } } },
-        field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, invoice sent automatically' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping: always upfront. Businesses: monthly.' }),
+        field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, invoice sent automatically' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping: always upfront. Businesses: weekly invoice.' }),
         checkbox('upfrontOptional', rules.upfrontOptional !== false, 'Customers may pay upfront', 'Shows "Pay now" once the price is confirmed'),
         field('Express handling fee, MVR', numInput('expressFee', (s.rates || {}).express || 0), { hint: 'Suggested on express orders' }),
         checkbox('naaluBillable', !!rules.naaluBillable, 'Charge naalu to the customer by default', 'When off, only the driver is reimbursed'),
