@@ -915,7 +915,9 @@
     catch (e) { toast(e && e.message ? e.message : 'Something went wrong', 'danger'); }
   }
   async function fresh(o) { return (await MDM.store.get('orders', o.id)) || o; }
-  function statusMessage(o) { return 'Mr. Delivery Man: order ' + o.code + ' is ' + MDM.STATUS[o.status].customer.toLowerCase() + '. Track: ' + MDM.href('track/?order=' + encodeURIComponent(o.id)); }
+  // The live service's link carries the order's secret (MDM.remote.trackLink), so the customer opens it on any phone without signing in.
+  function trackUrl(o) { return MDM.remote && MDM.remote.trackLink ? MDM.remote.trackLink(o) : MDM.href('track/?order=' + encodeURIComponent(o.id)); }
+  function statusMessage(o) { return 'Mr. Delivery Man, order ' + o.code + ': ' + MDM.STATUS[o.status].customer + '. Track it here: ' + trackUrl(o); }
   function openExternal(href) { const a = el('a', { href, target: '_blank', rel: 'noopener', class: 'sr-only' }, 'Open'); document.body.appendChild(a); a.click(); a.remove(); }
   async function sendUpdate(o, text) {
     const c = o.customer || {};

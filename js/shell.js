@@ -529,7 +529,7 @@
   // ---- Mount --------------------------------------------------------------------------------------------------------------
   let mounted = null, hoursTimer = null;
   function startAutopilot(s) {
-    if (!(s && s.demo && s.demo.autopilot)) return;
+    if (!(s && s.demo && s.demo.autopilot) || (MDM.store && MDM.store._live)) return;   // a demo tool: never on the live service
     if (MDM.live && typeof MDM.live.autopilot === 'function') { try { MDM.live.autopilot(); } catch (e) { /* the shell must render even if the demo autopilot cannot start */ } }
   }
   function mount() {
