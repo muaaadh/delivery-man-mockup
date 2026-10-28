@@ -181,7 +181,8 @@
   const returnPending = o => !!(o.cancellation && o.cancellation.returnStatus === 'pending');
   const cashDifference = o => !!(o.cod && typeof o.cod.variance === 'number' && o.cod.variance !== 0 && o.cod.status !== 'remitted');
   // A driver can be assigned once the price is confirmed, or straight away when there is no package photo: the price is then set from
-  // the proof of collection (updates 17/10/2026). Those requests wait in "Driver to assign", not "Price to confirm".
+  // the proof of collection (updates 17/10/2026). Those requests wait in "Driver to assign", not "Price to confirm". The other requests
+  // wait in "Price to confirm", where the order can still get a driver first (client, 28/10/2026).
   const toAssign = o => !o.driverId && !o.batchId && (o.status === 'confirmed' || (o.status === 'requested' && MDM.priceAfterCollection(o)));
   function queues(orders) {
     return {

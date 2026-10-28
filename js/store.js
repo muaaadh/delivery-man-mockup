@@ -159,7 +159,8 @@
   // cargo: the Maldivian Cargo bill the driver pays at the counter (updates 17/10/2026), always added to the customer's delivery charges.
   MDM.CHARGE_TYPES = [{ value: 'naalu', label: 'Naalu' }, { value: 'packing', label: 'Packing charge' }, { value: 'cargo', label: 'Maldivian Cargo charges' }, { value: 'other', label: 'Other charge' }];
   // Pick & deliver orders without a package photo are collected first; the operator sets the price from the proof of collection
-  // (updates 17/10/2026). pricing.afterCollection is fixed when the order is created.
+  // (updates 17/10/2026). pricing.afterCollection is set when the order is created, or when the office assigns a driver before
+  // confirming the price (client, 28/10/2026: a shopping stop or a package photo no longer holds the driver back).
   MDM.priceAfterCollection = o => !!(o && o.pricing && o.pricing.afterCollection && o.pricing.status !== 'confirmed');
   // priceToFinalise(o) → true once the proof of collection is in and the price still waits for the operator.
   MDM.priceToFinalise = o => MDM.priceAfterCollection(o) && ['cancelled', 'returned'].indexOf(o.status) < 0 && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
@@ -247,7 +248,7 @@
   const NOTIFY = {
     created: 'Order submitted', confirmed: 'Order confirmed', price_confirmed: 'Price confirmed', assigned: 'Driver assigned',
     collected: 'Package collected', out_for_delivery: 'Out for delivery', delivered: 'Delivered', failed: 'Delivery problem',
-    payment_requested: 'Payment requested', payment_submitted: 'Payment submitted', payment_verified: 'Payment verified',
+    payment_requested: 'Payment requested', invoice_updated: 'Invoice updated', payment_submitted: 'Payment submitted', payment_verified: 'Payment verified',
     priority_approved: 'Priority request approved', priority_rejected: 'Priority request rejected', cancelled: 'Order cancelled',
     cancel_rejected: 'Cancellation request declined', boat_updated: 'Boat details updated', cod_remitted: 'Cash on delivery paid to you',
   };
@@ -544,6 +545,12 @@
     return save(o);
   }
   function recalc(o) { const s = settings(); return MDM.pricing && MDM.pricing.recalc ? MDM.pricing.recalc(o, s) : o; }
+  // A price corrected after delivery (client, 28/10/2026: a driver chose the wrong category): the invoice already sent shows the new
+  // total, so the customer's timeline says so. Weekly business invoices (payment method 'invoice') are not touched here.
+  function invoiceFollows(o, before, by) {
+    if (o.status === 'delivered' && o.totals.total !== before && o.payment && o.payment.method !== 'invoice' && ['requested', 'received'].indexOf(o.payment.status) >= 0)
+      pushEvent(o, makeEvent('invoice_updated', 'Invoice updated: ' + fmt(o.totals.total), by, 'public'));
+  }
   function priceHistory(o, from, to, note, by) { o.pricing = o.pricing || { status: 'estimated', history: [] }; o.pricing.history = (o.pricing.history || []).concat([{ at: now(), by: by || 'admin', from, to, note: note || '' }]); }
 
   // ---- Pricing: estimates, confirmation and manual adjustments (requirements §3 step 4, §15) -----------------------------
@@ -559,6 +566,7 @@
     priceHistory(o, before, o.totals.total, label + (a.remarks ? ': ' + a.remarks : ''), a.by);
     const visible = o.pricing && o.pricing.status === 'confirmed';
     pushEvent(o, makeEvent('adjustment', (visible ? 'Price updated: ' : 'Adjustment: ') + label + ' ' + fmt(adj.amount), a.by, visible ? 'public' : 'internal', { adjustmentId: adj.id }));
+    invoiceFollows(o, before, a.by);
     return save(o);
   }
   // shopsOf(o) → [{ key, shop }]: the shops on an order, 'main' for the Shop & Deliver shop, then each shop stop by its collection id.
@@ -592,7 +600,9 @@
     if (o.status === 'requested') setStatus(o, 'confirmed', 'confirmed', 'Order confirmed', q.by);
     // Delivered before the price was set (price after collection): the invoice that waited for it goes out now.
     if (o.status === 'delivered' && o.payment.status === 'pending') requestPaymentOn(o, q.by, false);
-    else if (q.requestPayment || o.payment.upfrontRequired) requestPaymentOn(o, q.by, o.status !== 'delivered');
+    // A slip the customer already sent stays to verify: a corrected price does not ask them to pay again.
+    else if ((q.requestPayment || o.payment.upfrontRequired) && o.payment.status !== 'received') requestPaymentOn(o, q.by, o.status !== 'delivered');
+    else invoiceFollows(o, before, q.by);
     return save(o);
   }
 
@@ -891,9 +901,10 @@
     const prev = o.driverId;
     o.driverId = driverId;
     ensureRoute(o);
-    if (o.status === 'requested' && !MDM.priceAfterCollection(o)) throw new StoreError('transition', 'Confirm the price before assigning a driver');
+    // A driver before the price (client, 28/10/2026): the order is then priced after collection, like one without a package photo.
+    if (o.status === 'requested' && !MDM.priceAfterCollection(o)) o.pricing = Object.assign({}, o.pricing, { afterCollection: true });
     const label = (reassign ? 'Driver changed to ' : 'Driver assigned: ') + d.name;
-    if (o.status === 'requested') setStatus(o, 'assigned', 'assigned', label + '. We confirm your price from the driver\'s photo at collection', opts.by);
+    if (o.status === 'requested') setStatus(o, 'assigned', 'assigned', label + '. We confirm your price after collection', opts.by);
     else if (o.status === 'confirmed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
     else if (o.status === 'failed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
     else pushEvent(o, makeEvent('assigned', label, opts.by, 'public', { driverId }));
@@ -1045,7 +1056,7 @@
       pushEvent(o, makeEvent('size_updated', 'Package category changed' + (changed.length ? ' (' + changed.join(', ') + ')' : '') + (o.totals.total !== before ? ', price ' + fmt(before) + ' to ' + fmt(o.totals.total) : ''), by, o.pricing && o.pricing.status === 'confirmed' ? 'public' : 'internal'));
     }
   }
-  function updatePackages(orderId, sizes, by) { const o = orderOrThrow(orderId); applySizes(o, sizes, by); return save(o); }
+  function updatePackages(orderId, sizes, by) { const o = orderOrThrow(orderId); const before = o.totals.total; applySizes(o, sizes, by); invoiceFollows(o, before, by); return save(o); }
   // resolveFailure: the operator's decision on a failed collection or delivery.
   function resolveFailure(orderId, p) {
     const o = orderOrThrow(orderId);
@@ -1278,7 +1289,8 @@
     const level = d.serviceLevel || 'normal';
     const needsReview = q.totals.quoteRequired || (d.packages || []).some(p => p.photoId) || level === 'express' || d.requestType === 'office';
     // No package photo on a pick & deliver request: a driver can be assigned straight away and the price is set from the proof of
-    // collection. Shopping (paid upfront, before we buy) and orders created already confirmed keep the price-first flow.
+    // collection. Shopping (paid upfront, before we buy) and orders created already confirmed keep the price-first flow, unless the
+    // office assigns a driver first (assignDriver, 28/10/2026).
     const afterCollection = (d.service || 'pick') === 'pick' && !shopStop && (!d.status || d.status === 'requested') && !(d.packages || []).some(p => p.photoId);
     const order = insert('orders', {
       source: d.source || 'web', requestType: d.requestType || 'home', service: d.service || 'pick', serviceLevel: level, accountId: d.accountId || null,
@@ -1425,6 +1437,7 @@
     recalc(o); priceHistory(o, before, o.totals.total, 'Extra vehicle charge' + (p.remarks ? ': ' + p.remarks : ''), p.by);
     const visible = o.pricing && o.pricing.status === 'confirmed';
     pushEvent(o, makeEvent('adjustment', (visible ? 'Price updated: ' : 'Adjustment: ') + 'extra vehicle ' + fmt(amount), p.by, visible ? 'public' : 'internal'));
+    invoiceFollows(o, before, p.by);
     return save(o);
   }
 

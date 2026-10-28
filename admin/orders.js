@@ -12,6 +12,9 @@
   const DONE = F.DONE;
   const IN_PROGRESS = ['confirmed', 'assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery'];
   const open = o => DONE.indexOf(o.status) < 0;
+  // Client 28/10/2026: a delivered order's price and package categories can still be corrected (a driver chose the wrong category)
+  // until it is paid or goes on a weekly business invoice. The invoice shows the new total.
+  const correctable = o => o.status === 'delivered' && !!o.payment && ['pending', 'requested', 'received'].indexOf(o.payment.status) >= 0;
   const TABS = [
     { value: 'all', label: 'All', test: () => true },
     // Needs price: requests to price, and orders collected without a photo whose price is set from the proof of collection (17/10/2026).
@@ -297,10 +300,13 @@
         [sel, smallBtn('Assign driver', 'alert-assign', () => assign(o, sel.value), 'btn--primary'), vehicleBtn, smallBtn('Confirm price now', 'alert-confirm-price', () => confirmPrice(o))].filter(Boolean), 'drawer-alert-price');
       out[out.length - 1].setAttribute('data-mode', 'assign');
     } else if (o.status === 'requested') {
+      // Client 28/10/2026: the office may also assign a driver first (a shopping stop, a photo to check later); the price is then set
+      // after collection, like an order without a package photo.
       const photos = (o.packages || []).map(p => thumbButton(ctx.fileById[p.photoId], 'package photo')).filter(Boolean);
-      banner('warn', 'Confirm the price', [vehicle, el('span', null, 'Estimate ' + est + '. ' + (photos.length ? 'Check the photo, then set the price.' : 'No photo: confirm now or after collection.')),
+      const sel = assignSelect(o, ctx, 'alert-assign-driver');
+      banner('warn', 'Confirm the price', [vehicle, el('span', null, 'Estimate ' + est + '. ' + (photos.length ? 'Check the photo and confirm the price' : 'Confirm the price now') + ', or assign a driver and set it after collection.'),
         photos.length ? el('div', { class: 'thumbs' }, photos) : null],
-      [vehicleBtn, smallBtn('Confirm price', 'alert-confirm-price', () => confirmPrice(o), 'btn--primary')].filter(Boolean), 'drawer-alert-price');
+      [vehicleBtn, smallBtn('Confirm price', 'alert-confirm-price', () => confirmPrice(o), 'btn--primary'), sel, smallBtn('Assign driver', 'alert-assign', () => assign(o, sel.value))].filter(Boolean), 'drawer-alert-price');
     }
     if (MDM.priceToFinalise(o)) {
       const proofIds = ((o.route && o.route.stops) || []).filter(s => s.type === 'pickup' && s.proofPhotoId).map(s => s.proofPhotoId);
@@ -552,7 +558,7 @@
       const tags = [];
       if (pkg.fragile) tags.push('Fragile'); if (pkg.needsVehicle) tags.push('Needs a vehicle'); if (o.service === 'business' && pkg.underOneFt === false) tags.push('Over 1 ft');
       const photo = thumbButton(ctx.fileById[pkg.photoId], pkg.photoSource === 'driver' ? 'proof of collection' : 'package photo');
-      const canChange = open(o) && o.service !== 'store';
+      const canChange = (open(o) || correctable(o)) && o.service !== 'store';
       return el('div', { class: 'list__item', 'data-testid': 'drawer-package', 'data-package-id': pkg.id, 'data-size': pkg.size },
         el('div', { class: 'list__main' },
           el('div', { class: 'list__title' }, (i + 1) + '. ' + MDM.pricing.sizeLabel(pkg.size) + (pkg.description ? ' · ' + pkg.description : '')),
@@ -658,8 +664,9 @@
     const charged = F.vehicleCharged(o);
     const vehicleNote = o.extraVehicle || charged ? el('p', { class: 'small', 'data-testid': 'drawer-vehicle-note' }, badgeNode(charged ? 'info' : 'warn', o.extraVehicle ? 'Extra vehicle requested' : 'Extra vehicle'), ' ',
       el('span', { class: 'muted' }, charged ? 'Vehicle charge included below.' : 'No vehicle charge added yet.')) : null;
-    // A price set after delivery (price after collection) is still finalised here; it releases the invoice.
-    const actions = open(o) || MDM.priceToFinalise(o) ? el('div', { class: 'row row--wrap' },
+    // A price set after delivery (price after collection) is still finalised here; it releases the invoice. A delivered order that is not
+    // paid yet can still be corrected (correctable).
+    const actions = open(o) || MDM.priceToFinalise(o) || correctable(o) ? el('div', { class: 'row row--wrap' },
       smallBtn(confirmed ? 'Change confirmed price' : MDM.priceToFinalise(o) ? 'Finalise price' : 'Confirm price', 'drawer-confirm-price', () => confirmPrice(o), confirmed ? 'btn--secondary' : 'btn--primary'),
       vehicleBtn, smallBtn('Add adjustment', 'drawer-add-adjustment', () => addAdjustment(o))) : (vehicleBtn ? el('div', { class: 'row row--wrap' }, vehicleBtn) : null);
     return sec('Pricing', 'drawer-pricing', el('div', { class: 'stack-3' }, status, vehicleNote, summary, est, reasons, hist, actions));
@@ -869,7 +876,10 @@
     if (st === 'requested' && MDM.priceAfterCollection(o)) {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
       items.push(cancelBtn(), btn('Confirm price', 'drawer-confirm', 'btn--secondary', () => confirmPrice(o)), sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
-    } else if (st === 'requested') items.push(cancelBtn(), btn('Confirm price', 'drawer-confirm', 'btn--primary', () => confirmPrice(o)));
+    } else if (st === 'requested') {
+      const sel = assignSelect(o, ctx, 'drawer-assign-driver');
+      items.push(cancelBtn(), sel, btn('Assign driver', 'drawer-assign', 'btn--secondary', () => assign(o, sel.value)), btn('Confirm price', 'drawer-confirm', 'btn--primary', () => confirmPrice(o)));
+    }
     else if (st === 'confirmed' || (st === 'collected' && o.batchId && !o.driverId)) {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
       if (st === 'confirmed') items.push(cancelBtn());
@@ -935,6 +945,9 @@
     return r.id;
   }
   const upfrontDefault = o => !!(o.payment && o.payment.upfrontRequired) || ((state.settings || {}).rules || {}).paymentTiming === 'upfront';
+  // What a correction after delivery does to the bill (correctable): the invoice already sent shows the new total.
+  const correctionNote = o => !correctable(o) || o.payment.status === 'pending' ? ''
+    : ' Already delivered: the invoice changes to the new total' + (o.payment.status === 'received' ? '; the customer\'s transfer slip of ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total) + ' still waits to be checked.' : '.');
   async function confirmPrice(o) {
     o = await fresh(o);
     const presets = MDM.ADJUSTMENT_PRESETS.filter(p => p.value !== 'discount');
@@ -953,7 +966,7 @@
       : [{ name: 'total', label: 'Final price (MVR)', type: 'number', required: true, value: o.totals.total, min: 0, step: 1 }];
     const v = await dialog({ title: (finalise ? 'Finalise the price for ' : 'Confirm the price for ') + o.code, okLabel: finalise ? 'Finalise price' : 'Confirm price',
       message: 'Now ' + money(o.totals.total) + ', estimate ' + est + '. ' + (finalise ? 'Set it from the collection photo. ' : '') + (shopsOn.length ? 'Enter the items as agreed with the customer on the call; the ' + pct + '% shopping fee is added to them. ' : '') + 'Include any vehicle fee.' +
-        (finalise && delivered && o.payment && o.payment.status === 'pending' ? ' The invoice goes out once you confirm.' : ''),
+        (finalise && delivered && o.payment && o.payment.status === 'pending' ? ' The invoice goes out once you confirm.' : '') + correctionNote(o),
       fields: priceFields.concat([
         { name: 'preset', label: 'Reason for any difference', type: 'select', required: true, options: presets,
           value: (o.packages || []).some(p => p.needsVehicle) && !((o.fees || {}).adjustments || []).some(a => a.preset === 'vehicle') ? 'vehicle' : 'quote' },
@@ -966,7 +979,7 @@
   }
   async function addAdjustment(o) {
     const presets = MDM.ADJUSTMENT_PRESETS.filter(p => p.value !== 'quote');
-    const v = await dialog({ title: 'Adjust the price of ' + o.code, message: o.pricing && o.pricing.status === 'confirmed' ? 'The customer sees the new total on the tracking page.' : 'Added to the estimate before the price is confirmed.', okLabel: 'Add adjustment',
+    const v = await dialog({ title: 'Adjust the price of ' + o.code, message: (o.pricing && o.pricing.status === 'confirmed' ? 'The customer sees the new total on the tracking page.' : 'Added to the estimate before the price is confirmed.') + correctionNote(o), okLabel: 'Add adjustment',
       fields: [
         { name: 'preset', label: 'Type', type: 'select', options: presets, value: presets[0].value },
         { name: 'amount', label: 'Amount (MVR)', type: 'number', required: true, step: 1, hint: 'Discounts are negative, for example −20', validate: (val, all) => all.preset === 'discount' ? (val < 0 ? null : 'A discount is a negative amount') : (val > 0 ? null : 'Enter an amount above 0') },
@@ -1003,7 +1016,7 @@
     const idx = (o.packages || []).findIndex(p => p.id === pkgId);
     const pkg = o.packages[idx];
     if (!pkg) { toast('This package is no longer on the order', 'warn'); return; }
-    if (!open(o)) { toast(o.code + ' is ' + MDM.STATUS[o.status].label.toLowerCase() + ': the category can no longer change', 'warn'); return; }
+    if (!open(o) && !correctable(o)) { toast(o.code + (o.status === 'delivered' ? ' is paid or invoiced' : ' is ' + MDM.STATUS[o.status].label.toLowerCase()) + ': the category can no longer change', 'warn'); return; }
     const business = o.service === 'business';   // the store re-tiers every business package whose size changes
     const acc = business && o.accountId ? await MDM.store.get('business_accounts', o.accountId) : null;
     const tiers = business ? MDM.pricing.accountTiers(acc, settings) : [];
@@ -1021,7 +1034,7 @@
     const current = pkg.price ? pkg.price.lineTotal : 0;
     const v = await dialog({ title: 'Change category · package ' + (idx + 1), okLabel: 'Change category',
       message: (pkg.description ? pkg.description + '. ' : '') + 'Now ' + MDM.pricing.sizeLabel(pkg.size) + ' at ' + money(current) + '. Choose the category the package really is; ' +
-        (business ? 'it moves to the business\'s rate for that size, ' : '') + 'the price and the order total follow and the change is logged with your name.',
+        (business ? 'it moves to the business\'s rate for that size, ' : '') + 'the price and the order total follow and the change is logged with your name.' + correctionNote(o),
       fields: [
         { name: 'size', label: 'Package category', type: 'segmented', required: true, options, value: pkg.size, validate: val => val === pkg.size ? 'Choose a different category' : null },
         { name: 'remarks', label: 'Why it changed', type: 'textarea', rows: 2, placeholder: 'Driver found two boxes taped together, not a bag' }] });

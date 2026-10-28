@@ -83,7 +83,7 @@
   function signedInBusiness() { try { const b = JSON.parse(localStorage.getItem('mdm:business') || 'null'); return b && b.accountId ? b.accountId : null; } catch (e) { return null; } }
   const receiverView = o => isBusinessOrder(o) && signedInBusiness() !== o.accountId;
   // Public events that carry the business's price, invoice or cash remittance are left out of the receiver's activity log.
-  const RECEIVER_HIDDEN = ['price_confirmed', 'adjustment', 'size_updated', 'payment_requested', 'payment_submitted', 'payment_verified', 'payment_rejected', 'refund', 'settled', 'cod_remitted', 'cancel_requested', 'cancel_rejected'];
+  const RECEIVER_HIDDEN = ['price_confirmed', 'adjustment', 'size_updated', 'payment_requested', 'invoice_updated', 'payment_submitted', 'payment_verified', 'payment_rejected', 'refund', 'settled', 'cod_remitted', 'cancel_requested', 'cancel_rejected'];
   const tierLabel = v => { const t = MDM.pricing.businessTiers(state.settings).find(x => x.value === v); return t ? t.label + ' (' + MDM.pricing.sizeLabel(t.size) + ')' : String(v || ''); };
   const who = by => { const n = String(MDM.byName(by) || ''); return n.charAt(0).toUpperCase() + n.slice(1); };
   // Cash on delivery as the receiver sees it: to pay, paid (whatever the office did with it afterwards), or not collected.
