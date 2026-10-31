@@ -309,7 +309,7 @@
     const account = owner && o.accountId ? await MDM.store.get('business_accounts', o.accountId) : null;
     const ids = new Set();
     if (owner) {
-      stops.forEach(s => { [s.photoId, s.proofPhotoId].forEach(id => { if (id) ids.add(id); }); });
+      stops.forEach(s => { [s.photoId, s.proofPhotoId].concat(s.proofPhotoIds || []).forEach(id => { if (id) ids.add(id); }); });
       (o.packages || []).forEach(p => { if (p.photoId) ids.add(p.photoId); });
       (o.documents || []).forEach(d => { if (d.fileId) ids.add(d.fileId); });
       (o.charges || []).forEach(c => { if (c.photoId && !c.void) ids.add(c.photoId); });
@@ -929,8 +929,11 @@
   function buildProofs(o, stops, files) {
     const items = [];
     stops.filter(x => x.type === 'pickup' && x.status === 'done').forEach(x => {
-      const f = x.proofPhotoId ? files[x.proofPhotoId] : null;
-      if (f) items.push(thumbItem(f, 'Proof of collection', 'Collected ' + fmtWhen(x.at) + (x.address ? ' · ' + x.address : ''), 'track-proof-collection'));
+      // One photo per package since 31/10/2026 (proofPhotoIds); older stops have the one proofPhotoId.
+      (x.proofPhotoIds || [x.proofPhotoId]).forEach(id => {
+        const f = id ? files[id] : null;
+        if (f) items.push(thumbItem(f, 'Proof of collection', 'Collected ' + fmtWhen(x.at) + (x.address ? ' · ' + x.address : ''), 'track-proof-collection'));
+      });
     });
     stops.filter(x => (x.type === 'dropoff' || x.type === 'return') && x.status === 'done').forEach(x => {
       const f = x.photoId ? files[x.photoId] : null;

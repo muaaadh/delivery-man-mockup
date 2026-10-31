@@ -114,6 +114,7 @@
     const list = MDM.geo.jetties();
     const exact = list.find(t => norm(t.value) === n || norm(t.label) === n);
     if (exact) return exact.value;
+    if (/not sure|unsure|don ?t know|do not know|assist|check/.test(n)) return 'unsure';
     if (/t ?jetty/.test(n)) return 'male_tjetty';
     if (/north/.test(n)) return 'male_north';
     if (/villi/.test(n)) return 'villimale_ferry';

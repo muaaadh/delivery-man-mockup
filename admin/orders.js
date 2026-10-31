@@ -254,7 +254,7 @@
   // A button that runs an action and carries extra attributes (data-package-id, data-charge-id) for the row it belongs to.
   const rowBtn = (text, testid, fn, cls, attrs) => el('button', Object.assign({ type: 'button', class: 'btn btn--sm ' + (cls || 'btn--secondary'), 'data-testid': testid, on: { click: () => act(fn) } }, attrs || {}), text);
   const sum = (list, f) => (list || []).reduce((t, x) => t + (Number(f ? f(x) : x) || 0), 0);
-  const jettyLabel = v => label(MDM.geo.terminals(), v);
+  const jettyLabel = v => (v === 'unsure' ? 'Jetty to be confirmed' : label(MDM.geo.terminals(), v));
   const vesselLabel = v => label(MDM.VESSEL_TYPES, v);
   function departureText(b) { return [b.departureDate ? F.fmtDay(b.departureDate) : '', b.departureTime || ''].filter(Boolean).join(', '); }
   // The vehicle charge the office usually adds (settings.rates.vehicle); empty when the rate card has none.
@@ -309,7 +309,7 @@
       [vehicleBtn, smallBtn('Confirm price', 'alert-confirm-price', () => confirmPrice(o), 'btn--primary'), sel, smallBtn('Assign driver', 'alert-assign', () => assign(o, sel.value))].filter(Boolean), 'drawer-alert-price');
     }
     if (MDM.priceToFinalise(o)) {
-      const proofIds = ((o.route && o.route.stops) || []).filter(s => s.type === 'pickup' && s.proofPhotoId).map(s => s.proofPhotoId);
+      const proofIds = [].concat(...((o.route && o.route.stops) || []).filter(s => s.type === 'pickup' && s.proofPhotoId).map(s => s.proofPhotoIds || [s.proofPhotoId]));
       const ids = proofIds.concat((o.packages || []).map(p => p.photoId).filter(id => id && proofIds.indexOf(id) < 0));
       const photos = ids.filter((id, i) => ids.indexOf(id) === i).map(id => thumbButton(ctx.fileById[id], 'proof of collection')).filter(Boolean);
       const changed = (o.packages || []).some(p => p.sizeSource === 'driver');
@@ -384,7 +384,7 @@
     if (k === 'area') return label(MDM.geo.airportPoints(), v);
     if (k === 'task') return label(MDM.OFFICE_TASKS, v);
     if (k === 'shopZone') return MDM.geo.zoneLabel(v);
-    if (k === 'proof') return { invoice: 'Invoice and payment slip', quotation: 'Quotation and payment slip', order_no: 'Order number' }[v] || v;
+    if (k === 'proof') return { invoice: 'Invoice', quotation: 'Quotation and payment slip', order_no: 'Order number' }[v] || v;
     if (k === 'ownerContact' || k === 'passengerPhone') return phone.format(v);
     return String(v);
   }
@@ -463,7 +463,7 @@
       open(o) ? el('div', { class: 'row', style: { marginTop: '12px' } }, smallBtn('Modify order', 'drawer-modify', () => modifyOrder(o))) : null);
   }
   // ---- Delivery method details (§3.2 boat, §3.3 Maldivian Cargo, §3.4 airport), with the boat change log (§5.3) ----------------
-  const BOAT_FIELD = { vesselType: 'Vessel', name: 'Name', departureDate: 'Departure date', departureTime: 'Departure time', jetty: 'Harbour or jetty', island: 'Island', address: 'Destination address', contact: 'Contact' };
+  const BOAT_FIELD = { vesselType: 'Vessel', name: 'Name', departureDate: 'Departure date', departureTime: 'Departure time', jetty: 'Harbour or jetty', island: 'Island', address: 'Destination address', contact: 'Contact of the boat' };
   function boatValue(k, v) {
     if (v == null || v === '') return 'empty';
     if (k === 'vesselType') return vesselLabel(v) || v;
@@ -503,11 +503,12 @@
         el('div', { class: 'rate-table', 'data-testid': 'drawer-boat' },
           row('Vessel', [vesselLabel(b.vesselType), b.name].filter(Boolean).join(' · ')),
           row('Departure', departureText(b)),
-          row('Harbour or jetty', jettyLabel(b.jetty)),
+          b.jetty === 'unsure' ? rowNode('Harbour or jetty', el('span', { 'data-testid': 'drawer-boat-jetty-unsure' }, badgeNode('warn', 'Not sure'), el('small', null, 'Check the jetty with the customer, then update the boat details')))
+            : row('Harbour or jetty', jettyLabel(b.jetty)),
           row('Destination island', b.island),
           row('Destination address', b.address),
           receiver,
-          b.contact && phone.normalize(b.contact) !== phone.normalize(d.recipientPhone) ? rowNode('Contact on the island', el('span', null, el('span', { class: 'mono' }, phone.format(b.contact)), contactLinks(b.contact))) : null,
+          b.contact && phone.normalize(b.contact) !== phone.normalize(d.recipientPhone) ? rowNode('Contact of the boat', el('span', null, el('span', { class: 'mono' }, phone.format(b.contact)), contactLinks(b.contact))) : null,
           row('Instructions', d.instructions)),
         pkgLabel, log,
         el('div', { class: 'row row--wrap' }, open(o) ? smallBtn('Update boat details', 'drawer-update-boat', () => updateBoat(o), 'btn--secondary') : null, labelsLink)));
@@ -557,7 +558,8 @@
       }
       const tags = [];
       if (pkg.fragile) tags.push('Fragile'); if (pkg.needsVehicle) tags.push('Needs a vehicle'); if (o.service === 'business' && pkg.underOneFt === false) tags.push('Over 1 ft');
-      const photo = thumbButton(ctx.fileById[pkg.photoId], pkg.photoSource === 'driver' ? 'proof of collection' : 'package photo');
+      const photo = [thumbButton(ctx.fileById[pkg.photoId], pkg.photoSource === 'driver' ? 'proof of collection' : 'package photo'),
+        pkg.collectionPhotoId && pkg.collectionPhotoId !== pkg.photoId ? thumbButton(ctx.fileById[pkg.collectionPhotoId], 'proof of collection') : null].filter(Boolean);
       const canChange = (open(o) || correctable(o)) && o.service !== 'store';
       return el('div', { class: 'list__item', 'data-testid': 'drawer-package', 'data-package-id': pkg.id, 'data-size': pkg.size },
         el('div', { class: 'list__main' },
@@ -565,7 +567,7 @@
           el('div', { class: 'list__meta' }, CATEGORY_SOURCE[pkg.sizeSource] || CATEGORY_SOURCE.estimate),
           lines.map(l => el('div', { class: 'list__meta' }, l)),
           tags.length ? el('div', { class: 'tags' }, tags.map(f => el('span', { class: 'tag' }, f))) : null,
-          photo ? el('div', { class: 'thumbs' }, photo) : null),
+          photo.length ? el('div', { class: 'thumbs' }, photo) : null),
         el('div', { class: 'list__aside' }, el('span', { class: 'mono' }, money(pkg.price ? pkg.price.lineTotal : 0)),
           canChange ? el('div', { class: 'row' }, rowBtn('Change category', 'drawer-change-category', () => changeCategory(o, pkg.id), 'btn--secondary', { 'data-package-id': pkg.id })) : null));
     });
@@ -623,7 +625,7 @@
       else if (s.remarks) meta.push('Remark: ' + s.remarks);
       if (s.attempts > 0) meta.push('Attempt ' + (s.attempts + 1));
       const aside = s.status === 'done' ? fmtDate(s.at) : s.status === 'failed' ? 'Failed ' + fmtDate(s.failedAt) : s.status === 'arrived' ? 'Arrived ' + fmtDate(s.arrivedAt) : s.status === 'skipped' ? 'Skipped' : 'Pending';
-      const photos = [thumbButton(ctx.fileById[s.proofPhotoId], 'proof of collection'), thumbButton(ctx.fileById[s.photoId], 'proof of delivery'), thumbButton(ctx.fileById[s.receiptPhotoId], 'shop receipt'), thumbButton(ctx.fileById[s.failPhotoId], 'photo from the failed attempt')].filter(Boolean);
+      const photos = [...(s.proofPhotoIds || [s.proofPhotoId]).map(id => thumbButton(ctx.fileById[id], 'proof of collection')), thumbButton(ctx.fileById[s.photoId], 'proof of delivery'), thumbButton(ctx.fileById[s.receiptPhotoId], 'shop receipt'), thumbButton(ctx.fileById[s.failPhotoId], 'photo from the failed attempt')].filter(Boolean);
       return el('div', { class: cls.filter(Boolean).join(' '), 'data-testid': 'drawer-stop', 'data-stop-id': s.id, 'data-status': s.status },
         el('div', { class: 'stop__marker' }, s.status === 'done' ? html(MDM.icon('check', 14)) : String(i + 1)),
         el('div', null, el('div', { class: 'stop__title' }, s.label + ' · ' + s.address), el('div', { class: 'stop__meta' }, meta.join(' · ')), photos.length ? el('div', { class: 'thumbs' }, photos) : null),
@@ -872,7 +874,13 @@
     const cancelBtn = () => btn('Cancel order', 'drawer-cancel', 'btn--ghost', () => cancelOrder(o));
     const labels = el('a', { class: 'btn btn--ghost', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), target: '_blank', rel: 'noopener', 'data-testid': 'drawer-labels' }, html(MDM.icon('printer', 16)), 'Labels');
     items.push(labels);
-    if (open(o)) items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
+    if (open(o) || st === 'delivered') items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
+    // Delivered and not paid yet (client, 31/10/2026): the payment step sits here too, next to Labels, not only in the Payment section.
+    const pay = (o.payment || {}).status;
+    if (st === 'delivered' && o.payment && o.payment.method !== 'invoice') {
+      if (pay === 'pending') items.push(btn('Request payment', 'drawer-footer-request-payment', 'btn--primary', () => requestPayment(o)));
+      else if (pay === 'received') items.push(btn('Verify payment', 'drawer-footer-verify', 'btn--primary', () => verify(o)));
+    }
     if (st === 'requested' && MDM.priceAfterCollection(o)) {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
       items.push(cancelBtn(), btn('Confirm price', 'drawer-confirm', 'btn--secondary', () => confirmPrice(o)), sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
@@ -927,7 +935,11 @@
   async function fresh(o) { return (await MDM.store.get('orders', o.id)) || o; }
   // The live service's link carries the order's secret (MDM.remote.trackLink), so the customer opens it on any phone without signing in.
   function trackUrl(o) { return MDM.remote && MDM.remote.trackLink ? MDM.remote.trackLink(o) : MDM.href('track/?order=' + encodeURIComponent(o.id)); }
-  function statusMessage(o) { return 'Mr. Delivery Man, order ' + o.code + ': ' + MDM.STATUS[o.status].customer + '. Track it here: ' + trackUrl(o); }
+  // A delivered order still to be paid says what is due, so Send update also works as a payment reminder.
+  function statusMessage(o) {
+    const due = o.status === 'delivered' && o.payment && o.payment.method !== 'invoice' && o.payment.status === 'requested';
+    return 'Mr. Delivery Man, order ' + o.code + ': ' + MDM.STATUS[o.status].customer + '. ' + (due ? 'Amount due ' + money(o.totals.total) + '. Pay and track it here: ' : 'Track it here: ') + trackUrl(o);
+  }
   function openExternal(href) { const a = el('a', { href, target: '_blank', rel: 'noopener', class: 'sr-only' }, 'Open'); document.body.appendChild(a); a.click(); a.remove(); }
   async function sendUpdate(o, text) {
     const c = o.customer || {};
@@ -1061,7 +1073,7 @@
         { name: 'jetty', label: 'Harbour or jetty', type: 'select', required: true, options: jetties, value: b.jetty && jetties.some(j => j.value === b.jetty) ? b.jetty : jetties[0].value },
         { name: 'island', label: 'Destination island', type: 'text', required: true, value: b.island || '' },
         { name: 'address', label: 'Destination address', type: 'text', value: b.address || '' },
-        { name: 'contact', label: 'Contact on the island', type: 'tel', intl: true, value: b.contact || '' },
+        { name: 'contact', label: 'Contact of the boat', type: 'tel', intl: true, value: b.contact || '' },
         { name: 'note', label: 'Note', type: 'textarea', rows: 2, placeholder: 'Huraa Speed 1 was full, sent on Huraa Speed 2', validate: (val, all) => all.reason === 'other' && !val ? 'Say what happened' : null }] });
     if (!v) return;
     const count = (b.history || []).length;
@@ -1599,8 +1611,8 @@
     const dNote = el('textarea', { class: 'textarea', id: uid + '-delivery-instructions', rows: 2, 'data-testid': 'neworder-delivery-instructions', placeholder: 'Call the receiver when the boat leaves' });
     const rNameField = clearOnInput(rName, field(rName.id, "Receiver's name", rName));
     const rPhoneField = clearOnInput(rPhone, field(rPhone.id, "Receiver's contact number", rPhone, { hint: 'Overseas numbers start with +' }));
-    const receiverBlock = el('div', { class: 'stack-4', hidden: true, 'data-testid': 'neworder-receiver' },
-      el('div', { class: 'grid-2' }, rNameField, rPhoneField), field(dNote.id, 'Delivery instructions', dNote, { optional: true }));
+    const receiverBlock = el('div', { class: 'stack-4', hidden: true, 'data-testid': 'neworder-receiver' }, el('div', { class: 'grid-2' }, rNameField, rPhoneField));
+    const dNoteField = field(dNote.id, 'Delivery instructions', dNote, { optional: true });
     const homeNote = el('p', { class: 'muted small', 'data-testid': 'neworder-method-home' }, 'Each package has its own drop-off and receiver.');
     // Boat, ferry or speedboat (§3.2)
     let vessel = 'speedboat';
@@ -1616,7 +1628,7 @@
       name: clearOnInput(boatName, field(boatName.id, 'Boat, ferry or speedboat name', boatName)),
       time: clearOnInput(boatTime, field(boatTime.id, 'Departure time', boatTime)),
       island: clearOnInput(boatIsland, field(boatIsland.id, 'Destination island', boatIsland)),
-      contact: clearOnInput(boatContact, field(boatContact.id, 'Contact on the island', boatContact, { optional: true, hint: 'If not the receiver' })),
+      contact: clearOnInput(boatContact, field(boatContact.id, 'Contact of the boat', boatContact, { optional: true, hint: 'Captain or crew, if not the receiver' })),
     };
     const boatBlock = el('div', { class: 'stack-4', hidden: true, 'data-testid': 'neworder-boat' },
       groupField('Vessel', vesselSeg),
@@ -1658,6 +1670,9 @@
       methodHint.textContent = (MDM.DELIVERY_METHODS.find(x => x.value === m) || {}).hint || '';
       homeNote.hidden = m !== 'home'; receiverBlock.hidden = m === 'home';
       boatBlock.hidden = m !== 'boat'; cargoBlock.hidden = m !== 'cargo'; airportBlock.hidden = m !== 'airport';
+      packagesSec.firstChild.textContent = m === 'home' ? 'Packages' : 'Receiver and packages';
+      methodSec.hidden = m === 'home';
+      methodSec.firstChild.textContent = { boat: 'Boat details', cargo: 'Maldivian Cargo details', airport: 'Airport details' }[m] || 'Delivery details';
       syncEditor();
       renderPackages();
     }
@@ -1697,6 +1712,9 @@
     const codField = clearOnInput(codIn, field(codIn.id, 'Cash to collect (MVR)', codIn, { optional: true, hint: 'Leave empty if already paid' }));
     const refIn = input('reference', { placeholder: 'Invoice or order number' });
     const estimate = el('div', { 'data-testid': 'neworder-estimate' });
+    const packagesSec = sec('Packages', 'neworder-packages-section', el('div', { class: 'stack-4' }, receiverBlock, list, editorSlot, pkgError, addBtn, evBlock,
+      el('div', { class: 'grid-2' }, codField, field(refIn.id, 'Reference', refIn, { optional: true }))));
+    const methodSec = sec('Delivery details', 'neworder-method-section', el('div', { class: 'stack-4' }, boatBlock, cargoBlock, airportBlock, dNoteField));
     function me() { const a = account(); return a ? { name: a.contactName, phone: a.phone } : null; }
     function cancelEditor() { if (n.editor) { n.editor.destroy(); n.editor = null; } n.editing = null; editorSlot.replaceChildren(); addBtn.hidden = false; }
     function syncEditor() {
@@ -1721,8 +1739,16 @@
       n.editing = index;
       // §3.3: a boat, Maldivian Cargo or airport hand-over is a delivery method with its own fee, so the package drop-off is an address
       // only (no cargo terminal, no airport zone; either would add the cargo or airport fee to a home delivery).
-      n.editor = MDM.packageEditor.create({ service: 'business', settings, dropoffKinds: 'address', value: index == null ? null : n.packages[index], first: index !== 0 && n.packages.length ? n.packages[0] : null, me: me(), savedAddresses: [],
-        onSave: pkg => { if (index == null) n.packages.push(pkg); else n.packages[index] = pkg; cancelEditor(); renderPackages(); },
+      // Each size shows this account's rate for its category (client, 31/10/2026: every size read MVR 25, the old flat business rate).
+      const sizePrice = size => { const t = tierChoices().find(x => x.size === size); return t ? t.rate : null; };
+      n.editor = MDM.packageEditor.create({ service: 'business', settings, sizePrice, dropoffKinds: 'address', value: index == null ? null : n.packages[index], first: index !== 0 && n.packages.length ? n.packages[0] : null, me: me(), savedAddresses: [],
+        onSave: pkg => {
+          // A new size in the editor picks its own category again, unless the operator chose one for that size in the list.
+          const was = index == null ? null : n.packages[index];
+          if (was && was.size !== pkg.size) delete n.tiers[was.id];
+          if (index == null) n.packages.push(pkg); else n.packages[index] = pkg;
+          cancelEditor(); renderPackages();
+        },
         onCancel: cancelEditor });
       editorSlot.replaceChildren(n.editor.el);
       // A new package goes to the business's customer, not to the business: the receiver is typed.
@@ -1800,14 +1826,14 @@
     codIn.addEventListener('input', () => renderPackages());
     accountSel.addEventListener('change', () => { n.accountId = accountSel.value; n.tiers = {}; syncTiers(); syncPoints(); cancelEditor(); renderPackages(); });
 
+    // The method first, then the receiver with the packages and their size, then the boat (cargo, airport) details: the order the
+    // office takes a business's boat order in (client, 31/10/2026).
     const body = [
       sec('Account', 'neworder-account-section', accountBlock),
       sec('Collection', 'neworder-collection-section', collectionBlock),
-      sec('Delivery', 'neworder-delivery-section', el('div', { class: 'stack-4' },
-        groupField('Delivery method', el('div', null, methodSeg, methodHint)),
-        homeNote, receiverBlock, boatBlock, cargoBlock, airportBlock)),
-      sec('Packages', 'neworder-packages-section', el('div', { class: 'stack-4' }, list, editorSlot, pkgError, addBtn, evBlock,
-        el('div', { class: 'grid-2' }, codField, field(refIn.id, 'Reference', refIn, { optional: true })))),
+      sec('Delivery', 'neworder-delivery-section', el('div', { class: 'stack-4' }, groupField('Delivery method', el('div', null, methodSeg, methodHint)), homeNote)),
+      packagesSec,
+      methodSec,
       sec('Price', 'neworder-estimate-section', estimate),
     ];
     const createBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'neworder-create', on: { click: () => act(createOrder) } }, 'Create order');

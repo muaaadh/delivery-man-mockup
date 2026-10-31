@@ -112,7 +112,7 @@
   ];
   MDM.REQUEST_TYPES = [
     { value: 'home',         category: 'pick', label: 'Home collection',              hint: 'Collect from a home address' },
-    { value: 'shop_collect', category: 'pick', label: 'Shop or godown collection',    hint: 'Collect what you bought from a shop or warehouse; add the invoice or quotation and the payment slip' },
+    { value: 'shop_collect', category: 'pick', label: 'Shop or godown collection',    hint: 'Collect what you bought from a shop or warehouse; add the invoice, or the quotation and the payment slip' },
     { value: 'postal',       category: 'pick', label: 'Postal & courier collection',  hint: 'Redbox, Pikpost, Post Office, DHL, FedEx and other couriers' },
     { value: 'office',       category: 'pick', label: 'Administrative services',      hint: 'Collect or submit documents at government offices and ministries' },
     { value: 'shop_buy',     category: 'shop', label: 'Shop & deliver',               hint: 'We buy the items on your list and deliver them' },
@@ -211,7 +211,8 @@
   MDM.shopName = sh => (sh && String(sh.name || '').trim()) || 'Any shop';
   MDM.PIKPOST_LOCATIONS = [
     { value: 'velaanaage', label: 'Velaanaage', zone: 'male' }, { value: 'bus_terminal', label: 'Bus Terminal', zone: 'male' },
-    { value: 'museum', label: 'National Museum', zone: 'male' }, { value: 'hm_nirolhu', label: 'Hulhumalé, Nirolhu Magu', zone: 'hulhumale_p1' },
+    { value: 'museum', label: 'National Museum', zone: 'male' }, { value: 'post_building', label: 'Post Building, ground floor', zone: 'male' },
+    { value: 'hm_nirolhu', label: 'Hulhumalé, Nirolhu Magu', zone: 'hulhumale_p1' },
     { value: 'hm_amin', label: 'Hulhumalé, Amin Avenue', zone: 'hulhumale_p1' },
   ];
   MDM.POST_OFFICES = [{ value: 'male_7th', label: 'Post Office, 7th floor (Malé)', zone: 'male' }, { value: 'hulhumale', label: 'Hulhumalé Post Office', zone: 'hulhumale_p1' }];
@@ -802,7 +803,7 @@
       const b = d.boat || {};
       const t = MDM.geo.terminals().find(x => x.value === b.jetty) || MDM.geo.jetties()[0];
       const vessel = ((MDM.VESSEL_TYPES.find(v => v.value === b.vesselType) || {}).label || 'Boat').replace(' (dhoni)', '');
-      return Object.assign(base, { address: t.label + (b.name ? ', ' + vessel.toLowerCase() + ' ' + b.name : ''), zone: t.zone, landmark: [b.island, b.departureTime ? 'departs ' + b.departureTime : ''].filter(Boolean).join(', '), lat: t.point[0], lng: t.point[1], meetAt: '', boat: Object.assign({}, b, { history: undefined }) });
+      return Object.assign(base, { address: (t.unsure ? 'Jetty to be confirmed' : t.label) + (b.name ? ', ' + vessel.toLowerCase() + ' ' + b.name : ''), zone: t.zone, landmark: [b.island, b.departureTime ? 'departs ' + b.departureTime : ''].filter(Boolean).join(', '), lat: t.point[0], lng: t.point[1], meetAt: '', boat: Object.assign({}, b, { history: undefined }) });
     }
     if (method === 'cargo') {
       const c = MDM.geo.cargoCounter();
@@ -964,8 +965,17 @@
     } else if (p.status === 'done') {
       s.status = 'done'; s.at = now(); s.remarks = p.remarks || s.remarks || '';
       if (s.type === 'pickup') {
-        s.proofPhotoId = p.photoId || null;
-        if (p.photoId) o.packages.filter(k => (s.packageIds || [s.packageId]).indexOf(k.id) >= 0).forEach(k => { if (!k.photoId) { k.photoId = p.photoId; k.photoSource = 'driver'; } });
+        // One photo per package (31/10/2026): p.packagePhotos { packageId: fileId }; p.photoId is the stop's first (or only) photo.
+        const perPkg = p.packagePhotos && typeof p.packagePhotos === 'object' ? p.packagePhotos : {};
+        const here = o.packages.filter(k => (s.packageIds || [s.packageId]).indexOf(k.id) >= 0);
+        s.proofPhotoId = p.photoId || here.map(k => perPkg[k.id]).find(Boolean) || null;
+        s.proofPhotoIds = [s.proofPhotoId].concat(here.map(k => perPkg[k.id])).filter((id, i, a) => id && a.indexOf(id) === i);
+        const own = Object.keys(perPkg).length > 0;
+        here.forEach(k => {
+          const f = own ? perPkg[k.id] : p.photoId; if (!f) return;
+          k.collectionPhotoId = f;
+          if (!k.photoId) { k.photoId = f; k.photoSource = 'driver'; }
+        });
         if (p.sizes) applySizes(o, p.sizes, by);
         if (s.shop) {
           // The receipt replaces the budget for the shopping fee: on the package (Shop & Deliver) or on the extra shop stop.
@@ -979,7 +989,7 @@
         const label = s.shop ? 'Shopping done, receipt ' + fmt(s.receiptTotal || 0) : 'Collected from ' + (s.address || 'the collection point');
         if (pickups.every(x => x.status === 'done')) {
           if (o.status === 'dispatched') setStatus(o, 'on_the_way', 'route_started', who + ' is on the way to collect', by);
-          if (o.status === 'on_the_way' || o.status === 'arrived') setStatus(o, 'collected', 'collected', label + (p.photoId ? ', proof photo added' : ''), by, 'public', { stopId });
+          if (o.status === 'on_the_way' || o.status === 'arrived') setStatus(o, 'collected', 'collected', label + (s.proofPhotoIds.length > 1 ? ', ' + s.proofPhotoIds.length + ' proof photos added' : s.proofPhotoId ? ', proof photo added' : ''), by, 'public', { stopId });
           else pushEvent(o, makeEvent('collected', label, by, 'public', { stopId }));
         } else {
           pushEvent(o, makeEvent('collected_partial', label, by, 'public', { stopId }));
@@ -987,7 +997,7 @@
         }
         if (p.remarks) pushEvent(o, makeEvent('note', 'Driver remark: ' + p.remarks, by, 'internal', { stopId }));
         if (Number(p.naalu) > 0) addChargeOn(o, { type: 'naalu', stage: 'collection', amount: p.naalu, description: p.naaluNote || 'Paid at collection', paidBy: 'driver', by });
-        if (MDM.priceToFinalise(o) && pickups.every(x => x.status === 'done')) notifyStaff(o, 'operations', 'Finalise the price', 'collected' + (p.photoId ? ' with a proof of collection photo' : '') + ': confirm the price while it is being delivered');
+        if (MDM.priceToFinalise(o) && pickups.every(x => x.status === 'done')) notifyStaff(o, 'operations', 'Finalise the price', 'collected' + (s.proofPhotoIds.length > 1 ? ' with ' + s.proofPhotoIds.length + ' proof of collection photos' : s.proofPhotoId ? ' with a proof of collection photo' : '') + ': confirm the price while it is being delivered');
       } else {
         s.handedTo = p.handedTo || 'recipient'; s.recipientName = p.recipientName || ''; s.photoId = p.photoId || null; s.confirmed = !!p.confirmed;
         if (Number(p.naalu) > 0) addChargeOn(o, { type: 'naalu', stage: 'delivery', amount: p.naalu, description: p.naaluNote || 'Paid at delivery', paidBy: 'driver', by });
@@ -1139,10 +1149,24 @@
     audit('batch_created', 'Bulk order ' + saved.code + ' with ' + ids.length + ' packages', b.by || ('business:' + acc.id), { batchId: saved.id });
     return clone(saved);
   }
+  // batchCollected(batchId, { orderIds?, note?, by }): orderIds are the packages received (client, 31/10/2026); the others stay awaiting
+  // collection, their timeline says so and the business is told. Without orderIds every package awaiting collection is collected.
   function batchCollected(batchId, p) {
+    p = p || {};
     const batch = readCol('batches').find(x => x.id === batchId); if (!batch) throw new StoreError('not_found', 'Batch not found');
-    readCol('orders').filter(o => o.batchId === batchId && o.status === 'confirmed').forEach(o => { const x = clone(o); ensureRoute(x); x.route.stops.filter(s => s.type === 'pickup').forEach(s => { s.status = 'done'; s.at = now(); }); setStatus(x, 'collected', 'collected', 'Collected, sorting at our hub', p && p.by); save(x); });
-    return update('batches', batchId, { status: 'collected', collectedAt: now() });
+    const waiting = readCol('orders').filter(o => o.batchId === batchId && o.status === 'confirmed');
+    const got = Array.isArray(p.orderIds) ? waiting.filter(o => p.orderIds.indexOf(o.id) >= 0) : waiting;
+    if (waiting.length && !got.length) throw new StoreError('validation', 'Tick at least one package we received');
+    got.forEach(o => { const x = clone(o); ensureRoute(x); x.route.stops.filter(s => s.type === 'pickup').forEach(s => { s.status = 'done'; s.at = now(); }); setStatus(x, 'collected', 'collected', 'Collected, sorting at our hub', p.by); save(x); });
+    const missed = waiting.filter(o => got.indexOf(o) < 0), note = String(p.note || '').trim();
+    if (missed.length) {
+      missed.forEach(o => { const x = clone(o); pushEvent(x, makeEvent('not_received', 'Not received at collection' + (note ? ': ' + note : ''), p.by, 'public')); save(x); });
+      const acc = readCol('business_accounts').find(a => a.id === batch.accountId);
+      if (acc) insert('notifications', { orderId: missed[0].id, code: batch.code, to: acc.phone, name: acc.name, audience: 'business', channel: 'app', event: 'staff_business', title: 'Not received at collection',
+        message: batch.code + ': ' + missed.length + ' of ' + waiting.length + ' packages not received (' + missed.map(o => o.code).join(', ') + ')' + (note ? '. ' + note : ''), status: 'sent', at: now() });
+      audit('batch_partly_collected', batch.code + ': ' + got.length + ' collected, ' + missed.length + ' not received', p.by, { batchId });
+    }
+    return update('batches', batchId, missed.length ? { collectedAt: now() } : { status: 'collected', collectedAt: now() });
   }
   // assignByZone: every package goes to the first active driver of its delivery zone (requirements §10, §16).
   function assignByZone(batchId, p) {

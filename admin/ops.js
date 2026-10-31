@@ -137,6 +137,22 @@
         card(null, list.length ? table(cols, list.map(b => ({ data: b, attrs: { class: 'is-clickable', 'data-testid': 'bulk-row', 'data-batch-id': b.id, on: { click: e => { if (e.target.closest('a, button')) return; location.hash = '#/bulk/' + encodeURIComponent(b.id); } } } })), { testid: 'bulk-table' })
           : empty('No bulk orders yet.', 'Create one, or the business uploads it.')));
     }
+    // Mark collected: the office unticks a package the business did not hand over (client, 31/10/2026). It stays awaiting
+    // collection, the business is told, and Mark collected stays for it.
+    async function markCollected(b, kids, settings) {
+      const waiting = kids.filter(o => o.status === 'confirmed');
+      if (!waiting.length) { await MDM.store.batchCollected(b.id, { by: by() }); toast(b.code + ' collected, packages at the hub'); return; }
+      const line = o => { const p = (o.packages || [])[0] || {}, d = o.delivery || {}; return (o.batchIndex || '') + '. ' + (d.recipientName || o.code) + ' · ' + (p.tier ? tierName(p.tier, settings) : MDM.pricing.sizeLabel(p.size)); };
+      const where = o => { const d = o.delivery || {}; return [o.code, d.method && d.method !== 'home' ? MDM.deliveryMethodLabel(d.method) : '', d.address].filter(Boolean).join(' · '); };
+      const fields = waiting.map(o => ({ name: 'got_' + o.id, label: line(o), type: 'checkbox', value: true, hint: where(o) }));
+      fields.push({ name: 'note', label: 'Note on what was not received', type: 'text', required: false, placeholder: 'Not packed yet, sending tomorrow' });
+      const v = await MDM.ui.dialog({ title: 'Mark ' + b.code + ' collected', message: 'Untick any package we did not receive. It stays awaiting collection and the business is told.', fields, okLabel: 'Mark collected',
+        validate: vals => (waiting.some(o => vals['got_' + o.id]) ? null : { ['got_' + waiting[0].id]: 'Tick the packages we received' }) });
+      if (!v) return;
+      const got = waiting.filter(o => v['got_' + o.id]).map(o => o.id), missing = waiting.length - got.length;
+      await MDM.store.batchCollected(b.id, { by: by(), orderIds: got, note: trim(v.note) });
+      toast(missing ? plural(got.length, 'package') + ' collected, ' + missing + ' not received' : b.code + ' collected, packages at the hub', missing ? 'warn' : 'ok');
+    }
     async function renderDetail() {
       const [b, orders, drivers, zones, settings] = await Promise.all([MDM.store.get('batches', id), MDM.store.list('orders', { order: 'code' }), MDM.store.list('drivers'), MDM.store.list('zones', { order: 'createdAt' }), MDM.store.settings()]);
       const acc = b ? await MDM.store.get('business_accounts', b.accountId) : null;
@@ -153,7 +169,7 @@
       const preferred = b.preferredTime || c.preferredTime || '';
       const actions = [
         el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?batch=' + encodeURIComponent(b.id)), target: '_blank', rel: 'noopener', 'data-testid': 'bulk-labels' }, icon('printer'), 'Print labels'),
-        b.status === 'confirmed' ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-collected', on: { click: () => run(async () => { await MDM.store.batchCollected(b.id, { by: by() }); toast(b.code + ' collected, packages at the hub'); }) } }, 'Mark collected') : null,
+        b.status === 'confirmed' ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-collected', on: { click: () => run(() => markCollected(b, kids, settings)) } }, 'Mark collected') : null,
         unassigned.length ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-zone', on: { click: () => run(async () => { const r = await MDM.store.assignByZone(b.id, { by: by() }); toast(plural(r.assigned, 'package') + ' assigned by zone' + (r.unmatched ? ', ' + r.unmatched + ' with no zone driver' : ''), r.unmatched ? 'warn' : 'ok'); }) } }, 'Assign by zone') : null,
         toDispatch.length ? el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'bulk-dispatch', on: { click: () => run(async () => { for (const o of toDispatch) await MDM.store.dispatch(o.id, { by: by() }); toast(plural(toDispatch.length, 'package') + ' out for delivery'); }) } }, 'Dispatch ' + plural(toDispatch.length, 'package')) : null,
       ];

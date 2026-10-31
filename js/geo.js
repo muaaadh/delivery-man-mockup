@@ -32,6 +32,8 @@
     { value: 'villimale_ferry', label: 'Villimalé ferry terminal', zone: 'villimale', point: [4.1745, 73.4870] },
     { value: 'mpl_harbour', label: 'MPL commercial harbour', zone: 'male', point: [4.1710, 73.5060] },
     { value: 'male_jetties', label: 'Malé jetties 1 to 5 (speedboats)', zone: 'male', point: [4.1781, 73.5132] },
+    // Last in every jetty list: the customer does not know, our team checks with them (client, 31/10/2026). Priced and mapped as Malé.
+    { value: 'unsure', label: 'Not sure, kindly assist in checking', zone: 'male', point: [4.1790, 73.5090], unsure: true },
     { value: 'maldivian_cargo', label: 'Maldivian Cargo counter, main bus terminal', zone: 'male', point: [4.1773, 73.5066], cargo: true },
   ];
   const AIRPORT_POINTS = [

@@ -31,7 +31,7 @@
     notesRead: q('[data-testid="driver-notes-read"]'), notesMore: q('[data-testid="driver-notes-more"]'), notesFoot: q('.driver-notes__foot'),
     cash: q('[data-testid="driver-cash"]'), cashTitle: q('[data-testid="driver-cash-title"]'), cashNote: q('[data-testid="driver-cash-note"]'),
     cashList: q('[data-testid="driver-cash-list"]'), cashPending: q('[data-testid="driver-cash-pending"]'), cashOwed: q('[data-testid="driver-cash-owed"]'),
-    signedIn: q('[data-testid="driver-signed-in"]'), switchBtn: q('[data-testid="driver-switch"]'), me: q('[data-testid="driver-me"]'),
+    signedIn: q('[data-testid="driver-signed-in"]'), switchBtn: q('[data-testid="driver-switch"]'), signOutBtn: q('[data-testid="driver-signout"]'), me: q('[data-testid="driver-me"]'),
     jobsSection: q('[data-testid="driver-jobs-section"]'), jobs: q('#driver-jobs'), summary: q('[data-testid="driver-route-summary"]'),
     mapSection: q('[data-testid="driver-map-section"]'), mapEl: q('#driver-map'), recenter: q('[data-testid="driver-recenter"]'),
   };
@@ -89,7 +89,7 @@
     return d === today ? 'Today' : d === tomorrow ? 'Tomorrow' : MDM.ui.fmtDate(d + 'T00:00', { time: false });
   }
   const departText = (date, time) => [dayText(date), time ? (date ? 'at ' : '') + time : ''].filter(Boolean).join(' ');
-  const terminalLabel = v => ((MDM.geo.terminals().find(t => t.value === v) || {}).label) || v || '';
+  const terminalLabel = v => { const t = MDM.geo.terminals().find(x => x.value === v); return t && t.unsure ? 'Not confirmed yet, ask the office' : (t || {}).label || v || ''; };
   const vesselLabel = v => optLabel(MDM.VESSEL_TYPES, v) || 'Boat';
   const isBoatJob = o => !!(o.delivery && o.delivery.method === 'boat' && ['delivered', 'cancelled', 'returned'].indexOf(o.status) < 0);
   // Delivery method details (§3.2 to §3.4) the driver needs at the jetty, the cargo counter or the airport.
@@ -103,7 +103,8 @@
       add('Harbour or jetty', terminalLabel(b.jetty));
       add('Island', b.island);
       add('Destination address', b.address);
-      add('Receiver', personNodes(d.recipientName, b.contact || d.recipientPhone));
+      add('Receiver', personNodes(d.recipientName, d.recipientPhone));
+      if (b.contact && MDM.ui.phone.normalize(b.contact) !== MDM.ui.phone.normalize(d.recipientPhone)) add('Boat contact', personNodes('', b.contact));
     } else if (d.method === 'cargo') {
       const c = d.cargo || {};
       add('Drop at', c.counter || MDM.geo.cargoCounter().label);
@@ -525,6 +526,7 @@
     ui.jobsSection.hidden = !d;
     ui.mapSection.hidden = !d;
     ui.me.hidden = !d;
+    ui.signOutBtn.hidden = !d;
     if (!d) { ui.cash.hidden = true; ui.notes.hidden = true; return; }
     ui.name.textContent = d.name;
     const worked = minutesWorked();
@@ -989,10 +991,14 @@
     // stop has no package of its own yet (it is packed with the rest), so it only needs a photo of what was collected.
     const photoHint = stop.collectionId && !stop.shop ? 'What you collected, packed with the rest.'
       : MDM.priceAfterCollection(o) ? 'The office prices the order from this photo.' : 'The office uses it to confirm the price.';
-    fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: photoHint, requiredMessage: 'Take a photo of the package' });
+    // A photo of each package, next to its category (client, 31/10/2026). A stop with no package of its own keeps one photo.
+    const sizeOptions = Object.keys(MDM.pricing.SIZES).map(k => ({ value: k, label: MDM.pricing.SIZES[k] }));
+    const several = pkgs.length > 1;
+    if (!several) fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: photoHint, requiredMessage: 'Take a photo of the package' });
     pkgs.forEach((p, i) => {
-      const n = pkgs.length > 1 ? ' ' + (i + 1) : '';
-      fields.push({ name: 'size_' + i, label: 'Package' + n + ' category', type: 'segmented', required: true, value: p.size, options: Object.keys(MDM.pricing.SIZES).map(k => ({ value: k, label: MDM.pricing.SIZES[k] })),
+      if (several) fields.push({ name: 'photo_' + i, label: 'Photo', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo',
+        hint: i === 0 ? photoHint : null, requiredMessage: 'Take a photo of package ' + (i + 1) });
+      fields.push({ name: 'size_' + i, label: several ? 'Category' : 'Package category', type: 'segmented', required: true, value: p.size, options: sizeOptions,
         hint: i === pkgs.length - 1 ? 'Change it if it does not fit. No measuring.' : null });
     });
     fields.push({ name: 'naalu', label: 'Naalu paid at collection (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
@@ -1002,12 +1008,17 @@
     const p = MDM.ui.dialog({ title: stop.shop ? 'Shopping done' : 'Collected', message: o.code + ' · ' + addressText(o, stop), fields,
       validate: amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note'), okLabel: 'Confirm collection' });
     dialogHeading('naalu', 'Paid at collection');
+    if (several) pkgs.forEach((p, i) => dialogHeading('photo_' + i, 'Package ' + (i + 1) + (p.description ? ' · ' + p.description : '')));
     const v = await p;
     if (!v || !(await stillYours(o))) return;
     btn.disabled = true;
     const patch = { status: 'done', by: by(), remarks: v.remarks || '' };
     try {
       if (v.photo) patch.photoId = await storePhoto(v.photo, 'proof_collection', o.id);
+      const photos = {};
+      if (pkgs.length === 1 && patch.photoId) photos[pkgs[0].id] = patch.photoId;
+      for (let i = 0; several && i < pkgs.length; i++) if (v['photo_' + i]) photos[pkgs[i].id] = await storePhoto(v['photo_' + i], 'proof_collection', o.id);
+      if (Object.keys(photos).length) { patch.packagePhotos = photos; if (!patch.photoId) patch.photoId = photos[pkgs.find(k => photos[k.id]).id]; }
       if (stop.shop) { patch.receiptTotal = v.receiptTotal; patch.receiptPhotoId = await storePhoto(v.receiptPhoto, 'receipt', o.id); if (!patch.photoId) patch.photoId = patch.receiptPhotoId; }
     } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; }
     const sizes = {};
@@ -1169,6 +1180,20 @@
     if (!id) ui.select.focus();
   }
 
+  // Sign out (client, 31/10/2026): office phones are shared between shifts, often from the home-screen app with no address bar. The
+  // driver goes offline first; on the live service the sign-in ends and the next driver signs in with their own email. The demo goes
+  // back to "Who is driving?".
+  async function signOut() {
+    const d = state.driver;
+    if (!d) return;
+    const ok = await MDM.ui.confirm({ title: 'Sign out', okLabel: 'Sign out',
+      message: (state.shift ? 'You are still on duty: punch out first if your shift has ended. ' : '') + 'You go offline and the next driver signs in with their own account.' });
+    if (!ok) return;
+    if (state.online) await setOnline(false).catch(() => {});
+    if (MDM.auth) { await MDM.auth.signOut(); location.replace(MDM.href('login/?as=driver')); return; }
+    await selectDriver('');
+  }
+
   // ---- Render -------------------------------------------------------------------------------------------------------------------------
   async function render() {
     const seq = ++state.renderSeq;
@@ -1240,7 +1265,8 @@
     buildLeaveForm();
     ui.notesRead.addEventListener('click', markAllRead);
     ui.notesMore.addEventListener('click', () => { state.notesAll = !state.notesAll; renderNotes(); });
-    ui.switchBtn.addEventListener('click', () => { selectDriver('').catch(e => { setTimeout(() => { throw e; }, 0); }); });
+    ui.switchBtn.addEventListener('click', () => { signOut().catch(e => fail(e, 'Could not sign out')); });
+    ui.signOutBtn.addEventListener('click', () => { signOut().catch(e => fail(e, 'Could not sign out')); });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.online) keepAwake(); });
     window.addEventListener('storage', e => { if (e.key === READ_KEY) renderNotes(); });
     const WATCH = ['orders', 'drivers', 'attendance', 'leaves', 'staff', 'batches', 'notifications'];

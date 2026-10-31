@@ -134,14 +134,15 @@
   const couriers = () => MDM.couriers(settings);
   const otherCourier = () => draft.details.carrier === 'courier' && draft.details.courierName === MDM.OTHER_COURIER;
   // postalKeys() → the details fields the chosen carrier asks for; fields typed for another carrier stay in the draft (so switching
-  // back keeps them) but never reach the review or the order. Every carrier asks for the tracking number (§1.1); the SMS collection
-  // code and collect-before time are extra fields where the carrier sends them. 'Other courier' adds the courier's name and office.
+  // back keeps them) but never reach the review or the order. Every carrier asks for the tracking number (§1.1), optional for Redbox
+  // (Maafannu) and Pikpost, whose SMS collection code and collect-before time are enough (31/10/2026). 'Other courier' adds the
+  // courier's name and office.
   function postalKeys() {
     const d = draft.details, noCode = !trim(d.collectionCode);
     return ({
-      redbox_maafannu: ['trackingNo', 'collectionCode', 'collectBefore'],
+      redbox_maafannu: ['collectionCode', 'collectBefore', 'trackingNo'],
       redbox_main: ['trackingNo', 'ownerName', 'shippingAddress', 'ownerContact'],
-      pikpost: ['location', 'trackingNo', 'collectionCode', 'collectBefore'],
+      pikpost: ['location', 'collectionCode', 'collectBefore', 'trackingNo'],
       post_office: ['postOffice', 'trackingNo', 'collectionCode'].concat(noCode ? ['idSent', 'ownerName', 'ownerContact', 'shippingAddress'] : []),
       courier: ['courierName'].concat(otherCourier() ? ['courierOther', 'courierAddress', 'courierZone'] : [], ['trackingNo', 'ownerName', 'ownerContact']),
       dhl: ['trackingNo'],
@@ -738,10 +739,11 @@
     if (t === 'postal') {
       out.push(carrierField(n));
       const c = d.carrier;
-      const tracking = label => F(n, 'details.trackingNo', label || 'Tracking number', { required: true, testid: 'request-tracking-no' });
-      if (c === 'redbox_maafannu') out.push(tracking(), grid(F(n, 'details.collectionCode', 'Collection code', { required: true, placeholder: 'From the Redbox SMS' }), F(n, 'details.collectBefore', 'Collect before', { type: 'datetime-local', required: true, hint: 'The time in the SMS' })));
+      // Redbox (Maafannu) and Pikpost: the SMS collection code and time come first, the tracking number is optional (client, 31/10/2026).
+      const tracking = (label, optional) => F(n, 'details.trackingNo', label || 'Tracking number', { required: !optional, testid: 'request-tracking-no' });
+      if (c === 'redbox_maafannu') out.push(grid(F(n, 'details.collectionCode', 'Collection code', { required: true, placeholder: 'From the Redbox SMS' }), F(n, 'details.collectBefore', 'Collect before', { type: 'datetime-local', required: true, hint: 'The time in the SMS' })), tracking(null, true));
       if (c === 'redbox_main') out.push(grid(tracking(), F(n, 'details.ownerName', 'Owner name', { required: true })), F(n, 'details.shippingAddress', 'Shipping address on the parcel', { required: true }), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true }));
-      if (c === 'pikpost') out.push(F(n, 'details.location', 'Pikpost location', { type: 'select', placeholder: 'Choose a location', required: true, options: MDM.PIKPOST_LOCATIONS, onChange: dictate }), tracking(), grid(F(n, 'details.collectionCode', 'Collection code', { required: true }), F(n, 'details.collectBefore', 'Collect before (SMS time)', { type: 'datetime-local', required: true })));
+      if (c === 'pikpost') out.push(F(n, 'details.location', 'Pikpost location', { type: 'select', placeholder: 'Choose a location', required: true, options: MDM.PIKPOST_LOCATIONS, onChange: dictate }), grid(F(n, 'details.collectionCode', 'Collection code', { required: true }), F(n, 'details.collectBefore', 'Collect before (SMS time)', { type: 'datetime-local', required: true })), tracking(null, true));
       if (c === 'post_office') {
         out.push(F(n, 'details.postOffice', 'Post office', { type: 'select', placeholder: 'Choose a post office', required: true, options: MDM.POST_OFFICES, onChange: dictate }), tracking(),
           F(n, 'details.collectionCode', 'Collection code', { hint: 'No code? Leave it empty and add the owner.', onChange:v => { if (!trim(v) !== !!dom.steps[n].querySelector('[data-testid="request-id-sent"]')) rerender(n); } }));
@@ -762,8 +764,9 @@
         grid(F(n, 'details.shopAddress', 'Shop or godown address', { required: true, placeholder: 'Building name, street', testid: 'request-shop-address', onChange: dictate }),
           F(n, 'details.shopZone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: 'request-shop-zone', onChange: dictate })),
         seg(n, 'details.proof', 'Proof from the shop', SHOP_PROOF, { testid: 'request-proof', onChange: () => { saveDraft(); rerender(n); updateSummary(); } }),
+        // An invoice shows it is paid; only a quotation needs the payment slip (client, 31/10/2026).
         d.proof === 'quotation' ? docField(n, 'quotation', 'Quotation', { required: true }) : docField(n, 'invoice', 'Invoice', { required: true }),
-        docField(n, 'payment_slip', 'Payment slip', { required: true }),
+        d.proof === 'quotation' ? docField(n, 'payment_slip', 'Payment slip', { required: true }) : null,
         F(n, 'details.orderNo', 'Order number', { placeholder: 'If the shop gave you one', testid: 'request-order-no' }));
     }
     if (t === 'office') {
@@ -774,7 +777,7 @@
         docField(n, 'document', 'Documents', { multiple: true, hint: 'Upload copies. We collect the originals.' }),
         check(n, 'details.returnDocs', OFFICE ? 'Bring the receipt or documents back' : 'Bring the receipt or documents back to me'));
     }
-    return out;
+    return out.filter(Boolean);
   }
   function scheduleFields(n) {
     const out = [seg(n, 'level', 'When', MDM.SERVICE_LEVELS.map(l => ({ value: l.value, label: l.label })), { testid: 'request-level', onChange: () => { saveDraft(); rerender(n); updateSummary(); } })];
@@ -1064,7 +1067,7 @@
     const t = draft.type, d = draft.details;
     if (isShop()) return false;
     if (t === 'postal') return d.carrier === 'dhl' && kind === 'collection_doc';
-    if (t === 'shop_collect') return kind === 'payment_slip' || kind === (d.proof === 'quotation' ? 'quotation' : 'invoice');
+    if (t === 'shop_collect') return d.proof === 'quotation' ? kind === 'quotation' || kind === 'payment_slip' : kind === 'invoice';
     if (t === 'office') return kind === 'document';
     return false;
   }
@@ -1086,7 +1089,7 @@
       if (has('ownerContact')) add('Owner contact', d.ownerContact ? phone.format(d.ownerContact) : '');
       if (has('shippingAddress')) add('Shipping address', d.shippingAddress);
     }
-    if (t === 'shop_collect') { add('Shop or godown', [d.shopName, d.shopAddress].filter(trim).join(', ')); add('Proof', d.proof === 'quotation' ? 'Quotation and payment slip' : 'Invoice and payment slip'); add('Order number', d.orderNo); }
+    if (t === 'shop_collect') { add('Shop or godown', [d.shopName, d.shopAddress].filter(trim).join(', ')); add('Proof', d.proof === 'quotation' ? 'Quotation and payment slip' : 'Invoice'); add('Order number', d.orderNo); }
     if (t === 'office') { add('Office or ministry', d.organisation); add('Task', (MDM.OFFICE_TASKS.find(x => x.value === d.task) || {}).label); add('References', d.reference); add('Details', d.details); if (d.returnDocs) add('Return', 'Bring the receipt or documents back'); }
     const docs = draft.docs.filter(x => relevantDoc(x.kind));
     if (docs.length) rows.push(reviewRow('Documents', docs.map(x => x.name).join(', ')));

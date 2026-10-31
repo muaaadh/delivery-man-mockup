@@ -1,6 +1,9 @@
 /* Driver console: one centred column, max 560px, phone-first like a native app. Components come from base.css; this file lays them out. */
 body.page-driver main .container > .driver { max-width: 560px; margin: 0 auto; padding-bottom: 48px; }   /* not the map legend's i.driver swatch */
 body.page-driver .driver__head { margin-bottom: 20px; }
+/* Sign out stays beside the title on a phone too: office phones are shared between shifts (31/10/2026). */
+body.page-driver .driver__head { grid-template-columns: minmax(0, 1fr) auto; }
+body.page-driver .driver__head .page-head__actions { grid-column: 2; grid-row: 1; margin-top: 0; align-self: start; }
 body.page-driver .driver-card-title { font-size: 17px; font-weight: 600; line-height: 1.3; }
 body.page-driver .driver-card-sub { font-size: 15px; font-weight: 600; }
 body.page-driver .driver-pick .field { margin-top: 12px; }

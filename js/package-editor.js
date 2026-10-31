@@ -244,7 +244,10 @@
       body.append(field('description', 'Name this run', descriptionEl, { optional: true, hint: 'Shown on your order, for example Electronics' }));
     }
 
-    if (service === 'business') {
+    // opts.sizePrice(size) → the business's rate for that size's category: the size sets the category, so the old "Under 1 ft" flat
+    // business rate tick is not asked.
+    const sizePrice = service === 'business' && typeof opts.sizePrice === 'function' ? opts.sizePrice : null;
+    if (service === 'business' && !sizePrice) {
       underOneFt = checkbox('under-one-ft', 'Under 1 ft', value ? value.underOneFt !== false : true, 'Business rate applies within Malé and Hulhumalé');
       body.append(underOneFt.el);
     }
@@ -287,7 +290,8 @@
       const pz = pickupZone(), dz = dropZone();
       SIZES.forEach(s => {
         let price = MDM.pricing.sizePriceLabel(s, pz, dz, settings);
-        if (service === 'business' && underOneFt && underOneFt.input.checked && ['male', 'hulhumale'].includes(MDM.geo.island(pz)) && ['male', 'hulhumale'].includes(MDM.geo.island(dz))) price = MDM.pricing.format(rates.business);
+        if (sizePrice) { const r = sizePrice(s); if (r != null) price = MDM.pricing.format(r); }
+        else if (service === 'business' && underOneFt && underOneFt.input.checked && ['male', 'hulhumale'].includes(MDM.geo.island(pz)) && ['male', 'hulhumale'].includes(MDM.geo.island(dz))) price = MDM.pricing.format(rates.business);
         sizeSeg.setLabel(s, MDM.pricing.sizeLabel(s) + ' · ' + price);
       });
       const guide = (settings.sizeGuide || {})[sizeSeg.value() || 'bag'] || '';
@@ -353,7 +357,7 @@
         shop: service === 'shop' ? { name: trim(shop.name.value), zone: shop.zone.value || 'male', address: trim(shop.address.value), list: trim(shop.list.value), budget: Math.round(Number(trim(budgetEl.value)) || 0), unavailable: unavailableSeg.value() || 'call' } : null,
         notes: trim(notesEl.value),
       };
-      if (service === 'business') pkg.underOneFt = underOneFt.input.checked;
+      if (service === 'business') pkg.underOneFt = underOneFt ? underOneFt.input.checked : pkg.size === 'bag';
       if (service === 'shop' && !pkg.description) pkg.description = 'Shopping at ' + pkg.shop.name;
       return pkg;
     }

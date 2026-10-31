@@ -102,7 +102,7 @@
   const allTiers = () => MDM.pricing.businessTiers(state.settings);
   const tierInfo = v => allTiers().find(t => t.value === v) || null;
   const vesselLabel = v => ((MDM.VESSEL_TYPES.find(x => x.value === v) || {}).label || 'Boat');
-  const jettyLabel = v => ((MDM.geo.terminals().find(t => t.value === v) || {}).label || '');
+  const jettyLabel = v => (v === 'unsure' ? 'Jetty to be confirmed' : (MDM.geo.terminals().find(t => t.value === v) || {}).label || '');
   const airportLabel = v => ((MDM.geo.airportPoints().find(p => p.value === v) || {}).label || '');
   function ratesLine(acc) { return tiersOf(acc).map(t => t.label + ' ' + money(t.rate)).join(' · '); }
   // "Medium · MVR 35" (or "2 × Medium · MVR 70"); older orders without a size category show the package size.
