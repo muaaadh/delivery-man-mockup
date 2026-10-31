@@ -591,7 +591,7 @@ Settings (`mdm:v1:settings`):
         businessReplyText:'within 1 working day', slotStart:'09:00', slotEnd:'23:00', slotMinutes:120, speedCityKmh:18, speedHighwayKmh:40, peakBufferMin:10,
         peakWindows:['08:00-09:30','17:00-19:30'], closedWindows:['Fri 12:00-13:30'] },
   banks:[ { id:'bml', name:'Bank of Maldives', accountName:'Mr. Delivery Man', accountNo:'7730 0000 12345' }, { id:'mib', name:'Maldives Islamic Bank', accountName:'Mr. Delivery Man', accountNo:'9010 0000 67890' } ],
-  contact:{ phone:'7770000', whatsapp:'7770000', viber:'7770000', email:'hello@example.com' },   // demo values, edited in Admin → Settings
+  contact:{ phone:'9388007', whatsapp:'9388007', viber:'9388007', email:'hello@example.com' },   // Mr. Delivery Man's number (email still a placeholder), edited in Admin → Settings
   terms:"We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.",
   notice:{ text:'', active:false }, invoiceDueDays:14, gstPercent:0, demo:{ autopilot:true } }
 ```

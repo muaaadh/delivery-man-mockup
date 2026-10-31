@@ -19,7 +19,7 @@
       sizeGuide: { bag: 'Fits in a carrier bag, under about 1 ft (30 cm): documents, small parcels', box: 'A carton up to about 2 ft (60 cm) a side, strapped on the bike', xl: 'Bigger than a box or needs two hands; may need a vehicle, price confirmed first' },
       ops: { hours: { open: '09:00', close: '23:00' }, days: 'Every day', asapText: 'Usually within 60 to 90 minutes in Malé and Hulhumalé', reviewText: 'about 30 minutes', businessReplyText: 'within 3 working hours', slotStart: '09:00', slotEnd: '23:00', slotMinutes: 120, speedCityKmh: 18, speedHighwayKmh: 40, peakBufferMin: 10, peakWindows: ['08:00-09:30', '17:00-19:30'], closedWindows: ['Fri 12:00-13:30'] },
       banks: MDM.DEFAULT_BANKS.map(x => Object.assign({}, x)),
-      contact: { phone: '7770000', whatsapp: '7770000', viber: '7770000', email: 'hello@example.com' },
+      contact: { phone: '9388007', whatsapp: '9388007', viber: '9388007', email: 'hello@example.com' },
       terms: "We don't carry items prohibited under Maldives law or cash. Fragile items travel at the sender's risk unless they are boxed.",
       notice: { text: 'Sinamalé Bridge closed to motorcycles during heavy rain, Hulhumalé deliveries may be delayed', active: false },
       invoiceDueDays: 14, gstPercent: 0, demo: { autopilot: true },
@@ -486,7 +486,7 @@
     products.forEach(p => { p.createdAt = t(days(30)); p.updatedAt = t(days(2)); });
     order({ code: 'MDM-1056', type: 'store', service: 'store', customer: C.zeena, steps: [['requested', 16, 'customer', 'E-store order placed: 2 items'], ['confirmed', 16, 'system', 'Order confirmed']],
       items: [{ productId: 'prd_mailer', name: 'Bubble mailers, pack of 5', unit: 'pack', qty: 2, price: 35, total: 70 }, { productId: 'prd_tape', name: 'Packing tape', unit: 'roll', qty: 1, price: 25, total: 25 }],
-      packages: [pkg({ size: 'bag', description: '2 × Bubble mailers, 1 × Packing tape', pickup: { address: settings.store.address, zone: 'male' }, pickupContact: { name: 'Mr. Delivery Man store', phone: '7770000' }, dropoff: A.handhuvaree, recipient: { name: 'Fathimath Zeena', phone: '7654321' } })] });
+      packages: [pkg({ size: 'bag', description: '2 × Bubble mailers, 1 × Packing tape', pickup: { address: settings.store.address, zone: 'male' }, pickupContact: { name: 'Mr. Delivery Man store', phone: '9388007' }, dropoff: A.handhuvaree, recipient: { name: 'Fathimath Zeena', phone: '7654321' } })] });
     const o1056 = orders[orders.length - 1];
     o1056.totals.items = 95; o1056.totals.total += 95; o1056.estimate = { min: o1056.totals.total, max: o1056.totals.total, exact: o1056.totals.total };
 
