@@ -14,6 +14,9 @@
   const ZONE_ORDER = () => MDM.geo.ZONE_LIST.map(z => z.key).concat(['other']);
 
   function trackUrl(code) { return new URL(MDM.href('track/?code=' + encodeURIComponent(code)), location.href).href; }
+  // The QR opens the shared tracking link: on the live service that is the code plus the order's secret (MDM.remote.trackLink), so
+  // a recipient who scans it sees the order without signing in. The printed address stays the short code-only one.
+  const scanUrl = o => MDM.remote && MDM.remote.trackLink && o.trackToken ? new URL(MDM.remote.trackLink(o), location.href).href : trackUrl(o.code);
   // QR as crisp SVG modules; without the CDN library the label still carries the code and the tracking address in text.
   function qrSvg(text) {
     if (typeof window.qrcode !== 'function') return null;
@@ -89,7 +92,7 @@
     const fromPhone = (pick.contact && pick.contact.phone) || col.contactPhone || o.customer.phone;
     const zone = drop.zone || deliv.zone || 'male';
     const zoneObj = MDM.geo.zone(zone) || {};
-    const qr = qrSvg(trackUrl(o.code));
+    const qr = qrSvg(scanUrl(o));
     const batch = ctx.batch;
     const flags = serviceFlags(o);
     const ret = isReturn(o);

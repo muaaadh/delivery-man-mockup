@@ -1628,7 +1628,9 @@
     ['orders', 'batches', 'invoices', 'business_accounts'].forEach(c => MDM.store.subscribe(c, refresh));
     MDM.store.subscribe('settings', () => { if (!state.acc) render(); });
     MDM.store.subscribe('*', msg => { if (msg && msg.op === 'reset') { state.received = null; state.done = { order: null, batch: null, excel: null }; bulk.rows = []; excel.rows = []; panel = null; render(); } });
-    window.addEventListener('storage', e => { if (e.key === SESSION) { panel = null; render(); } });
+    // Another tab signed in or out. On the live service js/remote.js reloads this page for the new sign-in; acting on it here first
+    // would look the new account up in this tab's old data, miss it and sign the new account out.
+    window.addEventListener('storage', e => { if (e.key === SESSION && !MDM.auth) { panel = null; render(); } });
   }
   main();
 })(window.MDM);

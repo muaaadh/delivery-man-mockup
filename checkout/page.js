@@ -282,8 +282,11 @@
     const isPdf = slip.type === 'application/pdf';
     const actions = [];
     if (isPdf) {
-      state.objectUrl = URL.createObjectURL(dataUrlToBlob(slip.dataUrl));
-      actions.push(el('a', { class: 'btn btn--ghost btn--sm', href: state.objectUrl, target: '_blank', rel: 'noopener', 'data-testid': 'checkout-slip-open' }, 'Open'));
+      // A slip saved earlier comes back as a signed link on the live service (or none yet): that link opens as it is.
+      const src = slip.dataUrl || '';
+      let href = /^data:/.test(src) ? null : src;
+      if (/^data:/.test(src)) { try { state.objectUrl = URL.createObjectURL(dataUrlToBlob(src)); href = state.objectUrl; } catch (e) { href = null; } }
+      if (href) actions.push(el('a', { class: 'btn btn--ghost btn--sm', href, target: '_blank', rel: 'noopener', 'data-testid': 'checkout-slip-open' }, 'Open'));
     }
     actions.push(el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'checkout-slip-remove', on: { click: removeSlip } }, 'Remove'));
     return el('div', { class: 'dropzone__preview', 'data-testid': 'checkout-slip-preview', 'data-type': slip.type },

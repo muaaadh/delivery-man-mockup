@@ -502,7 +502,7 @@
   }
   MDM.byName = byName;
   // Audit entries that are not tied to one order (settings, HR, products, zones) go straight into the events log.
-  function audit(type, label, by, extra) { insert('events', Object.assign({ orderId: null, code: null, at: now(), type, label, by: by || 'system', visibility: 'internal' }, extra || {})); }
+  function audit(type, label, by, extra) { insert('events', Object.assign({ orderId: null, code: null, at: now() }, extra || {}, { type, label, by: by || 'system', visibility: 'internal' })); }
   function orderOrThrow(id) { const o = readCol('orders').find(x => x.id === id); if (!o) throw new StoreError('not_found', 'Order not found'); return clone(o); }
   function makeEvent(type, label, by, visibility, meta_) { return { id: MDM.id('evt'), at: now(), type, label, by: by || 'system', visibility: visibility || 'internal', meta: meta_ || null }; }
   function pushEvent(order, ev) {
@@ -602,7 +602,7 @@
     // Delivered before the price was set (price after collection): the invoice that waited for it goes out now.
     if (o.status === 'delivered' && o.payment.status === 'pending') requestPaymentOn(o, q.by, false);
     // A slip the customer already sent stays to verify: a corrected price does not ask them to pay again.
-    else if ((q.requestPayment || o.payment.upfrontRequired) && o.payment.status !== 'received') requestPaymentOn(o, q.by, o.status !== 'delivered');
+    else if ((q.requestPayment || o.payment.upfrontRequired) && ['received', 'paid', 'refunded'].indexOf(o.payment.status) < 0) requestPaymentOn(o, q.by, o.status !== 'delivered');
     else invoiceFollows(o, before, q.by);
     return save(o);
   }
@@ -954,6 +954,7 @@
     const s = o.route.stops.find(x => x.id === stopId); if (!s) throw new StoreError('not_found', 'Stop not found');
     // A finished order takes no more stop actions; the one exception is bringing a cancelled order's package back (a return stop).
     if (['cancelled', 'delivered', 'returned'].indexOf(o.status) >= 0 && !(o.status === 'cancelled' && s.type === 'return')) throw new StoreError('transition', 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase());
+    if (s.status === 'done' || s.status === 'skipped') throw new StoreError('transition', 'This stop is already ' + (s.status === 'done' ? 'done' : 'closed'));
     const by = p.by || ('driver:' + (o.driverId || ''));
     const who = driverName(o.driverId);
     if (p.status === 'arrived') {
@@ -999,6 +1000,9 @@
         if (Number(p.naalu) > 0) addChargeOn(o, { type: 'naalu', stage: 'collection', amount: p.naalu, description: p.naaluNote || 'Paid at collection', paidBy: 'driver', by });
         if (MDM.priceToFinalise(o) && pickups.every(x => x.status === 'done')) notifyStaff(o, 'operations', 'Finalise the price', 'collected' + (s.proofPhotoIds.length > 1 ? ' with ' + s.proofPhotoIds.length + ' proof of collection photos' : s.proofPhotoId ? ' with a proof of collection photo' : '') + ': confirm the price while it is being delivered');
       } else {
+        // Cash on delivery: handing the package over says how much cash came back (0 when none), as the driver's and the office's forms ask.
+        if (s.type !== 'return' && o.cod && o.cod.amount > 0 && o.cod.status === 'pending' && (p.cashCollected == null || p.cashCollected === '' || !(Number(p.cashCollected) >= 0)))
+          throw new StoreError('validation', 'Enter the cash collected, 0 if the receiver did not pay');
         s.handedTo = p.handedTo || 'recipient'; s.recipientName = p.recipientName || ''; s.photoId = p.photoId || null; s.confirmed = !!p.confirmed;
         if (Number(p.naalu) > 0) addChargeOn(o, { type: 'naalu', stage: 'delivery', amount: p.naalu, description: p.naaluNote || 'Paid at delivery', paidBy: 'driver', by });
         if (Number(p.packing) > 0) addChargeOn(o, { type: 'packing', stage: 'delivery', amount: p.packing, description: p.packingNote || 'Packing at delivery', paidBy: 'driver', billable: true, by });
@@ -1073,7 +1077,7 @@
     const failed = (o.route && o.route.stops || []).filter(x => x.status === 'failed');
     const by = p.by || 'admin';
     const resetFailed = () => failed.forEach(s => { s.status = 'pending'; s.attempts = (s.attempts || 0) + 1; s.failReason = null; s.failedAt = null; });
-    const backTo = () => { const anyPickupDone = o.route.stops.some(s => s.type === 'pickup' && s.status === 'done'); return anyPickupDone ? 'collected' : 'dispatched'; };
+    const backTo = () => { const pickups = o.route.stops.filter(s => s.type === 'pickup'), done = pickups.filter(s => s.status === 'done').length; return pickups.length && done === pickups.length ? 'collected' : done ? 'on_the_way' : 'dispatched'; };
     if (p.action === 'reschedule') {
       resetFailed();
       o.schedule = Object.assign({}, o.schedule, { rescheduledFor: p.when || '' });
@@ -1201,7 +1205,19 @@
   function createStoreOrder(o) {
     const s = settings();
     const products = readCol('products');
-    const items = (o.items || []).map(it => { const p = products.find(x => x.id === it.productId); if (!p) throw new StoreError('validation', 'A product is no longer available'); if (p.stock != null && p.stock < it.qty) throw new StoreError('validation', p.name + ': only ' + p.stock + ' left'); return { productId: p.id, name: p.name, unit: p.unit || '', qty: it.qty, price: p.price, total: p.price * it.qty }; });
+    // Whole quantities only, and a product listed twice counts once with both quantities, so the stock check sees the real number.
+    const wanted = new Map();
+    (o.items || []).forEach(it => {
+      const qty = Number(it && it.qty);
+      if (!Number.isInteger(qty) || qty < 1) throw new StoreError('validation', 'Choose how many you want');
+      wanted.set(it.productId, (wanted.get(it.productId) || 0) + qty);
+    });
+    const items = Array.from(wanted, ([productId, qty]) => {
+      const p = products.find(x => x.id === productId);
+      if (!p || p.active === false) throw new StoreError('validation', 'A product is no longer available');
+      if (qty > (p.stock != null ? p.stock : 99)) throw new StoreError('validation', p.stock != null ? p.name + ': only ' + p.stock + ' left' : p.name + ': at most 99 at a time');
+      return { productId: p.id, name: p.name, unit: p.unit || '', qty, price: p.price, total: p.price * qty };
+    });
     if (!items.length) throw new StoreError('validation', 'Your cart is empty');
     const store = s.store || {};
     const pkg = { id: MDM.id('pkg'), size: items.reduce((n, i) => n + i.qty, 0) > 6 ? 'box' : 'bag', description: items.map(i => i.qty + ' × ' + i.name).join(', '), pickup: { address: store.address || 'Mr. Delivery Man store, Malé', zone: store.zone || 'male', landmark: '', contact: { name: 'Mr. Delivery Man store', phone: (s.contact || {}).phone || '' } }, dropoff: { address: o.delivery.address, zone: o.delivery.zone, landmark: o.delivery.landmark || '', recipient: { name: o.customer.name, phone: o.customer.phone }, instructions: o.delivery.instructions || '' } };
@@ -1351,6 +1367,8 @@
       const ev = (o.events || []).filter(e => e.type === 'delivered').pop();
       const at = ev ? ev.at : o.updatedAt;
       if (!MDM.inPeriod(span, at)) return;
+      // A price still waiting for its quote (extra vehicle, XL) would be billed at the estimate: the office confirms it first.
+      if (o.totals && o.totals.quoteRequired && !(o.pricing && o.pricing.status === 'confirmed')) throw new StoreError('validation', 'Confirm the price of ' + o.code + ' first: it was delivered before its price was set');
       (o.packages || []).forEach(pkg => {
         const rate = pkg.price ? pkg.price.lineTotal : (acc.ratePerPackage || s.rates.business);
         lines.push({ kind: 'package', tier: pkg.tier || null, size: pkg.size, date: at, orderCode: o.code, recipient: pkg.dropoff && pkg.dropoff.recipient ? pkg.dropoff.recipient.name : '', description: pkg.description || '', packages: 1, rate, amount: rate });

@@ -115,10 +115,13 @@
     const exact = list.find(t => norm(t.value) === n || norm(t.label) === n);
     if (exact) return exact.value;
     if (/not sure|unsure|don ?t know|do not know|assist|check/.test(n)) return 'unsure';
-    if (/t ?jetty/.test(n)) return 'male_tjetty';
-    if (/north/.test(n)) return 'male_north';
-    if (/villi/.test(n)) return 'villimale_ferry';
+    // The island first: "Hulhumalé north harbour" is Hulhumalé, not Malé North Harbour. The airport has no jetty of ours: left unknown
+    // so the row asks for one instead of a guess in Malé.
     if (/hulhumale|hulhumal/.test(n)) return 'hulhumale_ferry';
+    if (/villi/.test(n)) return 'villimale_ferry';
+    if (/airport|hulhule|seaplane/.test(n)) return null;
+    if (/(^|[^a-z])t ?jetty/.test(n)) return 'male_tjetty';
+    if (/north/.test(n)) return 'male_north';
     if (/mpl|commercial/.test(n)) return 'mpl_harbour';
     if (/jett(y|ies)|speedboat/.test(n)) return 'male_jetties';
     const loose = list.find(t => norm(t.label).indexOf(n) >= 0);
@@ -172,7 +175,10 @@
   function parseMoney(v) {
     if (v == null || v === '') return 0;
     if (typeof v === 'number') return v >= 0 && isFinite(v) ? Math.round(v) : null;
-    const s = String(v).trim().replace(/^(mvr|rf|mrf)\.?\s*/i, '').replace(/\s*(mvr|rf|mrf)$/i, '').replace(/[,\s]/g, '');
+    const t = String(v).trim().replace(/^(mvr|rf|mrf)\.?\s*/i, '').replace(/\s*(mvr|rf|mrf)$/i, '').replace(/\s/g, '');
+    // Commas only as thousands separators (1,250): "350,50" is not an amount, never 35050.
+    if (t.indexOf(',') >= 0 && !/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) return null;
+    const s = t.replace(/,/g, '');
     if (!s || /^([-\u2013\u2014]+|nil|none|no|n\/?a)$/i.test(s)) return 0;   // a dash or "none" in the cash column means nothing to collect
     if (!/^\d+(\.\d+)?$/.test(s)) return null;
     return Math.round(Number(s));

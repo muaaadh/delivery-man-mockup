@@ -117,7 +117,9 @@
     const feesTotal = round(order.fees.cargo) + round(order.fees.airport) + round(order.fees.shopping);
     const adjustments = (order.fees.adjustments || []).reduce((n, a) => n + round(a.amount), 0);
     const prev = order.totals || {};
-    order.totals = { packages: packagesTotal, fees: feesTotal, adjustments, budget, total: packagesTotal + feesTotal + adjustments + budget, quoteRequired: !!prev.quoteRequired, quoteReasons: prev.quoteReasons || [] };
+    // E-store orders also carry the goods at their frozen store prices (createStoreOrder).
+    const items = order.service === 'store' ? (order.items || []).reduce((n, i) => n + (Number(i.total) || 0), 0) : 0;
+    order.totals = Object.assign({ packages: packagesTotal, fees: feesTotal, adjustments, budget, total: packagesTotal + feesTotal + adjustments + budget + items, quoteRequired: !!prev.quoteRequired, quoteReasons: prev.quoteReasons || [] }, order.service === 'store' ? { items } : {});
     return order;
   }
 
