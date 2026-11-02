@@ -637,168 +637,124 @@
     return { collectDate: !v.collectDate ? 'Choose the collection date' : (v.collectDate < today ? 'Choose today or a later date' : null),
       deliverDate: v.deliverDate && v.deliverDate < v.collectDate ? 'Delivery cannot be before collection' : null };
   }
-  // deliveryBlock(form) → { el, method(), row(), rules() }: the §3 fields for the chosen delivery method, read into the same row shape
-  // the bulk editor uses (so MDM.bizKit.delivery() builds the order's delivery object for both).
-  function deliveryBlock(form, s, onMethod) {
-    const methodSeg = segmented('method', MDM.DELIVERY_METHODS.map(m => ({ value: m.value, label: m.label })), 'home', 'biz-method');
-    const rates = s.rates || {};
-    const panels = {
-      home: el('div', { class: 'stack-4', 'data-method': 'home' },
-        field('dAddress', 'Delivery address', input({ placeholder: 'House or building, floor, road', 'data-testid': 'biz-d-address' })),
-        el('div', { class: 'grid-2' }, field('dZone', 'Area', select(zoneOptions().filter(o => !K.airportZone(o.value)), 'Choose the area', '')), field('dLandmark', 'Landmark', input({ placeholder: 'Near the school' }), { optional: true }))),
-      boat: el('div', { class: 'stack-4', 'data-method': 'boat', hidden: true },
-        el('div', { class: 'grid-2' }, field('bIsland', 'Destination island', input({ placeholder: 'Thulusdhoo, Kaafu Atoll', 'data-testid': 'biz-b-island' })), field('bAddress', 'Address on the island', input({ placeholder: 'House name', 'data-testid': 'biz-b-address' }), { optional: true })),
-        MDM.ui.field({ name: 'bVessel', label: 'Vessel', control: segmented('bVessel', MDM.VESSEL_TYPES.map(v => ({ value: v.value, label: v.label })), 'speedboat', 'biz-b-vessel') }),
-        el('div', { class: 'grid-2' }, field('bName', 'Boat, ferry or speedboat name', input({ placeholder: 'Thulusdhoo Express', 'data-testid': 'biz-b-name' })), field('bJetty', 'Harbour or jetty', select(K.jettyOptions(), null, 'male_jetties'))),
-        el('div', { class: 'grid-2' }, field('bDate', 'Departure date', input({ type: 'date', value: MDM.ui.dayKey(), 'data-testid': 'biz-b-date' })), field('bTime', 'Departure time', input({ type: 'time', 'data-testid': 'biz-b-time' }))),
-        el('p', { class: 'small muted' }, 'You can change the boat later.')),
-      cargo: el('div', { class: 'stack-4', 'data-method': 'cargo', hidden: true },
-        field('kIsland', 'Destination island', input({ placeholder: 'Kulhudhuffushi, Haa Dhaalu', 'data-testid': 'biz-k-island' })),
-        el('p', { class: 'small muted' }, 'Handed in at the cargo counter, main bus terminal. Fee ' + money(rates.cargo) + '.')),
-      airport: el('div', { class: 'stack-4', 'data-method': 'airport', hidden: true },
-        el('div', { class: 'grid-2' }, field('aPoint', 'Collection point at the airport', select(K.airportOptions(), null, 'resort_counters')), field('aCounter', 'Resort counter or person', input({ placeholder: 'Lagoon Point Resort counter', 'data-testid': 'biz-a-counter' }), { optional: true })),
-        field('aResort', 'Resort or destination', input({ placeholder: 'Lagoon Point Resort, Baa Atoll', 'data-testid': 'biz-a-resort' })),
-        el('div', { class: 'grid-2' }, field('aSpeedboat', 'Resort speedboat', input({ placeholder: 'Lagoon Express 3' }), { optional: true }), field('aTime', 'Speedboat departure', input({ type: 'time' }), { optional: true })),
-        el('p', { class: 'small muted' }, 'Airport fee ' + money(rates.airport) + '.')),
-    };
-    const node = el('div', { class: 'stack-4' },
-      MDM.ui.field({ name: 'method', label: 'Delivery method', control: methodSeg }),
-      el('div', { class: 'grid-2' }, field('dName', 'Receiver name', input({ autocomplete: 'off', 'data-testid': 'biz-d-name' })), field('dPhone', 'Receiver number', input({ type: 'tel', inputmode: 'numeric', placeholder: '7XX XXXX', 'data-testid': 'biz-d-phone' }))),
-      panels.home, panels.boat, panels.cargo, panels.airport,
-      field('dNote', 'Delivery note', input({ placeholder: 'Call before arriving', 'data-testid': 'biz-d-note' }), { optional: true }));
-    const noteField = node.querySelector('[data-field="dNote"] > label');
-    const method = () => form.elements.method ? form.elements.method.value : 'home';
-    methodSeg.addEventListener('change', () => {
-      const m = method();
-      Object.keys(panels).forEach(k => { panels[k].hidden = k !== m; });
-      if (noteField) noteField.firstChild.textContent = m === 'airport' ? 'Handover note' : 'Delivery note';
-      if (onMethod) onMethod(m);
-    });
-    const val = n => form.elements[n] ? String(form.elements[n].value || '').trim() : '';
-    return {
-      el: node, method,
-      row() {
-        const m = method();
-        return { method: m, name: val('dName'), phone: val('dPhone'), address: m === 'boat' ? val('bAddress') : val('dAddress'), zone: val('dZone'), landmark: val('dLandmark'),
-          island: m === 'cargo' ? val('kIsland') : val('bIsland'), vesselType: val('bVessel') || 'speedboat', boatName: val('bName'), departureDate: val('bDate'), departureTime: m === 'airport' ? val('aTime') : val('bTime'), jetty: val('bJetty'),
-          airportPoint: val('aPoint') || 'resort_counters', counter: val('aCounter'), resort: val('aResort'), speedboat: val('aSpeedboat'), instructions: val('dNote'), raw: {} };
-      },
-      rules() {
-        const m = method();
-        const r = {
-          dName: v => v ? null : 'Enter the receiver\'s name',
-          dPhone: v => !v ? 'Enter the receiver\'s contact number' : (MDM.ui.phone.valid(v, { intl: true }) ? null : 'Enter a 7-digit Maldives number, or + and the country code'),
-        };
-        if (m === 'home') { r.dAddress = v => v ? null : 'Enter the delivery address'; r.dZone = v => v ? null : 'Choose the area'; }
-        if (m === 'boat') {
-          r.bIsland = v => v ? null : 'Enter the destination island'; r.bName = v => v ? null : 'Enter the boat, ferry or speedboat name';
-          r.bJetty = v => v ? null : 'Choose the harbour or jetty'; r.bTime = v => v ? null : 'Enter the departure time';
-          r.bDate = v => !v ? 'Choose the departure date' : (v < MDM.ui.dayKey() ? 'Choose today or a later date' : null);
-        }
-        if (m === 'cargo') r.kIsland = v => v ? null : 'Enter the destination island';
-        if (m === 'airport') r.aResort = v => v ? null : 'Enter the resort or destination';
-        return r;
-      },
-    };
-  }
+  // ---- New order: one package card, filled the way the bulk order is (client, 01/11/2026), then how many, fragile and when -------
+  const single = { row: null };
   async function tabNew() {
     const acc = state.acc, s = await MDM.store.settings();
     state.settings = s || {};
     if (state.done.order) return newOrderDone(state.done.order);
     const tiers = tiersOf(acc);
+    if (!single.row || !tiers.some(t => t.value === single.row.tier)) single.row = K.blankRow(tiers);
+    const row = single.row;
     const form = el('form', { class: 'biz-form biz-split', novalidate: true, 'data-testid': 'biz-new-form' });
     const priceBox = el('div', { class: 'summary biz-price', 'data-testid': 'biz-new-price' });
     const failure = failBox();
     const submit = el('button', { type: 'submit', class: 'btn btn--primary btn--lg btn--block', 'data-testid': 'biz-new-submit' }, 'Book delivery');
-    const collection = collectionBlock(acc);
-    const tierSeg = segmented('tier', tiers.map(t => ({ value: t.value, label: t.label + ' · ' + money(t.rate), hint: MDM.pricing.sizeLabel(t.size) })), (tiers[0] || {}).value, 'biz-tier');
+    const collection = collectionBlock(acc, { onChange: () => { drawRate(); updatePrice(); } });
+    const ctx = { tiers, allTiers: allTiers(), pickupZone: () => collection.zone() };
+    const cardHost = el('div', { class: 'bulk-items' });
     const qty = input({ type: 'number', inputmode: 'numeric', min: '1', max: '20', step: '1', value: '1', 'data-testid': 'biz-qty' });
     const vehicle = el('label', { class: 'checkbox', hidden: true, 'data-testid': 'biz-vehicle' }, el('input', { type: 'checkbox', name: 'extraVehicle' }),
       el('span', null, 'Send an extra vehicle'), el('span', { class: 'checkbox__hint' }, 'We confirm the charge before pickup.'));
-    const cod = input({ inputmode: 'decimal', placeholder: '0', 'data-testid': 'biz-cod' });
-    const dblock = deliveryBlock(form, s, () => updatePrice());
+    let tried = false;
+    function showErrors(only) {
+      const errs = K.validateRow(row, ctx);
+      cardHost.querySelectorAll('[data-key]').forEach(c => { const k = c.dataset.key; if (only && only !== k) return; setError(c, errs[k] || null); });
+      return !Object.keys(errs).length;
+    }
+    function drawRate() { const r = cardHost.querySelector('[data-rate]'); if (r) r.textContent = rowRateText(row, ctx); }
+    function drawCard() {
+      const rctx = Object.assign({}, ctx, {
+        onInput: (r, key) => { if (tried) showErrors(key); drawRate(); },
+        onChange: (r, key) => { if (key === 'method') { drawCard(); const sel = cardHost.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else if (tried) showErrors(key); drawRate(); },
+      });
+      const fields = K.rowFields(row, rctx, 'new-' + row.id);
+      fields.forEach(f => { const c = f.querySelector('[data-key]'); if (c) c.setAttribute('data-testid', 'biz-new-' + c.dataset.key); });
+      cardHost.replaceChildren(el('div', { class: 'bulk-item', 'data-item': row.id, 'data-testid': 'biz-new-card' },
+        el('div', { class: 'bulk-item__head' }, el('h3', { class: 'bulk-item__title' }, 'Package'), el('span', { class: 'bulk-item__rate small muted', 'data-rate': '' }, rowRateText(row, ctx))),
+        el('div', { class: 'bulk-item__grid' }, fields)));
+      if (tried) showErrors();
+    }
     const step = (title, ...body) => el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, title)), el('div', { class: 'card__body stack-4' }, ...body));
     form.append(
       el('div', { class: 'biz-split__main stack-6' },
         step('Pickup', collection.el),
-        step('Package',
-          MDM.ui.field({ name: 'tier', label: 'Size', control: tierSeg }),
-          el('div', { class: 'grid-2' }, field('qty', 'Packages', qty, { hint: 'Same size, same receiver' }), field('description', 'What is it', input({ placeholder: 'Sneakers, size 42', 'data-testid': 'biz-description' }), { optional: true })),
-          vehicle,
-          el('div', { class: 'grid-2 biz-ref' }, field('reference', 'Your reference', input({ placeholder: 'Invoice or order number', 'data-testid': 'biz-reference' }), { optional: true }),
-            el('label', { class: 'checkbox' }, el('input', { type: 'checkbox', name: 'fragile' }), el('span', null, 'Fragile'))),
-          scheduleBlock(form)),
-        step('Delivery', dblock.el,
-          el('div', { class: 'grid-2' }, field('cod', 'Cash to collect (MVR)', cod, { optional: true, hint: 'Leave empty if already paid' }), el('div')))),
+        el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Package'),
+          el('a', { class: 'biz-link', href: '#bulk', 'data-testid': 'biz-new-to-bulk' }, html(MDM.icon('plus', 16)), 'Several receivers? Bulk order')),
+          el('div', { class: 'card__body stack-4' }, cardHost,
+            el('div', { class: 'grid-2' }, field('qty', 'Packages', qty, { hint: 'Same size, same receiver' }),
+              el('label', { class: 'checkbox biz-fragile' }, el('input', { type: 'checkbox', name: 'fragile' }), el('span', null, 'Fragile'))),
+            vehicle,
+            scheduleBlock(form)))),
       el('div', { class: 'biz-split__side' },
         el('div', { class: 'biz-sum stack-4' },
           el('h2', { class: 'biz-sum__title' }, 'Summary'),
           priceBox, failure, submit,
           el('p', { class: 'small muted biz-sum__note' }, 'Invoiced weekly. Nothing to pay now.'))));
-    form.elements.dZone.setAttribute('data-testid', 'biz-d-zone');
-    form.elements.bJetty.setAttribute('data-testid', 'biz-b-jetty');
-    form.elements.aPoint.setAttribute('data-testid', 'biz-a-point');
-    const tierNow = () => tiers.find(t => t.value === (form.elements.tier ? form.elements.tier.value : '')) || tiers[0];
+    drawCard();
+    const tierNow = () => tiers.find(t => t.value === row.tier) || null;
     const qtyNow = () => Math.max(1, Math.min(20, Math.round(Number(qty.value) || 1)));
-    function packagesFor(v, row) {
-      const t = tierNow(), n = qtyNow(), c = collection.value();
+    function packagesFor(v) {
+      const t = tierNow() || tiers[0], n = qtyNow(), c = collection.value();
       const end = MDM.deliveryEndpoint(K.delivery(Object.assign({}, row, { zone: row.zone || 'male' })));
+      const recipient = { name: String(row.name || '').trim(), phone: MDM.ui.phone.normalize(row.phone) || String(row.phone || '').trim() };
       const out = [];
-      for (let i = 0; i < n; i++) out.push({ id: MDM.id('pkg'), size: t.size, tier: t.value, description: v.description || '', fragile: !!v.fragile, underOneFt: t.size === 'bag', needsVehicle: false, notes: v.reference || '',
+      for (let i = 0; i < n; i++) out.push({ id: MDM.id('pkg'), size: t.size, tier: t.value, description: String(row.description || '').trim(), fragile: !!v.fragile, underOneFt: t.size === 'bag', needsVehicle: false, notes: String(row.reference || '').trim(),
         pickup: { address: c.address, zone: c.zone, landmark: c.landmark || '', contact: { name: c.contactName, phone: c.contactPhone }, instructions: c.instructions || '' },
-        dropoff: row.method === 'home' ? { address: row.address, zone: row.zone, landmark: row.landmark || '', recipient: { name: row.name, phone: MDM.ui.phone.normalize(row.phone) || row.phone }, instructions: row.instructions || '', meetAt: 'door' }
-          : { recipient: { name: row.name, phone: MDM.ui.phone.normalize(row.phone) || row.phone }, instructions: row.instructions || '', zone: end.zone } });
+        dropoff: row.method === 'home' ? { address: String(row.address || '').trim(), zone: row.zone, landmark: String(row.landmark || '').trim(), recipient, instructions: String(row.instructions || '').trim(), meetAt: 'door' }
+          : { recipient, instructions: String(row.instructions || '').trim(), zone: end.zone } });
       return out;
     }
     const values = () => {
-      const v = {}; ['description', 'reference', 'collectDate', 'collectTime', 'deliverDate', 'deliverTime'].forEach(k => { const c = form.elements[k]; v[k] = c ? String(c.value || '').trim() : ''; });
+      const v = {}; ['collectDate', 'collectTime', 'deliverDate', 'deliverTime'].forEach(k => { const c = form.elements[k]; v[k] = c ? String(c.value || '').trim() : ''; });
       v.level = form.elements.level.value; v.fragile = form.elements.fragile.checked;
       return v;
     };
     function updatePrice() {
-      const t = tierNow(), n = qtyNow(), row = dblock.row();
-      const eligible = MDM.extraVehicleEligible(Array.from({ length: n }, () => ({ size: t.size })));
+      const t = tierNow(), n = qtyNow();
+      const eligible = !!t && MDM.extraVehicleEligible(Array.from({ length: n }, () => ({ size: t.size })));
       vehicle.hidden = !eligible; if (!eligible) form.elements.extraVehicle.checked = false;
-      const pk = packagesFor(values(), row).map(p => Object.assign({}, p, { tierRate: t.rate, dropoff: row.method === 'home' ? Object.assign({}, p.dropoff, { zone: row.zone || 'male' }) : MDM.deliveryEndpoint(K.delivery(row)) }));
+      const codAmt = K.parseMoney(row.cod);
+      if (!t) { priceBox.replaceChildren(el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, 'Choose the package size'))); return; }
+      const pk = packagesFor(values()).map(p => Object.assign({}, p, { tierRate: t.rate, dropoff: row.method === 'home' ? Object.assign({}, p.dropoff, { zone: row.zone || 'male' }) : MDM.deliveryEndpoint(K.delivery(row)) }));
       const q = MDM.pricing.quote({ service: 'business', packages: pk }, s);
-      const codAmt = K.parseMoney(cod.value);
       priceBox.replaceChildren(...[
         el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, (n > 1 ? n + ' × ' : '') + t.label, el('small', null, money(t.rate) + ' each')), el('span', { class: 'summary__amount' }, money(q.totals.packages))),
         q.feeLines.map(f => el('div', { class: 'summary__line summary__line--fee', 'data-fee': f.key }, el('span', { class: 'summary__desc' }, f.label, f.reason && f.key !== 'cargo' ? el('small', null, f.reason) : null), el('span', { class: 'summary__amount' }, money(f.amount)))),
         el('div', { class: 'summary__line summary__total' }, el('span', { class: 'summary__desc' }, 'Total'), el('span', { class: 'summary__amount', 'data-testid': 'biz-new-total' }, money(q.totals.total))),
         form.elements.extraVehicle.checked ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Extra vehicle: charge confirmed before pickup.')) : null,
         codAmt > 0 ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': 'biz-new-cod' }, el('span', { class: 'summary__desc' }, 'Cash to collect', el('small', null, 'Paid to you after delivery')), el('span', { class: 'summary__amount' }, money(codAmt))) : null,
-        v0().level === 'express' ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Express: we confirm any extra charge first.')) : null].flat().filter(Boolean));
+        values().level === 'express' ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Express: we confirm any extra charge first.')) : null].flat().filter(Boolean));
     }
-    const v0 = () => ({ level: form.elements.level ? form.elements.level.value : 'normal' });
     form.addEventListener('input', updatePrice); form.addEventListener('change', updatePrice); updatePrice();
     form.addEventListener('submit', async e => {
       e.preventDefault(); failure.hidden = true;
-      const rules = Object.assign({
-        qty: v => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 20 ? null : 'Enter 1 to 20 packages'; },
-        cod: v => K.parseMoney(v) == null ? 'Enter an amount of 0 or more, numbers only' : null,
-      }, dblock.rules());
-      const r = MDM.ui.validate(form, rules);
+      tried = true;
+      const cardOk = showErrors();
+      const r = MDM.ui.validate(form, { qty: v => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 20 ? null : 'Enter 1 to 20 packages'; } });
       const cOk = collection.validate();
       const v = values();
       const extra = advanceRules(v);
       Object.keys(extra).forEach(k => { if (form.elements[k]) setError(form.elements[k], extra[k]); });
-      if (!r.ok || !cOk || Object.keys(extra).some(k => extra[k])) { MDM.ui.focusFirstInvalid(form); return; }
+      if (!r.ok || !cOk || !cardOk || Object.keys(extra).some(k => extra[k])) {
+        const first = form.querySelector('[aria-invalid="true"]');
+        if (first) { MDM.ui.scrollIntoViewIfNeeded(first); first.focus(); }
+        return;
+      }
       MDM.ui.setLoading(submit, true);
       try {
-        const row = dblock.row(), t = tierNow(), c = collection.value();
-        const d = K.delivery(row);
-        const pkgs = packagesFor(v, row);
+        const t = tierNow(), c = collection.value();
         const extraVehicle = !vehicle.hidden && form.elements.extraVehicle.checked;
         const order = await MDM.store.createOrder({
           source: 'business', requestType: 'business', service: 'business', serviceLevel: v.level, accountId: acc.id, by: 'business:' + acc.id,
           customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
           collection: { pointId: c.pointId, address: c.address, zone: c.zone, landmark: c.landmark, contactName: c.contactName, contactPhone: c.contactPhone, instructions: c.instructions, preferredTime: c.preferredTime },
-          delivery: d, details: { reference: v.reference, tier: t.value }, packages: pkgs, schedule: scheduleValue(v),
-          payment: { method: 'invoice', status: 'invoiced' }, cod: K.parseMoney(cod.value) || 0, extraVehicle,
+          delivery: K.delivery(row), details: { reference: String(row.reference || '').trim(), tier: t.value }, packages: packagesFor(v), schedule: scheduleValue(v),
+          payment: { method: 'invoice', status: 'invoiced' }, cod: K.parseMoney(row.cod) || 0, extraVehicle,
           // An extra vehicle needs its charge confirmed first; everything else is priced at the agreed rate.
           status: extraVehicle ? 'requested' : 'confirmed',
         });
+        single.row = null;
         state.done.order = order;
         renderTab({ enter: true });
         MDM.ui.toast('Delivery booked: ' + order.code, 'ok');
@@ -830,39 +786,9 @@
         el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'biz-new-another', on: { click: () => { state.done.order = null; renderTab({ enter: true }); } } }, 'Book another')]);
   }
 
-  // ---- Row controls (bulk rows editor and Excel review) ---------------------------------------------------------------------------
+  // ---- Row controls (bulk rows editor and Excel review): MDM.bizKit.rowControl / rowFields, shared with the office's business order ----
   const ROW_ORDER = ['name', 'phone', 'method', 'address', 'zone', 'landmark', 'island', 'vesselType', 'boatName', 'departureDate', 'departureTime', 'jetty', 'airportPoint', 'counter', 'resort', 'speedboat', 'tier', 'cod', 'instructions', 'reference', 'description'];
-  const WIDE = { address: true, instructions: true, jetty: true, airportPoint: true };
-  const ROW_METHOD_LABEL = { home: 'Home delivery', boat: 'Boat, ferry or speedboat', cargo: 'Maldivian Cargo', airport: 'Airport' };
-  // rowControl(row, key, ctx) → the input or select for one row field, bound to the row object. ctx: { tiers, onInput(row, key), onChange(row, key) }.
-  function rowControl(row, key, ctx, idx) {
-    const label = K.fieldLabel(key, row.method) + ', row ' + (idx + 1);
-    const base = { 'data-row': row.id, 'data-key': key, 'aria-label': label };
-    const rawOpt = k => row.raw && row.raw[k] ? el('option', { value: '' }, 'Check: ' + row.raw[k]) : null;
-    let c;
-    const sel = (opts, prompt, k) => { const s = el('select', Object.assign({ class: 'select' }, base), rawOpt(k) || (prompt ? el('option', { value: '' }, prompt) : null), opts.map(o => el('option', { value: o.value }, o.label))); s.value = row[k] || ''; return s; };
-    if (key === 'method') c = sel(K.methodOptions().map(o => ({ value: o.value, label: ROW_METHOD_LABEL[o.value] || o.label })), null, 'method');
-    else if (key === 'zone') c = sel(K.zoneOptions(), 'Choose the area', 'zone');
-    else if (key === 'tier') c = sel(K.tierOptions(ctx.tiers), 'Choose a size', 'tier');
-    else if (key === 'vesselType') c = sel(K.vesselOptions(), 'Choose', 'vesselType');
-    else if (key === 'jetty') c = sel(K.jettyOptions(), 'Choose the jetty', 'jetty');
-    else if (key === 'airportPoint') c = sel(K.airportOptions(), null, 'airportPoint');
-    else if (key === 'departureDate') c = el('input', Object.assign({ class: 'input', type: 'date', value: K.parseDate(row.departureDate) || '' }, base));
-    else if (key === 'departureTime') c = el('input', Object.assign({ class: 'input', type: 'time', value: K.parseTime(row.departureTime) || '' }, base));
-    else if (key === 'phone') c = el('input', Object.assign({ class: 'input', type: 'tel', inputmode: 'tel', placeholder: '7XX XXXX', value: row.phone || '' }, base));
-    else if (key === 'cod') c = el('input', Object.assign({ class: 'input', type: 'text', inputmode: 'decimal', placeholder: '0', value: row.cod || '' }, base));
-    else c = el('input', Object.assign({ class: 'input', type: 'text', value: row[key] || '' }, base));
-    const isSelect = c.tagName === 'SELECT';
-    c.addEventListener(isSelect ? 'change' : 'input', () => {
-      row[key] = c.value;
-      if (row.raw && row.raw[key]) delete row.raw[key];
-      if (isSelect && ctx.onChange) ctx.onChange(row, key, c); else if (ctx.onInput) ctx.onInput(row, key, c);
-    });
-    if (!isSelect && ctx.onChange) c.addEventListener('change', () => ctx.onChange(row, key, c));
-    return c;
-  }
-  // Receiver and method first, then the method's own fields in their natural order, then size, cash and notes.
-  const rowKeys = row => ['name', 'phone', 'method'].concat(K.METHOD_FIELDS[row.method] || K.METHOD_FIELDS.home, ['tier', 'cod', 'instructions', 'reference', 'description']);
+  const rowControl = (row, key, ctx, idx) => K.rowControl(row, key, ctx, idx);
   // "airport fee", but "Maldivian Cargo fee" keeps its capitals (a name) in the middle of a line.
   const feeName = f => /^[A-Z]\w* [A-Z]/.test(f.label) ? f.label : f.label.charAt(0).toLowerCase() + f.label.slice(1);
   function rowRateText(row, ctx) {
@@ -924,12 +850,7 @@
         onInput: (row, key) => { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); showRowErrors(row, node, key); updateRowHead(row); drawSummary(); },
         onChange: (row, key) => { if (key === 'method') { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); const fresh = itemNode(row, bulk.rows.indexOf(row)); node.replaceWith(fresh); const sel = fresh.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); showRowErrors(row, node, key); } updateRowHead(row); drawSummary(); },
       });
-      const fields = rowKeys(r).map(k => {
-        const c = rowControl(r, k, rctx, i);
-        c.removeAttribute('aria-label');
-        c.id = 'bulk-' + r.id + '-' + k;
-        return MDM.ui.field({ name: k, label: K.fieldLabel(k, r.method), control: c, optional: ['landmark', 'instructions', 'reference', 'description', 'cod', 'counter', 'speedboat'].indexOf(k) >= 0 || (k === 'address' && r.method === 'boat') || (k === 'departureTime' && r.method === 'airport'), class: WIDE[k] ? 'bulk-item__wide' : null });
-      });
+      const fields = K.rowFields(r, rctx, 'bulk-' + r.id);
       const node = el('div', { class: 'bulk-item', 'data-item': r.id, 'data-testid': 'biz-bulk-row' },
         el('div', { class: 'bulk-item__head' },
           el('h3', { class: 'bulk-item__title' }, 'Package ' + (i + 1)),

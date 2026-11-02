@@ -2,6 +2,8 @@
 // details from settings, takes the payer details plus the slip and calls MDM.store.submitPayment (payment → received). Payment is
 // open when it was requested (invoice after delivery, or upfront) or, optionally, as soon as our team confirmed the price.
 // The slip goes into `files` the moment it is chosen and `order.payment.slip` points at it, so a reload shows the same preview.
+// From the shared tracking link (?code=…&t=<its secret>, client 01/11/2026) anyone with the link pays without signing in: the slip
+// is kept on the page until the payment is sent, and the order's details stay for its owner.
 (function (MDM) { 'use strict';
   const { el } = MDM.ui;
   const MB = 1024 * 1024;
@@ -14,11 +16,14 @@
   const root = document.querySelector('[data-checkout="body"]');
   const descEl = document.querySelector('[data-checkout="desc"]');
   // draft holds what the customer typed so a re-render (store event from another tab, slip saved) never loses it.
-  const state = { orderId: null, draftFor: null, draft: null, slip: null, busy: false, slipError: null, formError: null, objectUrl: null, focusPanel: false, seq: 0, entered: false };
+  const state = { orderId: null, draftFor: null, draft: null, slip: null, busy: false, slipError: null, formError: null, objectUrl: null, focusPanel: false, seq: 0, entered: false,
+    linkSlip: null, linkSent: false };
+  // The shared link's secret, on the live service only: it lets this page record the slip and the payment for the order it names.
+  const LINK = (() => { const t = (new URLSearchParams(location.search).get('t') || '').trim(); return MDM.remote && /^[0-9a-f]{32}$/.test(t) ? t : null; })();
   const fields = {};
 
   class SlipError extends Error {}
-  const trackHref = id => '../track/?order=' + encodeURIComponent(id);
+  const trackHref = order => (LINK && MDM.remote.trackLink ? MDM.remote.trackLink(order) : '../track/?order=' + encodeURIComponent(order.id));
   const icon = (name, size) => MDM.ui.html(MDM.icon(name, size || 16));
   const channelOf = c => CHANNEL[c && c.notify] || CHANNEL.whatsapp;
   const CHARGE_STAGE = { collection: 'at collection', delivery: 'at delivery' };
@@ -59,6 +64,7 @@
     state.draft = { bank: p.bank || '', reference: p.reference || '', touched: {} };
   }
   async function loadSlip(order) {
+    if (LINK) return state.linkSlip;
     const s = order.payment && order.payment.slip;
     if (!s || !s.fileId) return null;
     const row = await MDM.store.get('files', s.fileId);
@@ -85,7 +91,13 @@
   }
   async function saveSlip(p) {
     const id = state.orderId;
-    const row = await MDM.store.insert('files', { kind: 'slip', orderId: id, name: p.name, type: p.type, size: p.size, width: p.width || null, height: p.height || null, dataUrl: p.dataUrl, at: new Date().toISOString() });
+    const row = await MDM.store.insert('files', Object.assign({ kind: 'slip', orderId: id, name: p.name, type: p.type, size: p.size, width: p.width || null, height: p.height || null, dataUrl: p.dataUrl, at: new Date().toISOString() }, LINK ? { trackToken: LINK } : {}));
+    if (LINK) {
+      const prev = state.linkSlip;
+      state.linkSlip = Object.assign({}, row, { dataUrl: p.dataUrl });
+      if (prev && prev.id !== row.id) await MDM.store.remove('files', prev.id).catch(() => {});
+      return;
+    }
     let prev = null;
     try {
       await MDM.store.update('orders', id, cur => { prev = cur.payment && cur.payment.slip; return { payment: Object.assign({}, cur.payment, { slip: { fileId: row.id, name: p.name, type: p.type, size: p.size } }) }; });
@@ -104,6 +116,11 @@
   async function removeSlip() {
     if (state.busy) return;
     state.busy = 'slip'; state.slipError = null;
+    if (LINK) {
+      const prev = state.linkSlip; state.linkSlip = null;
+      if (prev) await MDM.store.remove('files', prev.id).catch(() => {});
+      state.busy = false; await render(); return;
+    }
     try {
       let prev = null;
       await MDM.store.update('orders', state.orderId, cur => { prev = cur.payment && cur.payment.slip; return { payment: Object.assign({}, cur.payment, { slip: null }) }; });
@@ -139,7 +156,10 @@
     const d = state.draft;
     try {
       const cur = await MDM.store.get('orders', state.orderId);
-      await MDM.store.submitPayment(state.orderId, { bank: d.bank, reference: d.reference.trim(), slip: cur && cur.payment ? cur.payment.slip : null, by: 'customer' });
+      const ls = state.linkSlip;
+      const slip = LINK ? (ls ? { fileId: ls.id, name: ls.name, type: ls.type, size: ls.size } : null) : cur && cur.payment ? cur.payment.slip : null;
+      await MDM.store.submitPayment(state.orderId, Object.assign({ bank: d.bank, reference: d.reference.trim(), slip, by: 'customer' }, LINK ? { trackToken: LINK } : {}));
+      if (LINK) state.linkSent = true;
       state.busy = false; state.focusPanel = true;
       await render();
     } catch (e) {
@@ -171,7 +191,7 @@
   function notice(kind, iconName, body, action) {
     return el('div', { class: 'alert alert--' + kind, role: kind === 'danger' ? 'alert' : 'status' }, icon(iconName), el('div', { class: 'alert__body' }, el('div', null, body), action || null));
   }
-  function trackAction(order) { return el('a', { class: 'alert__action', href: trackHref(order.id) }, 'Track order'); }
+  function trackAction(order) { return el('a', { class: 'alert__action', href: trackHref(order) }, 'Track order'); }
   function row(label, value, opts) {
     opts = opts || {};
     return el('div', { class: 'rate-table__row' },
@@ -184,6 +204,9 @@
       el('span', { class: 'summary__amount mono' }, MDM.pricing.format(amount)));
   }
   function summary(order, settings) {
+    // The shared link's copy of an order carries the amount due only, not the lines behind it.
+    if (!(order.packages || []).every(p => p.price)) return el('div', { class: 'summary checkout-summary' },
+      el('div', { class: 'summary__total' }, el('span', null, 'Amount due'), el('span', { class: 'mono', 'data-testid': 'checkout-amount' }, MDM.pricing.format(order.totals.total))));
     const from = {};
     (order.changes || []).forEach(c => { const m = /^package (.+) size$/.exec(c.field || ''); if (m && c.from && !from[m[1]]) from[m[1]] = c.from; });
     const lines = (order.packages || []).map(p => line(MDM.pricing.lineLabel(p, order.service),
@@ -348,8 +371,8 @@
         el('h3', null, 'What happens next'),
         el('ol', { class: 'checkout-next' },
           el('li', null, 'We match your transfer, usually within ' + review + '.'),
-          el('li', null, 'We message you ' + channel + ' at ' + MDM.ui.phone.format(c.phone) + ' once it is verified.')),
-        el('a', { class: 'btn btn--primary', href: trackHref(order.id), 'data-testid': 'checkout-track-link' }, 'Track order')));
+          el('li', null, c.phone ? 'We message you ' + channel + ' at ' + MDM.ui.phone.format(c.phone) + ' once it is verified.' : 'We message you once it is verified.')),
+        el('a', { class: 'btn btn--primary', href: trackHref(order), 'data-testid': 'checkout-track-link' }, 'Track order')));
   }
   function renderInvalid() {
     return el('div', { class: 'empty', 'data-testid': 'checkout-invalid' },
@@ -403,7 +426,7 @@
       show(notice('info', 'info', "We're confirming your price. We'll message you " + channelOf(order.customer) + ' when you can pay.', trackAction(order)), '');
       return;
     }
-    if (pay.status === 'received') {
+    if (pay.status === 'received' || state.linkSent) {
       show(renderConfirmation(order, settings), 'We check your slip within ' + review + '.');
       if (state.focusPanel) { state.focusPanel = false; window.scrollTo(0, 0); const h = root.querySelector('#co-done'); if (h) h.focus({ preventScroll: true }); }
       return;

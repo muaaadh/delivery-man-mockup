@@ -355,6 +355,8 @@
     destroyMap();
     const parts = [buildHead(o, refs), buildNotices(o, []), buildProgress(o, first)];
     if (state.driver) parts.push(buildDriver(o, state.driver, refs));
+    const pay = buildPublicPayment(o);
+    if (pay) parts.push(pay);
     parts.push(buildPublicDelivery(o));
     resultEl.replaceChildren(...parts);
     state.refs = refs;
@@ -369,6 +371,15 @@
     if (m === 'cargo') return (d.cargo || {}).island || 'Another island';
     if (m === 'airport') return 'Velana International Airport';
     return d.zone ? MDM.geo.zoneLabel(d.zone) : '';
+  }
+  // Paying needs no sign-in (client, 01/11/2026): the shared link shows the amount due and leads to the payment page; the invoice,
+  // photos and personal details stay for the signed-in owner.
+  function buildPublicPayment(o) {
+    const p = o.payment;
+    if (!p || !o.totals || !canPay(o)) return null;
+    return section('track-pay-h', 'Payment', el('div', { class: 'stack-4', 'data-testid': 'track-public-payment' },
+      el('div', { class: 'rate-table' }, row('Amount due', el('span', { class: 'mono', 'data-testid': 'track-public-amount' }, fmt(o.totals.total)))),
+      el('div', { class: 'track-actions track-pay-row' }, payButton(o, p.status === 'requested' ? 'Pay ' + fmt(o.totals.total) : 'Pay now (optional)'))));
   }
   function buildPublicDelivery(o) {
     const d = o.delivery || {};
@@ -474,8 +485,11 @@
     try { await MDM.store.requestCancel(o.id, { reason: v.reason, by: 'customer' }); MDM.ui.toast('Cancellation requested. We will confirm shortly.', 'ok'); }
     catch (e) { MDM.ui.toast(e && e.code === 'transition' ? 'The package is already collected. Call us and we will sort it out.' : 'Could not send the request. Try again.', 'danger'); }
   }
+  // From a shared link the payment page gets the link's secret too (live service), so it opens without signing in.
   function payButton(o, label) {
-    return el('a', { class: 'btn btn--brand', href: MDM.href('checkout/?order=' + encodeURIComponent(o.id)), 'data-testid': 'track-pay' }, label || 'Pay ' + fmt(o.totals.total));
+    const t = new URLSearchParams(location.search).get('t');
+    const href = t && o.trackToken ? 'checkout/?code=' + encodeURIComponent(o.code) + '&t=' + encodeURIComponent(t) : 'checkout/?order=' + encodeURIComponent(o.id);
+    return el('a', { class: 'btn btn--brand', href: MDM.href(href), 'data-testid': 'track-pay' }, label || 'Pay ' + fmt(o.totals.total));
   }
   // Public view: a failed stop, a cancellation and a business order's cash on delivery, without names, reasons or our messages.
   function publicNotices(o) {
@@ -888,6 +902,12 @@
     } else if (t === 'office') {
       add('Task', (MDM.OFFICE_TASKS.find(x => x.value === d.task) || {}).label); add('Office', d.organisation); add('References', d.reference); add('Details', d.details);
       if (d.returnDocs) add('Return', 'Bring the receipt or documents back');
+    } else if (t === 'boat_collect') {
+      add('Arriving on', [(MDM.VESSEL_TYPES.find(x => x.value === d.vesselType) || {}).label, d.boatName].filter(Boolean).join(': '));
+      const j = MDM.geo.terminals().find(x => x.value === d.jetty);
+      add('Arriving at', j ? (j.unsure ? 'Jetty to be confirmed' : j.label) : '');
+      add('Arrives', [d.arrivalDate, d.arrivalTime].filter(Boolean).join(' at '));
+      add('Hands it over', [d.senderName, d.senderPhone ? MDM.ui.phone.format(d.senderPhone) : ''].filter(Boolean).join(' · ')); add('Coming from', d.fromIsland);
     } else if (t === 'shop_collect') {
       add('Shop', d.shopName); add('Proof', { invoice: 'Invoice', quotation: 'Quotation and payment slip', order_no: 'Order number' }[d.proof]); add('Order number', d.orderNo);
     } else if (t === 'shop_buy' || o.service === 'shop') {

@@ -41,7 +41,7 @@
     route: { orders: [], stops: [], polyline: [], returns: [] }, upcoming: [], doneToday: [], zoneQueue: [], batches: {},
     shift: null, today: [], leaves: [], offDays: null, cashHeld: [], owed: [], notes: [], notesAll: false, noteIds: null, readMem: {},
     online: false, sim: null, gpsOn: false, gpsFix: null, nearId: null, focusOrder: null,
-    wakeLock: null, speed: null, renderSeq: 0, moreOpen: new Set(), entered: false,
+    wakeLock: null, speed: null, renderSeq: 0, entered: false,
   };
   const map = { map: null, ready: null, route: null, stops: null, driver: null, posUnsub: null, fitted: false };
 
@@ -175,6 +175,7 @@
     return { key: 'none' };
   }
   const STEPS = ['Start', 'Arrived', 'Collected', 'Out for delivery', 'Delivered'];
+  const STEP_TONE = ['go', 'go', 'collected', 'collected', 'deliver'];
   const STEP_AT = { dispatched: 0, on_the_way: 1, arrived: 2, collected: 3, out_for_delivery: 4, delivered: 5 };
   // The bar marks done steps and the next one; a failed job keeps the progress it had and marks the step that went wrong.
   function stepsNode(o) {
@@ -182,7 +183,7 @@
     const before = failed ? ((o.statusHistory || []).slice().reverse().find(h => h.to === 'failed') || {}).from : o.status;
     const at = STEP_AT[before] != null ? STEP_AT[before] : -1;
     return el('ol', { class: 'job__steps', 'aria-label': 'Progress' }, STEPS.map((t, i) =>
-      el('li', { class: ['job__step', i < at && 'is-done', i === at && (failed ? 'is-failed' : 'is-current')], 'aria-current': i === at ? 'step' : null }, el('span', { class: 'job__dot', 'aria-hidden': 'true' }), el('span', { class: 'job__steptext' }, t))));
+      el('li', { class: ['job__step', 'job__step--' + STEP_TONE[i], i < at && 'is-done', i === at && (failed ? 'is-failed' : 'is-current')], 'aria-current': i === at ? 'step' : null }, el('span', { class: 'job__dot', 'aria-hidden': 'true' }), el('span', { class: 'job__steptext' }, t))));
   }
   const MEET = { door: 'Meet at the door', lobby: 'Customer comes down to the lobby', reception: 'Leave at reception or security' };
   function placeLine(stop) {
@@ -245,6 +246,12 @@
       add('Flight', [d.flight, d.flightTime].filter(Boolean).join(' at '));
       add('Passenger', [d.passengerName, d.passengerPhone ? MDM.ui.phone.format(d.passengerPhone) : ''].filter(Boolean).join(' · '));
       add('Bags', d.bags);
+    } else if (o.requestType === 'boat_collect') {
+      add('Arriving on', [vesselLabel(d.vesselType), d.boatName].filter(Boolean).join(': '));
+      add('Arriving at', d.jetty ? terminalLabel(d.jetty) : '');
+      add('Arrives', [d.arrivalDate ? dayText(d.arrivalDate) : '', d.arrivalTime].filter(Boolean).join(' at '));
+      add('Hands it over', [d.senderName, d.senderPhone ? MDM.ui.phone.format(d.senderPhone) : ''].filter(Boolean).join(' · '));
+      add('Coming from', d.fromIsland);
     } else if (o.requestType === 'office') {
       add('Task', optLabel(MDM.OFFICE_TASKS, d.task));
       add('Office', d.organisation);
@@ -322,6 +329,14 @@
         el('span', { class: 'job__pkgtext' }, [p.description, p.fragile ? 'Fragile' : '', p.needsVehicle ? 'Needs a vehicle' : ''].filter(Boolean).join(' · ') || 'No description')))),
       filesRow(o));
   }
+  // What to collect, right under where to collect it (client, 01/11/2026): the packages with their documents, then the request's own
+  // details (collection code, collect-before time, tracking number, shop and proof), before the delivery.
+  function collectInfo(o) {
+    const rows = dl(detailRows(o));
+    return el('div', { class: 'job__collectinfo', 'data-testid': 'driver-collect-info' }, packagesBlock(o), rows);
+  }
+  // One colour per stage on the action button (client, 01/11/2026): green to start and collect, yellow once collected, red to deliver.
+  const PHASE_TONE = { start: 'go', arrive: 'go', collect: 'collected', out: 'collected', deliver: 'deliver', return: 'deliver' };
   function directionsHref(stop) { return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(Number(stop.lat).toFixed(5) + ',' + Number(stop.lng).toFixed(5)) + '&travelmode=driving'; }
   function officeAlert(o) {
     const stop = (o.route.stops || []).find(s => s.status === 'failed');
@@ -400,16 +415,10 @@
     if ((o.packages || []).some(p => p.fragile)) tags.push(el('span', { class: 'tag' }, 'Fragile'));
     const meta = [MDM.requestTypeLabel(o.requestType), o.customer && o.customer.name].filter(Boolean).join(' · ');
     const target = (ph.stop || cur || showDrop || showPick);
-    const primary = ph.label ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary', 'data-testid': 'driver-action', 'data-action': ph.key, on: { click: e => act(e.currentTarget, o, ph) } }, ph.label) : null;
+    const primary = ph.label ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary job__primary--' + (PHASE_TONE[ph.key] || 'go'), 'data-testid': 'driver-action', 'data-action': ph.key, on: { click: e => act(e.currentTarget, o, ph) } }, ph.label) : null;
     const canFail = ACTIVE.indexOf(o.status) >= 0 && cur;
-    const detailsBody = el('div', { class: 'card__body job__body' }, packagesBlock(o), dl(detailRows(o)), chargesBlock(o));
-    let more = detailsBody;
-    if (!hero) {
-      more = el('details', { class: 'job__more', open: state.moreOpen.has(o.id) || null },
-        el('summary', { class: 'job__more-summary', 'data-testid': 'driver-details' }, el('span', null, 'Details'), el('span', { class: 'job__more-meta' }, packagesLine(o)), el('span', { class: 'job__more-chevron', 'aria-hidden': 'true' }, icon('chevron-down', 18))),
-        detailsBody);
-      more.addEventListener('toggle', () => { if (more.open) state.moreOpen.add(o.id); else state.moreOpen.delete(o.id); });
-    }
+    const charges = chargesBlock(o);
+    const more = charges ? el('div', { class: 'card__body job__body' }, charges) : null;
     return el('article', { class: ['card', 'job', hero && 'job--hero', pri.rank < 9 && 'is-priority', state.focusOrder === o.id && 'is-focus'], 'data-testid': 'driver-job', 'data-order-id': o.id, 'data-code': o.code, 'data-status': o.status },
       el('div', { class: 'card__body job__top' },
         el('div', { class: 'job__head' }, el('h3', { class: 'mono mono--code job__code' }, o.code), html(MDM.badgeFor(o.status))),
@@ -419,6 +428,7 @@
       el('div', { class: 'card__body job__body job__stops' },
         pickups.length > 1 ? el('div', { class: 'job__multi' }, pickups.every(s => s.status === 'done') ? 'All ' + pickups.length + ' collections done' : 'Collection ' + (pickups.indexOf(showPick) + 1) + ' of ' + pickups.length) : null,
         showPick ? stopBlock(o, showPick, 'Collect from', 'driver-pickup') : null,
+        collectInfo(o),
         drops.length > 1 ? el('div', { class: 'job__multi' }, 'Delivery ' + (drops.indexOf(showDrop) + 1) + ' of ' + drops.length) : null,
         showDrop ? stopBlock(o, showDrop, showDrop.type === 'return' ? 'Return to' : 'Deliver to', 'driver-drop') : null),
       el('div', { class: 'card__body job__actions' },
@@ -912,15 +922,24 @@
     const doc = await MDM.store.insert('files', { kind, orderId, name: file.name || kind + '.jpg', type: img.type, size: img.size, dataUrl: img.dataUrl, at: new Date().toISOString() });
     return doc.id;
   }
+  // A picture opens here; a PDF (an invoice, a quotation) opens in the phone's own viewer from a button the driver taps. The file of a
+  // job assigned after this page loaded is read when it is asked for (MDM.remote.file on the live service).
   async function viewFile(fileId, title) {
-    const f = await MDM.store.get('files', fileId);
+    let f = await MDM.store.get('files', fileId);
+    if ((!f || !f.dataUrl) && MDM.remote && MDM.remote.file) f = await MDM.remote.file(fileId).catch(() => null);
     if (!f || !f.dataUrl) { MDM.ui.toast('That file is no longer available', 'warn'); return; }
+    const image = /^image\//.test(f.type || '') || /^data:image\//.test(f.dataUrl);
+    let href = f.dataUrl, blobUrl = null;
+    if (!image && /^data:/.test(href)) { try { blobUrl = URL.createObjectURL(await (await fetch(href)).blob()); href = blobUrl; } catch (e) { /* the data link itself */ } }
     const close = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'driver-file-close' }, 'Close');
     const dlg = el('dialog', { class: 'dialog dialog--wide', 'aria-label': title, 'data-testid': 'driver-file-view' },
-      el('div', { class: 'dialog__body' }, el('h2', { class: 'dialog__title' }, title), el('img', { src: f.dataUrl, alt: title, class: 'job__preview' })),
+      el('div', { class: 'dialog__body' }, el('h2', { class: 'dialog__title' }, title),
+        image ? el('img', { src: f.dataUrl, alt: title, class: 'job__preview' })
+          : el('div', { class: 'stack-4' }, el('p', { class: 'muted' }, f.name || 'Document'),
+            el('a', { class: 'btn btn--primary btn--block', href, target: '_blank', rel: 'noopener', 'data-testid': 'driver-file-open' }, icon('file', 16), 'Open the document'))),
       el('div', { class: 'dialog__footer' }, close));
     close.addEventListener('click', () => dlg.close());
-    dlg.addEventListener('close', () => dlg.remove());
+    dlg.addEventListener('close', () => { dlg.remove(); if (blobUrl) setTimeout(() => URL.revokeObjectURL(blobUrl), 60000); });
     document.body.appendChild(dlg);
     if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
     close.focus();
@@ -1001,13 +1020,14 @@
       fields.push({ name: 'size_' + i, label: several ? 'Category' : 'Package category', type: 'segmented', required: true, value: p.size, options: sizeOptions,
         hint: i === pkgs.length - 1 ? 'Change it if it does not fit. No measuring.' : null });
     });
+    // Naalu and remarks fold into one line (client, 01/11/2026): most collections have neither, and the button stays in reach.
+    const fold = 'Naalu paid, or a remark';
     fields.push({ name: 'naalu', label: 'Naalu paid at collection (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
-      hint: 'Only if you paid a crew or porters.' });
-    fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Dhoni crew, North Harbour' });
-    fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2 });
+      hint: 'Only if you paid a crew or porters.', fold });
+    fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Dhoni crew, North Harbour', fold });
+    fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2, fold });
     const p = MDM.ui.dialog({ title: stop.shop ? 'Shopping done' : 'Collected', message: o.code + ' · ' + addressText(o, stop), fields,
       validate: amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note'), okLabel: 'Confirm collection' });
-    dialogHeading('naalu', 'Paid at collection');
     if (several) pkgs.forEach((p, i) => dialogHeading('photo_' + i, 'Package ' + (i + 1) + (p.description ? ' · ' + p.description : '')));
     const v = await p;
     if (!v || !(await stillYours(o))) return;
@@ -1035,45 +1055,43 @@
   async function onDelivered(btn, o, stop) {
     const isReturn = stop.type === 'return';
     const cod = !isReturn && codDue(o) ? o.cod.amount : 0;
-    const nameField = { name: 'recipientName', label: isReturn ? 'Received by' : 'Recipient name', type: 'text', required: true, autocomplete: 'off', value: !isReturn && stop.contact && stop.contact.name ? stop.contact.name : '', hint: 'Not needed when left as instructed.', requiredMessage: 'Enter who received it' };
+    const nameField = { name: 'recipientName', label: isReturn ? 'Received by' : 'Recipient name', type: 'text', required: true, autocomplete: 'off', value: !isReturn && stop.contact && stop.contact.name ? stop.contact.name : '', requiredMessage: 'Enter who received it' };
+    // Short on a phone (client, 01/11/2026): who took it is one list, a hand-over in person needs no photo (only a package left as
+    // instructed does), and the charges fold into one line so "Confirm delivery" stays close.
     const fields = [
-      { name: 'handedTo', label: 'Handed to', type: 'segmented', required: true, value: 'recipient', options: MDM.HANDED_TO },
+      { name: 'handedTo', label: 'Handed to', type: 'select', required: true, value: 'recipient', options: MDM.HANDED_TO },
       nameField,
-      { name: 'confirmed', label: 'The recipient confirmed they received it', type: 'checkbox', value: false },
-      { name: 'photo', label: 'Proof of delivery', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed if nobody confirms in person.' },
+      { name: 'photo', label: 'Proof of delivery', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed when the package is left as instructed.' },
     ];
     if (cod) fields.push({ name: 'cashCollected', label: 'Cash collected (MVR)', type: 'number', required: true, min: 0, step: 1, placeholder: String(cod), validate: wholeMvr('cashCollected'),
       hint: 'Amount to collect: ' + money(cod), requiredMessage: 'Enter the cash you collected (amount to collect: ' + money(cod) + '). Enter 0 if the receiver did not pay.' });
     // Maldivian Cargo (updates 17/10/2026): the counter's bill, paid by the driver, goes on the customer's delivery charges with its photo.
     const cargo = !isReturn && (o.delivery || {}).method === 'cargo';
+    const fold = cargo ? 'Maldivian Cargo bill, naalu or packing' : isReturn ? 'Naalu paid, or a remark' : 'Naalu, packing or a remark';
     if (cargo) {
       fields.push({ name: 'cargoCharge', label: 'Maldivian Cargo charges (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('cargoCharge'),
-        hint: 'From their bill. Added to the customer\'s charges.' });
-      fields.push({ name: 'cargoBill', label: 'Maldivian Cargo bill', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed when you enter the charges.' });
-      fields.push({ name: 'cargoNote', label: 'Cargo note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Bill MC-204517' });
+        hint: 'From their bill. Added to the customer\'s charges.', fold });
+      fields.push({ name: 'cargoBill', label: 'Maldivian Cargo bill', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed when you enter the charges.', fold });
+      fields.push({ name: 'cargoNote', label: 'Cargo note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Bill MC-204517', fold });
     }
     fields.push({ name: 'naalu', label: 'Naalu paid at delivery (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
-      hint: 'Only if you paid a crew or porters.' });
-    fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Speedboat crew' });
+      hint: 'Only if you paid a crew or porters.', fold });
+    fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Speedboat crew', fold });
     if (!isReturn) {
-      fields.push({ name: 'packing', label: 'Packing charge (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('packing'), hint: 'Added to the customer\'s bill.' });
-      fields.push({ name: 'packingNote', label: 'Packing note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Bubble wrap and a box' });
+      fields.push({ name: 'packing', label: 'Packing charge (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('packing'), hint: 'Added to the customer\'s bill.', fold });
+      fields.push({ name: 'packingNote', label: 'Packing note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Bubble wrap and a box', fold });
     }
-    fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2 });
+    fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2, fold });
     const p = MDM.ui.dialog({ title: isReturn ? 'Returned to sender' : 'Delivered', message: o.code + ' · ' + addressText(o, stop), fields,
       validate: vals => {
-        if (!vals.photo && !vals.confirmed) return { photo: 'Take a photo, or tick that the recipient confirmed' };
+        if (vals.handedTo === 'left' && !vals.photo) return { photo: 'Take a photo of where you left it' };
         if (cargo && Number(vals.cargoCharge) > 0 && !vals.cargoBill) return { cargoBill: 'Take a photo of the Maldivian Cargo bill' };
         return (cargo ? amountOrNote('cargoCharge', 'cargoNote', 'Enter the Maldivian Cargo charges, or clear the note')(vals) : null)
           || amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note')(vals) || (isReturn ? null : amountOrNote('packing', 'packingNote', 'Enter the packing charge, or clear the note')(vals));
       },
       okLabel: isReturn ? 'Confirm return' : 'Confirm delivery' });
-    const seg = document.querySelector('dialog[open] [data-testid="dialog-handedTo"]');
-    if (seg) {
-      seg.classList.add('segmented--stack');
-      seg.addEventListener('change', () => { const c = seg.querySelector('input:checked'); nameField.required = !(c && c.value === 'left'); });
-    }
-    dialogHeading(cod ? 'cashCollected' : cargo ? 'cargoCharge' : 'naalu', cod ? 'Cash and charges' : 'Charges');
+    const handed = document.querySelector('dialog[open] [data-testid="dialog-handedTo"]');
+    if (handed) handed.addEventListener('change', () => { nameField.required = handed.value !== 'left'; });
     if (cod) {
       // A different amount is allowed (the receiver paid part, or nothing) but called out, and the office is told about the difference.
       const wrap = document.querySelector('dialog[open] [data-field="cashCollected"]');
@@ -1092,7 +1110,7 @@
     const v = await p;
     if (!v || !(await stillYours(o))) return;
     btn.disabled = true;
-    const patch = { status: 'done', by: by(), handedTo: v.handedTo, recipientName: v.recipientName || '', confirmed: !!v.confirmed, remarks: v.remarks || '' };
+    const patch = { status: 'done', by: by(), handedTo: v.handedTo, recipientName: v.recipientName || '', confirmed: v.handedTo !== 'left', remarks: v.remarks || '' };
     if (cod) patch.cashCollected = Math.round(Number(v.cashCollected) || 0);
     if (Number(v.naalu) > 0) { patch.naalu = Math.round(v.naalu); patch.naaluNote = v.naaluNote || ''; }
     if (!isReturn && Number(v.packing) > 0) { patch.packing = Math.round(v.packing); patch.packingNote = v.packingNote || ''; }
@@ -1170,7 +1188,7 @@
     if ((id || null) === state.driverId) return;
     stopSim(); stopGps(); hideGpsAlert(); letSleep();
     state.driverId = id || null; state.driver = null; state.online = false; state.nearId = null;
-    state.noteIds = null; state.notesAll = false; state.entered = false; state.moreOpen.clear();
+    state.noteIds = null; state.notesAll = false; state.entered = false;
     map.fitted = false;
     ui.leaveSection.open = false;
     resetLeaveForm();

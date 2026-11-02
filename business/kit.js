@@ -1,6 +1,7 @@
 // Business portal kit (web app updates 11/10/2026 §3, §5): the row model shared by the bulk rows editor and the Excel review,
 // tolerant parsers for spreadsheet values, row validation, conversion to store.createBatch rows, and the SheetJS template / reader.
-// Pure helpers only: no DOM except the on-demand SheetJS <script> tag. Exposed as MDM.bizKit for business/page.js.
+// Pure helpers, plus the package card's controls (rowControl, rowFields) and the on-demand SheetJS <script> tag. Exposed as MDM.bizKit
+// for business/page.js and the office's business order (admin/orders.js).
 (function (MDM) { 'use strict';
 
   const SHEETJS = { src: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', integrity: 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw' };
@@ -239,6 +240,8 @@
     else if (!tiers.some(t => t.value === r.tier)) e.tier = 'Not one of your agreed sizes. Use ' + sizes;
     if (method === 'boat' || method === 'cargo') { if (!String(r.island || '').trim()) e.island = 'Enter the destination island'; }
     if (method === 'boat') {
+      // The address on the island is required (client, 01/11/2026): the receiver is found by it when the boat arrives.
+      if (!String(r.address || '').trim()) e.address = 'Enter the address on the island';
       if (r.raw && r.raw.vesselType && !r.vesselType) e.vesselType = 'Not a vessel type: ' + r.raw.vesselType + '. Use boat, ferry or speedboat';
       else if (!r.vesselType) e.vesselType = 'Choose boat, ferry or speedboat';
       if (!String(r.boatName || '').trim()) e.boatName = 'Enter the boat name';
@@ -397,11 +400,55 @@
     XLSX.writeFile(wb, 'mr-delivery-man-bulk-orders.xlsx');
   }
 
+  // ---- One package as a card: the bulk rows editor, the Excel review, the single order and the office's business order (01/11/2026) ---------------------------------------------------------------------------
+  const WIDE = { address: true, instructions: true, jetty: true, airportPoint: true };
+  const ROW_METHOD_LABEL = { home: 'Home delivery', boat: 'Boat, ferry or speedboat', cargo: 'Maldivian Cargo', airport: 'Airport' };
+  // rowControl(row, key, ctx) → the input or select for one row field, bound to the row object. ctx: { tiers, onInput(row, key), onChange(row, key) }.
+  function rowControl(row, key, ctx, idx) {
+    const el = MDM.ui.el;
+    const label = fieldLabel(key, row.method) + (idx != null ? ', row ' + (idx + 1) : '');
+    const base = { 'data-row': row.id, 'data-key': key, 'aria-label': label };
+    const rawOpt = k => row.raw && row.raw[k] ? el('option', { value: '' }, 'Check: ' + row.raw[k]) : null;
+    let c;
+    const sel = (opts, prompt, k) => { const s = el('select', Object.assign({ class: 'select' }, base), rawOpt(k) || (prompt ? el('option', { value: '' }, prompt) : null), opts.map(o => el('option', { value: o.value }, o.label))); s.value = row[k] || ''; return s; };
+    if (key === 'method') c = sel(methodOptions().map(o => ({ value: o.value, label: ROW_METHOD_LABEL[o.value] || o.label })), null, 'method');
+    else if (key === 'zone') c = sel(zoneOptions(), 'Choose the area', 'zone');
+    else if (key === 'tier') c = sel(tierOptions(ctx.tiers), 'Choose a size', 'tier');
+    else if (key === 'vesselType') c = sel(vesselOptions(), 'Choose', 'vesselType');
+    else if (key === 'jetty') c = sel(jettyOptions(), 'Choose the jetty', 'jetty');
+    else if (key === 'airportPoint') c = sel(airportOptions(), null, 'airportPoint');
+    else if (key === 'departureDate') c = el('input', Object.assign({ class: 'input', type: 'date', value: parseDate(row.departureDate) || '' }, base));
+    else if (key === 'departureTime') c = el('input', Object.assign({ class: 'input', type: 'time', value: parseTime(row.departureTime) || '' }, base));
+    else if (key === 'phone') c = el('input', Object.assign({ class: 'input', type: 'tel', inputmode: 'tel', placeholder: '7XX XXXX', value: row.phone || '' }, base));
+    else if (key === 'cod') c = el('input', Object.assign({ class: 'input', type: 'text', inputmode: 'decimal', placeholder: '0', value: row.cod || '' }, base));
+    else c = el('input', Object.assign({ class: 'input', type: 'text', value: row[key] || '' }, base));
+    const isSelect = c.tagName === 'SELECT';
+    c.addEventListener(isSelect ? 'change' : 'input', () => {
+      row[key] = c.value;
+      if (row.raw && row.raw[key]) delete row.raw[key];
+      if (isSelect && ctx.onChange) ctx.onChange(row, key, c); else if (ctx.onInput) ctx.onInput(row, key, c);
+    });
+    if (!isSelect && ctx.onChange) c.addEventListener('change', () => ctx.onChange(row, key, c));
+    return c;
+  }
+  // Receiver and method first, then the method's own fields in their natural order, then size, cash and notes.
+  const rowKeys = row => ['name', 'phone', 'method'].concat(METHOD_FIELDS[row.method] || METHOD_FIELDS.home, ['tier', 'cod', 'instructions', 'reference', 'description']);
+  const OPTIONAL = ['landmark', 'instructions', 'reference', 'description', 'cod', 'counter', 'speedboat'];
+  // rowFields(row, ctx, idPrefix) → the labelled fields of one package card, in rowKeys order (a method change rebuilds them).
+  function rowFields(row, ctx, idPrefix) {
+    return rowKeys(row).map(k => {
+      const c = rowControl(row, k, ctx);
+      c.removeAttribute('aria-label');
+      c.id = idPrefix + '-' + k;
+      return MDM.ui.field({ name: k, label: fieldLabel(k, row.method), control: c, optional: OPTIONAL.indexOf(k) >= 0 || (k === 'departureTime' && row.method === 'airport'), class: WIDE[k] ? 'bulk-item__wide' : null });
+    });
+  }
+
   MDM.bizKit = {
     norm, COLUMNS, REQUIRED_COLUMNS, METHOD_FIELDS, METHOD_SHORT, uses, fieldLabel,
     airportZone, zoneOptions, jettyOptions, airportOptions, vesselOptions, methodOptions, tierOptions,
     parseZone, parseMethod, parseVessel, parseTier, parseJetty, parseAirportPoint, parseTime, parseDate, parseMoney,
-    blankRow, filled, rowFromCells, validateRow, delivery, toBatchRow, quoteRow,
+    blankRow, filled, rowFromCells, validateRow, delivery, toBatchRow, quoteRow, rowControl, rowKeys, rowFields,
     mapHeaders, recordsFromGrid, parseDelimited, loadXLSX, readFile, downloadTemplate,
   };
 })(window.MDM);

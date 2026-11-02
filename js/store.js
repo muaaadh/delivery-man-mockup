@@ -52,7 +52,7 @@
     on_the_way: ['arrived', 'collected', 'failed', 'cancelled'],
     arrived: ['collected', 'on_the_way', 'failed', 'cancelled'],   // on_the_way: on to the next collection of a multi-collection order
     collected: ['out_for_delivery', 'failed', 'cancelled'],
-    out_for_delivery: ['delivered', 'failed', 'returned', 'cancelled'],   // cancelled: a business cancels after dispatch, the package comes back
+    out_for_delivery: ['delivered', 'failed', 'returned', 'cancelled', 'collected'],   // cancelled: a business cancels after dispatch, the package comes back; collected: given to another driver
     failed: ['dispatched', 'assigned', 'confirmed', 'on_the_way', 'collected', 'out_for_delivery', 'returned', 'cancelled'],
     delivered: [], returned: [], cancelled: [],
   };
@@ -111,10 +111,13 @@
     { value: 'business', label: 'Business Delivery', hint: 'Fixed rates for your package sizes, bulk orders, cash on delivery and one weekly invoice', types: [] },
   ];
   MDM.REQUEST_TYPES = [
+    // Order of the choices (client, 01/11/2026): home, boat, shop or godown, courier. Administrative services left the list for boat
+    // collection; their older orders keep the label.
     { value: 'home',         category: 'pick', label: 'Home collection',              hint: 'Collect from a home address' },
+    { value: 'boat_collect', category: 'pick', label: 'Boat collection',              hint: 'Collect a package arriving on a boat, ferry or speedboat at a Malé jetty' },
     { value: 'shop_collect', category: 'pick', label: 'Shop or godown collection',    hint: 'Collect what you bought from a shop or warehouse; add the invoice, or the quotation and the payment slip' },
     { value: 'postal',       category: 'pick', label: 'Postal & courier collection',  hint: 'Redbox, Pikpost, Post Office, DHL, FedEx and other couriers' },
-    { value: 'office',       category: 'pick', label: 'Administrative services',      hint: 'Collect or submit documents at government offices and ministries' },
+    { value: 'office',       category: 'pick', label: 'Administrative services',      hint: 'Older orders only: documents at government offices', legacy: true },
     { value: 'shop_buy',     category: 'shop', label: 'Shop & deliver',               hint: 'We buy the items on your list and deliver them' },
     { value: 'airport',      category: 'pick', label: 'Airport & baggage',            hint: 'Older orders only: airport runs are now a delivery method', legacy: true },
   ];
@@ -908,6 +911,8 @@
     if (o.status === 'requested') setStatus(o, 'assigned', 'assigned', label + '. We confirm your price after collection', opts.by);
     else if (o.status === 'confirmed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
     else if (o.status === 'failed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
+    // Out for delivery with someone else (client, 01/11/2026): the new driver takes it out again from "collected".
+    else if (o.status === 'out_for_delivery' && reassign) setStatus(o, 'collected', 'assigned', label + '. It goes out again with them', opts.by, 'public', { driverId });
     else pushEvent(o, makeEvent('assigned', label, opts.by, 'public', { driverId }));
     const saved = save(o);
     if (prev && prev !== driverId) releaseDriverIfIdle(prev, o.id);
@@ -1100,6 +1105,57 @@
     } else if (p.action === 'cancel') {
       cancelOn(o, p.remarks || 'Could not be completed', by);
     }
+    return save(o);
+  }
+  // undoStep: the office takes back the last collection or delivery a driver marked done by mistake (client, 01/11/2026: a postponed
+  // delivery was marked delivered). The stop is open again and the order goes back to the step before it; what that step recorded goes
+  // with it: the charges entered there are voided, cash on delivery is pending again (unless it has reached the office), an invoice it
+  // sent goes back to pending, and the collection photos come off the packages (they stay on file). Then the office reschedules or
+  // reassigns as usual.
+  function undoStep(orderId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId);
+    const by = p.by || 'admin', reason = String(p.reason || '').trim();
+    if (!reason) throw new StoreError('validation', 'Say why the step is taken back');
+    if (['cancelled', 'returned'].indexOf(o.status) >= 0) throw new StoreError('transition', 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase());
+    const stops = (o.route && o.route.stops) || [];
+    const s = stops.filter(x => x.status === 'done' && x.type !== 'return').sort((a, b) => (String(a.at || '') < String(b.at || '') ? -1 : 1)).pop();
+    if (!s) throw new StoreError('transition', 'There is no collection or delivery to take back');
+    const drop = s.type !== 'pickup';
+    if (drop && o.cod && ['with_office', 'remitted'].indexOf(o.cod.status) >= 0) throw new StoreError('transition', 'The cash for this delivery is already with the office');
+    const at = String(s.at || '');
+    const stage = drop ? 'delivery' : 'collection';
+    (o.charges || []).forEach(c => {
+      if (c.void || c.reimbursedAt || c.stage !== stage || String(c.at || '') < at) return;
+      if (c.billable) unbillCharge(o, c, by);
+      c.void = true; c.voidedAt = now(); c.voidedBy = by; c.voidReason = 'Step taken back: ' + reason;
+    });
+    s.undone = (s.undone || []).concat([{ at: now(), by, reason, doneAt: s.at, photoId: s.photoId || s.proofPhotoId || null }]);
+    s.status = 'pending'; s.at = null; s.arrivedAt = null;
+    let next = o.status, label;
+    if (drop) {
+      Object.assign(s, { handedTo: null, recipientName: '', confirmed: false, photoId: null });
+      if (o.cod && ['collected', 'not_collected'].indexOf(o.cod.status) >= 0) o.cod = Object.assign({}, o.cod, { status: 'pending', collectedAmount: null, collectedAt: null, collectedBy: null, variance: null });
+      if (o.payment && o.payment.status === 'requested' && !o.payment.upfront && String(o.payment.requestedAt || '') >= at) o.payment = Object.assign({}, o.payment, { status: 'pending', requestedAt: null });
+      if (o.settlement && o.settlement.status !== 'settled') o.settlement = null;
+      if (o.status === 'delivered') next = 'out_for_delivery';
+      label = 'Not delivered yet: the delivery record was taken back';
+    } else {
+      const here = (o.packages || []).filter(k => (s.packageIds || [s.packageId]).indexOf(k.id) >= 0);
+      here.forEach(k => { k.collectionPhotoId = null; if (k.photoSource === 'driver') { k.photoId = null; k.photoSource = null; } });
+      Object.assign(s, { proofPhotoId: null, proofPhotoIds: [] });
+      if (s.shop) {
+        const pkg = o.packages.find(k => k.id === s.packageId), extra = s.collectionId ? (o.extraCollections || []).find(c => c.id === s.collectionId) : null;
+        const sh = pkg && pkg.shop ? pkg.shop : extra && extra.shop ? extra.shop : null;
+        if (sh) { sh.receiptTotal = null; sh.receiptPhotoId = null; recalc(o); }
+        s.receiptTotal = null; s.receiptPhotoId = null;
+      }
+      if (['collected', 'out_for_delivery', 'arrived'].indexOf(o.status) >= 0) next = 'on_the_way';
+      label = 'Not collected yet: the collection record was taken back';
+    }
+    if (next !== o.status) { o.statusHistory = (o.statusHistory || []).concat([{ at: now(), from: o.status, to: next, by, undo: true }]); o.status = next; }
+    pushEvent(o, makeEvent('step_undone', label, by, 'public', { stopId: s.id }));
+    pushEvent(o, makeEvent('note', 'Taken back: ' + reason, by, 'internal', { stopId: s.id }));
     return save(o);
   }
   function driverRoute(driverId) {
@@ -1668,6 +1724,27 @@
     audit('business_approved', 'Business account approved: ' + req.name + ' (' + tiers.map(k => k + ' ' + fmt(rates[k])).join(', ') + ')', p.by || 'admin', { accountId: acc.id });
     return acc;
   }
+  // createBusinessAccount: the office opens an account directly, without a sign-up request (client, 01/11/2026). Signing in comes
+  // later: whoever signs in with the account's email, or its mobile number, gets the account (app.link_user on the live service).
+  function createBusinessAccount(d) {
+    d = d || {};
+    const name = String(d.name || '').trim(), phone = normPhone(d.phone), email = String(d.email || '').trim().toLowerCase();
+    if (!name) throw new StoreError('validation', 'Enter the business name');
+    if (!phone) throw new StoreError('validation', 'Enter a valid mobile number');
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new StoreError('validation', 'Enter a valid email address');
+    const taken = readCol('business_accounts').find(a => a.phone === phone || (email && String(a.email || '').toLowerCase() === email));
+    if (taken) throw new StoreError('validation', taken.name + ' already has this ' + (taken.phone === phone ? 'number' : 'email'));
+    const rates = {}; Object.keys(d.rates || {}).forEach(k => { const v = Math.round(Number(d.rates[k])); if (v > 0) rates[k] = v; });
+    if (!Object.keys(rates).length) throw new StoreError('validation', 'Agree a rate for at least one package size');
+    const tiers = MDM.pricing.businessTiers(settings()).map(t => t.value).filter(k => rates[k] != null);
+    const zone = d.zone || 'male', address = String(d.pickupAddress || '').trim(), contactName = String(d.contactName || '').trim();
+    const acc = insert('business_accounts', { name, contactName, phone, landline: normPhone(d.landline) || '', email, tin: String(d.tin || '').trim(), zone, pickupAddress: address, pickupWindow: '',
+      pickupFrom: 'address', packagePhotos: [], rates, tiers, ratePerPackage: rates[tiers[0]], packagePhotoId: null, assessment: String(d.notes || '').trim(), priorityAllowed: true,
+      status: 'approved', approvedAt: now(), approvedBy: d.by || 'admin',
+      collectionPoints: address ? [{ id: MDM.id('cpt'), label: 'Main', address, zone, landmark: '', contactName, contactPhone: phone, preferredTime: '', isDefault: true }] : [] });
+    audit('business_created', 'Business account opened by our team: ' + name + ' (' + tiers.map(k => k + ' ' + fmt(rates[k])).join(', ') + ')', d.by || 'admin', { accountId: acc.id });
+    return acc;
+  }
   function setBusinessRates(accountId, rates, by) {
     const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
     const clean = {}; Object.keys(rates || {}).forEach(k => { const v = Math.round(Number(rates[k])); if (v > 0) clean[k] = v; });
@@ -1711,14 +1788,14 @@
     createOrder: P(createOrder), modifyOrder: P(modifyOrder), addAdjustment: P(addAdjustment), confirmPrice: P(confirmPrice), updatePackages: P(updatePackages),
     requestPayment: P(requestPayment), submitPayment: P(submitPayment), verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), recordRefund: P(recordRefund), markSettled: P(markSettled),
     cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
-    assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure),
+    assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep),
     driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
     createStoreOrder: P(createStoreOrder), punchIn: P(punchIn), punchOut: P(punchOut), openShift: P(openShift), requestLeave: P(requestLeave), decideLeave: P(decideLeave),
     upsertCustomer: P(upsertCustomer), createInvoice: P(createInvoice), orderByCode: P(orderByCode),
     addCharge: P(addCharge), setChargeBillable: P(setChargeBillable), voidCharge: P(voidCharge), reimburseCharges: P(reimburseCharges), addVehicleCharge: P(addVehicleCharge),
     updateBoat: P(updateBoat), businessCancel: P(businessCancel), markReturned: P(markReturned), cashHandover: P(cashHandover), remitCash: P(remitCash),
     offDayBalance: P(offDayBalance), saveAddress: P(saveAddress), removeAddress: P(removeAddress), saveCollectionPoint: P(saveCollectionPoint), removeCollectionPoint: P(removeCollectionPoint),
-    approveBusinessRequest: P(approveBusinessRequest), setBusinessRates: P(setBusinessRates), deliveryEndpoint: P(d => deliveryEndpoint(d)),
+    approveBusinessRequest: P(approveBusinessRequest), createBusinessAccount: P(createBusinessAccount), setBusinessRates: P(setBusinessRates), deliveryEndpoint: P(d => deliveryEndpoint(d)),
     buildStops: P(o => buildStops(clone(o))),
     _buildStops: buildStops, _batchStatus: batchStatus, _list: list, _settings: settings, _offDayBalance: offDayBalance,   // synchronous, for seed.js, geo zones and reports
   };

@@ -170,6 +170,7 @@
       const actions = [
         el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?batch=' + encodeURIComponent(b.id)), target: '_blank', rel: 'noopener', 'data-testid': 'bulk-labels' }, icon('printer'), 'Print labels'),
         b.status === 'confirmed' ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-collected', on: { click: () => run(() => markCollected(b, kids, settings)) } }, 'Mark collected') : null,
+        kids.some(o => DONE.indexOf(o.status) < 0 && o.driverId) ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-change-driver', on: { click: () => run(() => changeDriver(kids, drivers)) } }, 'Change driver') : null,
         unassigned.length ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-zone', on: { click: () => run(async () => { const r = await MDM.store.assignByZone(b.id, { by: by() }); toast(plural(r.assigned, 'package') + ' assigned by zone' + (r.unmatched ? ', ' + r.unmatched + ' with no zone driver' : ''), r.unmatched ? 'warn' : 'ok'); }) } }, 'Assign by zone') : null,
         toDispatch.length ? el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'bulk-dispatch', on: { click: () => run(async () => { for (const o of toDispatch) await MDM.store.dispatch(o.id, { by: by() }); toast(plural(toDispatch.length, 'package') + ' out for delivery'); }) } }, 'Dispatch ' + plural(toDispatch.length, 'package')) : null,
       ];
@@ -248,7 +249,8 @@
       return [
         cn.returnStatus === 'pending' ? smallBtn('Mark returned', 'bulk-row-returned', () => markReturned(o), 'btn--secondary') : null,
         o.status === 'collected' && o.driverId ? smallBtn('Dispatch', 'bulk-row-dispatch', async () => { await MDM.store.dispatch(o.id, { by: by() }); toast(o.code + ' out for delivery'); }, 'btn--secondary') : null,
-        ['confirmed', 'collected'].indexOf(o.status) >= 0 ? smallBtn(o.driverId ? 'Change driver' : 'Assign', 'bulk-row-assign', () => assignOne(o, drivers, zones)) : null,
+        // Any package still on its way can change driver (client, 01/11/2026), a failed one for its next attempt.
+        active && o.status !== 'requested' ? smallBtn(o.driverId ? 'Change driver' : 'Assign', 'bulk-row-assign', () => assignOne(o, drivers, zones)) : null,
         active && o.accountId ? smallBtn('Cancel', 'bulk-row-cancel', () => cancelOne(o)) : null,
         el('a', { class: 'btn btn--ghost btn--sm', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), target: '_blank', rel: 'noopener' }, 'Label'),
       ];
@@ -292,10 +294,30 @@
       const z = zones.find(x => x.key === (o.delivery || {}).zone);
       const inZone = d => z && (z.driverIds || []).indexOf(d.id) >= 0;
       const options = drivers.slice().sort((a, b) => inZone(b) - inZone(a) || a.name.localeCompare(b.name)).map(d => ({ value: d.id, label: d.name + (inZone(d) ? ' · ' + (z.short || z.name) : '') }));
-      const v = await MDM.ui.dialog({ title: 'Driver for ' + o.code, okLabel: 'Assign', fields: [{ name: 'driverId', label: 'Driver', type: 'select', options, value: o.driverId || (options[0] || {}).value }] });
+      const v = await MDM.ui.dialog({ title: 'Driver for ' + o.code, okLabel: 'Assign', message: o.status === 'failed' ? 'Its next attempt goes with this driver.' : o.status === 'out_for_delivery' ? 'The new driver takes it out again.' : null,
+        fields: [{ name: 'driverId', label: 'Driver', type: 'select', options, value: o.driverId || (options[0] || {}).value }] });
       if (!v) return;
-      await MDM.store.assignDriver(o.id, v.driverId, { by: by() });
+      await moveTo(o, v.driverId);
       toast(o.code + ' assigned to ' + F.driverName(v.driverId, drivers));
+    }
+    // A failed package goes to its next attempt (resolveFailure "reassign"); any other one changes driver where it is.
+    const moveTo = (o, driverId) => o.status === 'failed'
+      ? MDM.store.resolveFailure(o.id, { action: 'reassign', driverId, remarks: 'Next attempt', by: by() })
+      : MDM.store.assignDriver(o.id, driverId, { by: by() });
+    // A driver changed in the middle of a distribution (client, 01/11/2026): everything still with one driver goes to another.
+    async function changeDriver(kids, drivers) {
+      const open = kids.filter(o => DONE.indexOf(o.status) < 0 && o.driverId);
+      const holders = Array.from(new Set(open.map(o => o.driverId)));
+      if (!holders.length) { toast('No package of this bulk order is with a driver now', 'warn'); return; }
+      const count = id => open.filter(o => o.driverId === id).length;
+      const v = await MDM.ui.dialog({ title: 'Change driver', message: 'Every package of this bulk order still with the first driver goes to the second.', okLabel: 'Change driver',
+        fields: [{ name: 'from', label: 'From', type: 'select', options: holders.map(id => ({ value: id, label: F.driverName(id, drivers) + ' · ' + plural(count(id), 'package') })), value: holders[0] },
+          { name: 'to', label: 'To', type: 'select', options: drivers.slice().sort((a, b) => a.name.localeCompare(b.name)).map(d => ({ value: d.id, label: d.name })), required: true }],
+        validate: x => x.from === x.to ? { to: 'Choose another driver' } : null });
+      if (!v) return;
+      const moving = open.filter(o => o.driverId === v.from);
+      for (const o of moving) await moveTo(o, v.to);
+      toast(plural(moving.length, 'package') + ' now with ' + F.driverName(v.to, drivers), 'ok');
     }
     // CSV / spreadsheet rows: name, phone, address, zone, size category, description, reference, delivery method, cash to collect.
     // A header line is skipped; cells may be quoted ("Amin Avenue, Block B") or tab separated when pasted from a spreadsheet.

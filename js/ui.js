@@ -391,14 +391,24 @@
     return { wrap, ctrl, focusEl: focusEl || (() => ctrl) };
   }
   // dialog({ title, message, fields, okLabel, cancelLabel, danger, validate(values) → string | { field: msg } | null }) → Promise<values|null>
+  // A field with `fold: 'Add a charge'` goes into a closed section with that title, together with the fields next to it that carry the
+  // same fold; it opens by itself when one of its fields has an error.
   function dialog(opts) {
     opts = opts || {};
     const prefix = uid('dlg'), urls = [], fields = opts.fields || [], parts = {};
     const formError = el('div', { class: 'field__error dialog__error', role: 'alert', hidden: true });
     const body = el('div', { class: 'dialog__fields' });
+    let fold = null;
     fields.forEach(f => {
       const p = buildField(f, prefix, urls);
-      parts[f.name] = p; body.appendChild(p.wrap);
+      parts[f.name] = p;
+      if (f.fold) {
+        if (!fold || fold.title !== f.fold) {
+          fold = { title: f.fold, node: el('details', { class: 'dialog__fold', 'data-testid': 'dialog-fold' }, el('summary', { class: 'dialog__fold-summary' }, f.fold)) };
+          body.appendChild(fold.node);
+        }
+        fold.node.appendChild(p.wrap);
+      } else { fold = null; body.appendChild(p.wrap); }
       p.wrap.addEventListener('input', () => { setError(p.wrap, null); formError.hidden = true; formError.textContent = ''; });
       p.wrap.addEventListener('change', () => { setError(p.wrap, null); formError.hidden = true; formError.textContent = ''; });
     });
@@ -407,7 +417,7 @@
     function check() {
       values = {};
       let first = null;
-      const fail = (name, msg) => { const p = parts[name]; if (!p) return; setError(p.wrap, msg); if (!first) first = p.focusEl(); };
+      const fail = (name, msg) => { const p = parts[name]; if (!p) return; const d = p.wrap.closest('details'); if (d) d.open = true; setError(p.wrap, msg); if (!first) first = p.focusEl(); };
       fields.forEach(f => {
         const v = fieldValue(f, parts[f.name].ctrl);
         values[f.name] = v;

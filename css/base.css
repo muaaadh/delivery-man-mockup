@@ -521,6 +521,29 @@ body.page-track .maplibregl-ctrl-group button, body.page-driver .maplibregl-ctrl
 .dialog__message { color: var(--text-2); max-width: none; }
 .dialog__fields { color: var(--text); }
 .dialog__fields > .field, .dialog__fields > .field + .field { margin-top: 16px; }
+/* One package as a card (business bulk orders, the single business order and the office's business order): labelled fields in a
+   responsive grid. */
+.bulk-items { display: grid; gap: 16px; }
+.bulk-item { border-radius: var(--radius); padding: 12px 16px 16px; background: var(--surface); min-width: 0; }
+.bulk-item__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 12px; }
+.bulk-item__title { font-size: 15px; }
+.bulk-item__rate { flex: 1 1 auto; min-width: 0; }
+.bulk-item__remove { margin-left: auto; }
+.bulk-item__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 16px; }
+.bulk-item__grid > .field { margin-top: 0; min-width: 0; }
+.bulk-item__wide { grid-column: span 2; }
+@media (max-width: 480px) {
+  .bulk-item { padding: 12px; }
+  .bulk-item__grid { grid-template-columns: minmax(0, 1fr); }
+  .bulk-item__wide { grid-column: auto; }
+}
+/* A closed group of optional fields (dialog({ fields: [{ fold }] })): one line until opened. */
+.dialog__fold { margin-top: 16px; border: 1px solid var(--border); border-radius: 12px; }
+.dialog__fold-summary { cursor: pointer; padding: 12px 14px; font-weight: 600; font-size: 15px; list-style: none; display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.dialog__fold-summary::-webkit-details-marker { display: none; }
+.dialog__fold-summary::before { content: '+'; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); font-weight: 700; line-height: 1; }
+.dialog__fold[open] > .dialog__fold-summary::before { content: '\2212'; }
+.dialog__fold > .field { margin: 0 14px 14px; }
 .dialog__error { margin-top: 12px; }
 .dialog__actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin: 24px -24px -24px; padding: 14px 24px; border-top: 1px solid var(--border); }
 .file-pick { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

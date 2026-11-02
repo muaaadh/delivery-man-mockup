@@ -374,6 +374,7 @@
     task: 'Task', organisation: 'Office or organisation', reference: 'Reference', details: 'Details', returnDocs: 'Bring documents back',
     shopName: 'Shop or godown', shopAddress: 'Shop or godown address', shopZone: 'Shop or godown area', proof: 'Proof of purchase', orderNo: 'Order or invoice number',
     paidByCustomer: 'Already paid', notes: 'Notes',
+    tier: 'Size category', vesselType: 'Arriving on', boatName: 'Boat name', jetty: 'Arriving at', arrivalDate: 'Arrival date', arrivalTime: 'Arrival time', senderName: 'Hands it over', senderPhone: 'Their number', fromIsland: 'Coming from',
   };
   function detailValue(k, v) {
     if (v === true) return 'Yes'; if (v === false) return 'No';
@@ -384,6 +385,10 @@
     if (k === 'area') return label(MDM.geo.airportPoints(), v);
     if (k === 'task') return label(MDM.OFFICE_TASKS, v);
     if (k === 'shopZone') return MDM.geo.zoneLabel(v);
+    if (k === 'tier') return (MDM.pricing.businessTiers(state.settings).find(t => t.value === v) || {}).label || v;
+    if (k === 'vesselType') return label(MDM.VESSEL_TYPES, v);
+    if (k === 'jetty') return jettyLabel(v);
+    if (k === 'senderPhone') return phone.format(v);
     if (k === 'proof') return { invoice: 'Invoice', quotation: 'Quotation and payment slip', order_no: 'Order number' }[v] || v;
     if (k === 'ownerContact' || k === 'passengerPhone') return phone.format(v);
     return String(v);
@@ -409,7 +414,51 @@
         el('div', { class: 'list__aside mono' }, '× ' + (i.qty || 1)))))) : null;
     const storeItems = o.items && o.items.length ? el('div', { class: 'list' }, o.items.map(i => el('div', { class: 'list__item' }, el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, i.qty + ' × ' + i.name)), el('div', { class: 'list__aside mono' }, money(i.total))))) : null;
     if (!rows.filter(Boolean).length && !shopItems && !storeItems) return null;
-    return sec(F.typeLabel(o) + ' details', 'drawer-details', rows.filter(Boolean).length ? el('div', { class: 'rate-table' }, rows) : null, shopItems, storeItems);
+    const edit = o.requestType === 'postal' && open(o) ? el('div', { class: 'row row--wrap' }, smallBtn('Edit collection details', 'drawer-edit-postal', () => editPostal(o), 'btn--secondary')) : null;
+    return sec(F.typeLabel(o) + ' details', 'drawer-details', rows.filter(Boolean).length ? el('div', { class: 'rate-table' }, rows) : null, shopItems, storeItems, edit);
+  }
+  // Postal and courier details the office corrects (client, 01/11/2026): the carrier's own fields, as the request form asks them. A new
+  // Pikpost location or post office moves the collection there too (store.modifyOrder keeps the packages and the route in step).
+  const POSTAL_EDIT = {
+    redbox_maafannu: ['collectionCode', 'collectBefore', 'trackingNo'],
+    redbox_main: ['trackingNo', 'ownerName', 'ownerContact', 'shippingAddress'],
+    pikpost: ['location', 'collectionCode', 'collectBefore', 'trackingNo'],
+    post_office: ['postOffice', 'trackingNo', 'collectionCode', 'ownerName', 'ownerContact', 'shippingAddress'],
+    courier: ['courierName', 'trackingNo', 'ownerName', 'ownerContact'],
+    dhl: ['trackingNo', 'ownerName', 'ownerContact'],
+  };
+  async function editPostal(o) {
+    o = await fresh(o);
+    const d = o.details || {};
+    const keys = (POSTAL_EDIT[d.carrier] || ['trackingNo', 'collectionCode', 'ownerName', 'ownerContact']).concat(['idNote']);
+    const FIELD = {
+      location: { label: 'Pikpost location', type: 'select', options: MDM.PIKPOST_LOCATIONS.map(x => ({ value: x.value, label: x.label })), required: true },
+      postOffice: { label: 'Post office', type: 'select', options: MDM.POST_OFFICES.map(x => ({ value: x.value, label: x.label })), required: true },
+      courierName: { label: 'Courier', type: 'text' },
+      collectionCode: { label: 'Collection code', type: 'text' },
+      collectBefore: { label: 'Collect before', type: 'datetime-local' },
+      trackingNo: { label: 'Tracking number', type: 'text' },
+      ownerName: { label: 'Owner name', type: 'text' },
+      ownerContact: { label: 'Owner contact', type: 'tel', intl: true },
+      shippingAddress: { label: 'Shipping address', type: 'text' },
+      idNote: { label: 'Note for the driver', type: 'textarea', rows: 2 },
+    };
+    const valueOf = k => k === 'collectBefore' ? String(d.collectBefore || '').replace(' ', 'T') : k === 'idNote' ? (d.idNote || d.smsNote || '') : (d[k] == null ? '' : d[k]);
+    const v = await dialog({ title: 'Collection details · ' + o.code, message: (label(MDM.CARRIERS, d.carrier) || 'Carrier') + '. Changes are recorded with your name.', okLabel: 'Save details',
+      fields: keys.map(k => Object.assign({ name: k, value: valueOf(k) }, FIELD[k])) });
+    if (!v) return;
+    const details = {};
+    keys.forEach(k => {
+      const next = k === 'collectBefore' ? String(v[k] || '').replace('T', ' ') : k === 'ownerContact' ? (phone.normalize(v[k]) || trim(v[k])) : v[k];
+      if (String(next == null ? '' : next) !== String(k === 'idNote' ? valueOf(k) : d[k] == null ? '' : d[k])) details[k] = next;
+    });
+    const patch = { details };
+    const loc = d.carrier === 'pikpost' && MDM.PIKPOST_LOCATIONS.find(x => x.value === v.location);
+    const po = d.carrier === 'post_office' && MDM.POST_OFFICES.find(x => x.value === v.postOffice);
+    if (loc && v.location !== d.location) patch.collection = { address: 'Pikpost locker, ' + loc.label, zone: loc.zone };
+    if (po && v.postOffice !== d.postOffice) patch.collection = { address: po.label, zone: po.zone };
+    const upd = await MDM.store.modifyOrder(o.id, patch, by());
+    toast((upd.changes || []).length > (o.changes || []).length ? 'Collection details saved' : 'Nothing changed', 'ok');
   }
   // Where the package is handed over: a home address, or the jetty / cargo counter / airport point of the delivery method (§3).
   function deliverToBlock(o) {
@@ -877,6 +926,10 @@
     if (open(o) || st === 'delivered') items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
     // Delivered and not paid yet (client, 31/10/2026): the payment step sits here too, next to Labels, not only in the Payment section.
     const pay = (o.payment || {}).status;
+    // A step marked done by mistake (client, 01/11/2026): the last delivery, or the collection while nothing is delivered yet.
+    const doneStops = ((o.route && o.route.stops) || []).filter(x => x.status === 'done' && x.type !== 'return');
+    if (st === 'delivered' || (doneStops.some(x => x.type !== 'pickup') && st === 'out_for_delivery')) items.push(btn('Undo delivered', 'drawer-undo-delivered', 'btn--ghost', () => undoLast(o, 'Delivered')));
+    else if (['collected', 'out_for_delivery'].indexOf(st) >= 0 && doneStops.length) items.push(btn('Undo collected', 'drawer-undo-collected', 'btn--ghost', () => undoLast(o, 'Collected')));
     if (st === 'delivered' && o.payment && o.payment.method !== 'invoice') {
       if (pay === 'pending') items.push(btn('Request payment', 'drawer-footer-request-payment', 'btn--primary', () => requestPayment(o)));
       else if (pay === 'received') items.push(btn('Verify payment', 'drawer-footer-verify', 'btn--primary', () => verify(o)));
@@ -897,7 +950,7 @@
     else if (st === 'on_the_way') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn('Arrived', 'drawer-arrived', 'btn--secondary', () => arrived(o)), btn('Mark collected', 'drawer-collected', 'btn--primary', () => collected(o)));
     else if (st === 'arrived') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn('Mark collected', 'drawer-collected', 'btn--primary', () => collected(o)));
     else if (st === 'collected') items.push(o.driverId ? btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)) : null, btn(o.batchId ? 'Dispatch for delivery' : 'Out for delivery', 'drawer-out', 'btn--primary', () => outForDelivery(o)));
-    else if (st === 'out_for_delivery') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn(nextStop(o, ['return']) ? 'Mark returned' : 'Mark delivered', 'drawer-deliver', 'btn--primary', () => delivered(o)));
+    else if (st === 'out_for_delivery') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), o.driverId ? btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)) : null, btn(nextStop(o, ['return']) ? 'Mark returned' : 'Mark delivered', 'drawer-deliver', 'btn--primary', () => delivered(o)));
     else if (st === 'failed') items.push(btn('Decide what happens next', 'drawer-resolve', 'btn--primary', () => resolveFailure(o, ctx)));
     else if (st === 'cancelled' && F.returnPending(o)) items.push(btn('Mark returned', 'drawer-mark-returned', 'btn--primary', () => markReturned(o)));
     return items.filter(Boolean);
@@ -940,15 +993,45 @@
     const due = o.status === 'delivered' && o.payment && o.payment.method !== 'invoice' && o.payment.status === 'requested';
     return 'Mr. Delivery Man, order ' + o.code + ': ' + MDM.STATUS[o.status].customer + '. ' + (due ? 'Amount due ' + money(o.totals.total) + '. Pay and track it here: ' : 'Track it here: ') + trackUrl(o);
   }
-  function openExternal(href) { const a = el('a', { href, target: '_blank', rel: 'noopener', class: 'sr-only' }, 'Open'); document.body.appendChild(a); a.click(); a.remove(); }
-  async function sendUpdate(o, text) {
+  // The payment request (client, 01/11/2026: "Request payment" sent nothing): the amount and the tracking link, where the customer pays
+  // without signing in.
+  function paymentMessage(o) {
+    return 'Mr. Delivery Man, order ' + o.code + ': payment of ' + money(o.totals.total) + ' is due. Pay by bank transfer and send the slip here: ' + trackUrl(o);
+  }
+  // Send a message (client, 01/11/2026: Viber did not open): the text, then WhatsApp, Viber and SMS as buttons the operator taps, the
+  // customer's own channel first. A real tap is what lets the browser open the app. Viber does not always take the text from its link,
+  // so tapping Viber also copies the message to paste.
+  function sendUpdate(o, text, opts) {
+    opts = opts || {};
     const c = o.customer || {};
     const links = phone.links(c.phone, text);
-    if (!links) { toast('This order has no phone number to message', 'warn'); return; }
-    const ch = c.notify === 'viber' ? 'viber' : c.notify === 'sms' ? 'sms' : 'whatsapp';
-    if (ch === 'viber') { await MDM.ui.copy(text); toast('Message copied. Paste it into the Viber chat.', 'ok'); }
-    openExternal(ch === 'viber' ? links.viber : ch === 'sms' ? links.sms : links.wa);
-    await MDM.store.addEvent(o.id, { type: 'update_sent', label: 'Update sent via ' + F.NOTIFY[ch], by: by(), visibility: 'internal' });
+    if (!links) { toast('This order has no phone number to message', 'warn'); return Promise.resolve(null); }
+    const pref = c.notify === 'viber' ? 'viber' : c.notify === 'sms' ? 'sms' : 'whatsapp';
+    const viber = links.viber + '&draft=' + encodeURIComponent(text);
+    const channels = [['whatsapp', 'WhatsApp', links.wa, '_blank'], ['viber', 'Viber', viber, null], ['sms', 'SMS', links.sms, null]]
+      .sort((a, b) => (b[0] === pref) - (a[0] === pref));
+    return new Promise(resolve => {
+      let sent = null;
+      const close = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'send-close' }, sent ? 'Done' : 'Close');
+      const dlg = el('dialog', { class: 'dialog', 'aria-labelledby': 'send-title', 'data-testid': 'send-dialog' },
+        el('div', { class: 'dialog__body stack-4' },
+          el('h2', { class: 'dialog__title', id: 'send-title' }, opts.title || 'Send an update to ' + (c.name || 'the customer')),
+          el('p', { class: 'muted small' }, phone.format(c.phone) + ' · prefers ' + (F.NOTIFY[pref] || 'WhatsApp')),
+          el('textarea', { class: 'textarea', rows: 4, readonly: true, 'data-testid': 'send-text', 'aria-label': 'Message' }, text),
+          el('div', { class: 'row row--wrap' }, channels.map(([ch, label, href, target]) => el('a', { class: 'btn ' + (ch === pref ? 'btn--primary' : 'btn--secondary'), href, target, rel: target ? 'noopener' : null, 'data-testid': 'send-' + ch,
+            on: { click: () => {
+              if (ch === 'viber') MDM.ui.copy(text).then(() => toast('Message copied: paste it into the Viber chat if it is empty.', 'ok')).catch(() => {});
+              sent = ch; close.textContent = 'Done';
+              MDM.store.addEvent(o.id, { type: 'update_sent', label: (opts.what || 'Update') + ' sent via ' + F.NOTIFY[ch], by: by(), visibility: 'internal' }).catch(() => {});
+            } } }, label))),
+          el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'send-copy', on: { click: () => MDM.ui.copy(text).then(() => toast('Message copied', 'ok')).catch(() => {}) } }, html(MDM.icon('copy', 16)), 'Copy the message')),
+        el('div', { class: 'dialog__footer' }, close));
+      close.addEventListener('click', () => dlg.close());
+      dlg.addEventListener('close', () => { dlg.remove(); resolve(sent); });
+      document.body.appendChild(dlg);
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+      const first = dlg.querySelector('[data-testid="send-' + pref + '"]'); if (first) first.focus();
+    });
   }
   async function storePhoto(file, orderId, kind) {
     if (!file) return null;
@@ -1148,11 +1231,12 @@
   }
   async function requestPayment(o) {
     const delivered = o.status === 'delivered';
-    const v = await dialog({ title: 'Request payment for ' + o.code, message: 'The customer gets the invoice ' + money(o.totals.total) + ' and the bank details by ' + (F.NOTIFY[o.customer.notify] || 'SMS') + '.', okLabel: 'Request payment',
+    const v = await dialog({ title: 'Request payment for ' + o.code, message: 'Then send the customer the amount, ' + money(o.totals.total) + ', and the link to pay by ' + (F.NOTIFY[o.customer.notify] || 'SMS') + ': they pay without signing in.', okLabel: 'Request payment',
       fields: delivered ? [] : [{ name: 'upfront', label: 'This is an upfront payment, before delivery', type: 'checkbox', value: true }] });
     if (!v) return;
-    await MDM.store.requestPayment(o.id, { by: by(), upfront: delivered ? false : !!v.upfront });
+    const upd = await MDM.store.requestPayment(o.id, { by: by(), upfront: delivered ? false : !!v.upfront });
     toast('Payment requested', 'ok');
+    await sendUpdate(upd || o, paymentMessage(upd || o), { title: 'Send the payment request', what: 'Payment request' });
   }
   async function verify(o) {
     const v = await dialog({ title: 'Verify payment for ' + o.code, message: 'Declared ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total) + ', reference ' + (o.payment.reference || o.code) + '.', okLabel: 'Verify payment',
@@ -1239,12 +1323,23 @@
   async function reassign(o, ctx) {
     const options = driverChoices(o, ctx, o.driverId);
     const first = options.find(x => !x.disabled);
-    const v = await dialog({ title: 'Reassign ' + o.code, message: 'Currently with ' + (F.driverName(o.driverId, ctx.drivers) || 'nobody') + '. The route stays the same.', okLabel: 'Reassign',
+    const v = await dialog({ title: 'Reassign ' + o.code, message: 'Currently with ' + (F.driverName(o.driverId, ctx.drivers) || 'nobody') + '. The route stays the same' + (o.status === 'out_for_delivery' ? '; the new driver takes it out again.' : '.'), okLabel: 'Reassign',
       fields: [{ name: 'driverId', label: 'New driver', type: 'select', options, value: first ? first.value : '' }, { name: 'remarks', label: 'Remarks', type: 'text' }] });
     if (!v || !v.driverId) return;
     await MDM.store.assignDriver(o.id, v.driverId, { by: by() });
     if (v.remarks) await MDM.store.addNote(o.id, { text: 'Reassigned: ' + v.remarks, by: by() });
     toast('Driver changed to ' + F.driverName(v.driverId, ctx.drivers), 'ok');
+  }
+  // Take back the last collection or delivery a driver marked done by mistake (store.undoStep): then reschedule or reassign it.
+  async function undoLast(o, what) {
+    const delivered = what === 'Delivered';
+    const v = await dialog({ title: 'Undo "' + what + '" on ' + o.code, okLabel: 'Undo ' + what.toLowerCase(), danger: true,
+      message: delivered ? 'The order is out for delivery again. Cash and charges recorded at the delivery are taken back, and an invoice it sent goes back to pending.'
+        : 'The collection is to do again. Charges recorded at it are taken back; the photos stay on file.',
+      fields: [{ name: 'reason', label: 'Why', type: 'textarea', rows: 2, required: true, placeholder: delivered ? 'Customer asked to deliver after 19:30' : 'Collected from the wrong place', requiredMessage: 'Say why' }] });
+    if (!v) return;
+    await MDM.store.undoStep(o.id, { reason: v.reason, by: by() });
+    toast(delivered ? o.code + ' is out for delivery again' : o.code + ': collection to do again', 'ok');
   }
   async function dispatchOrder(o) { await MDM.store.dispatch(o.id, { by: by() }); toast('Dispatched to ' + F.driverName(o.driverId, state.drivers), 'ok'); }
   async function startRoute(o) { await MDM.store.startRoute(o.id, { by: by() }); toast('Marked on the way', 'ok'); }
@@ -1505,7 +1600,7 @@
   }
   // The business order drawer.
   async function openNewOrder() {
-    if (!MDM.packageEditor || typeof MDM.packageEditor.create !== 'function') { toast('The package form is not loaded on this page', 'danger'); return; }
+    if (!MDM.bizKit) { toast('The package form is not loaded on this page', 'danger'); return; }
     if (state.drawer.kind) { state.drawer.silent = true; drawer.close(); state.drawer.silent = false; }
     const [accounts, settings] = await Promise.all([MDM.store.list('business_accounts', { where: { status: 'approved' } }), MDM.store.settings()]);
     state.settings = settings;
@@ -1574,8 +1669,7 @@
       if (setTime) cTime.value = p ? (p.preferredTime || '') : '';
       setError(cFields.address, null); setError(cFields.phone, null);
     }
-    pointSel.addEventListener('change', () => { syncPoint(true); renderPackages(); });
-    cZone.addEventListener('change', () => renderPackages());
+    pointSel.addEventListener('change', () => syncPoint(true));
     // collectionFor() → order.collection, recorded as the business portal records it.
     function collectionFor() {
       const p = point(), a = account() || {}, extra = { instructions: trim(cNote.value), preferredTime: cTime.value || '' };
@@ -1605,302 +1699,136 @@
       el('div', { class: 'grid-2' }, field(cTime.id, 'Preferred collection time', cTime, { optional: true }), field(cNote.id, 'Collection instructions', cNote, { optional: true })),
       groupField('When', levelSeg), advBlock);
 
-    // Delivery method (§3): home delivery uses each package's drop-off; boat, Maldivian Cargo and airport have their own details.
-    const rName = input('recipient-name', { autocomplete: 'off' });
-    const rPhone = input('recipient-phone', { type: 'tel', inputmode: 'numeric', placeholder: '7XX XXXX' });
-    const dNote = el('textarea', { class: 'textarea', id: uid + '-delivery-instructions', rows: 2, 'data-testid': 'neworder-delivery-instructions', placeholder: 'Call the receiver when the boat leaves' });
-    const rNameField = clearOnInput(rName, field(rName.id, "Receiver's name", rName));
-    const rPhoneField = clearOnInput(rPhone, field(rPhone.id, "Receiver's contact number", rPhone, { hint: 'Overseas numbers start with +' }));
-    const receiverBlock = el('div', { class: 'stack-4', hidden: true, 'data-testid': 'neworder-receiver' }, el('div', { class: 'grid-2' }, rNameField, rPhoneField));
-    const dNoteField = field(dNote.id, 'Delivery instructions', dNote, { optional: true });
-    const homeNote = el('p', { class: 'muted small', 'data-testid': 'neworder-method-home' }, 'Each package has its own drop-off and receiver.');
-    // Boat, ferry or speedboat (§3.2)
-    let vessel = 'speedboat';
-    const vesselSeg = segmented(uid + '-vessel', MDM.VESSEL_TYPES, vessel, 'neworder-vessel', v => { vessel = v; renderPackages(); });
-    const boatName = input('boat-name', { placeholder: 'Thulusdhoo Express' });
-    const boatDate = input('boat-date', { type: 'date', value: dayKey(new Date()) });
-    const boatTime = input('boat-time', { type: 'time' });
-    const jettySel = el('select', { class: 'select', id: uid + '-boat-jetty', 'data-testid': 'neworder-boat-jetty' }, MDM.geo.jetties().map(t => el('option', { value: t.value }, t.label)));
-    const boatIsland = input('boat-island', { placeholder: 'Thulusdhoo, Kaafu Atoll' });
-    const boatAddress = input('boat-address', { placeholder: 'Ma. Fehi Villa' });
+    // The package (client, 01/11/2026): one card like the business portal's bulk order (MDM.bizKit.rowFields): the receiver, the
+    // delivery method and its details, the size category with its rate, cash to collect, instructions, reference and contents. Several
+    // packages of the same size go to the same receiver; a boat's own contact and fragile handling sit under the card.
+    const K = MDM.bizKit;
+    // Business packages carry the account's size category and its agreed rate; a size the business never agreed keeps its own category
+    // at the default rate (as the store does on a category change), instead of silently becoming the cheapest agreed category.
+    function tierChoices() {
+      const agreed = accountTiers();
+      return MDM.pricing.businessTiers(settings).map(t => agreed.find(a => a.value === t.value) || Object.assign({}, t, { rate: MDM.pricing.businessRate(account(), t.value, settings), notAgreed: true }))
+        .map(t => Object.assign({}, t, { label: t.label + (t.notAgreed ? ' (default rate)' : '') }));
+    }
+    const row = n.row = K.blankRow(tierChoices().filter(t => !t.notAgreed).concat(tierChoices()));
+    const cardHost = el('div', { class: 'bulk-items', 'data-testid': 'neworder-card-host' });
+    const qtyIn = input('qty', { type: 'number', inputmode: 'numeric', min: 1, max: 20, step: 1, value: '1' });
+    const qtyField = clearOnInput(qtyIn, field(qtyIn.id, 'Packages', qtyIn, { hint: 'Same size, same receiver' }));
+    const fragileIn = el('input', { type: 'checkbox', id: uid + '-fragile', 'data-testid': 'neworder-fragile' });
     const boatContact = input('boat-contact', { type: 'tel', inputmode: 'numeric', placeholder: '7XX XXXX' });
-    const boatFields = {
-      name: clearOnInput(boatName, field(boatName.id, 'Boat, ferry or speedboat name', boatName)),
-      time: clearOnInput(boatTime, field(boatTime.id, 'Departure time', boatTime)),
-      island: clearOnInput(boatIsland, field(boatIsland.id, 'Destination island', boatIsland)),
-      contact: clearOnInput(boatContact, field(boatContact.id, 'Contact of the boat', boatContact, { optional: true, hint: 'Captain or crew, if not the receiver' })),
-    };
-    const boatBlock = el('div', { class: 'stack-4', hidden: true, 'data-testid': 'neworder-boat' },
-      groupField('Vessel', vesselSeg),
-      el('div', { class: 'grid-2' }, boatFields.name, field(jettySel.id, 'Harbour or jetty', jettySel)),
-      el('div', { class: 'grid-2' }, field(boatDate.id, 'Departure date', boatDate), boatFields.time),
-      el('div', { class: 'grid-2' }, boatFields.island, field(boatAddress.id, 'Destination address', boatAddress, { optional: true })),
-      boatFields.contact);
-    [jettySel, boatName, boatTime, boatIsland].forEach(c => c.addEventListener('change', () => renderPackages()));
-    // Maldivian Cargo (§3.3)
-    const counter = MDM.geo.cargoCounter() || { label: 'Maldivian Cargo counter, main bus terminal' };
-    const cargoIsland = input('cargo-island', { placeholder: 'Kulhudhuffushi, Haa Dhaalu' });
-    const cargoConsignee = input('cargo-consignee', { placeholder: 'Name written on the cargo' });
-    const cargoIslandField = clearOnInput(cargoIsland, field(cargoIsland.id, 'Destination island', cargoIsland));
-    const cargoBlock = el('div', { class: 'stack-4', hidden: true, 'data-testid': 'neworder-cargo' },
-      el('p', { class: 'muted small' }, 'To the ' + counter.label + '. Fee ' + money((settings.rates || {}).cargo || 0) + '.'),
-      el('div', { class: 'grid-2' }, cargoIslandField, field(cargoConsignee.id, 'Name on the cargo', cargoConsignee, { optional: true, hint: 'Defaults to the receiver' })));
-    // Airport (§3.4)
-    const airportSel = el('select', { class: 'select', id: uid + '-airport-point', 'data-testid': 'neworder-airport-point' }, MDM.geo.airportPoints().map(p => el('option', { value: p.value }, p.label)));
-    airportSel.value = 'resort_counters';
-    const aCounter = input('airport-counter', { placeholder: 'Lagoon Point Resort counter' });
-    const aResort = input('airport-resort', { placeholder: 'Lagoon Point Resort, Baa Atoll' });
-    const aBoat = input('airport-speedboat', { placeholder: 'Lagoon Express 3' });
-    const aTime = input('airport-time', { type: 'time' });
-    const aNote = el('textarea', { class: 'textarea', id: uid + '-airport-instructions', rows: 2, 'data-testid': 'neworder-airport-instructions', placeholder: 'Hand to the resort host' });
-    const airportFields = {
-      counter: clearOnInput(aCounter, field(aCounter.id, 'Resort counter or collection point', aCounter)),
-      resort: clearOnInput(aResort, field(aResort.id, 'Resort or destination', aResort)),
-    };
-    const airportBlock = el('div', { class: 'stack-4', hidden: true, 'data-testid': 'neworder-airport' },
-      el('div', { class: 'grid-2' }, field(airportSel.id, 'Meeting point at the airport', airportSel), airportFields.counter),
-      airportFields.resort,
-      el('div', { class: 'grid-2' }, field(aBoat.id, 'Resort speedboat', aBoat, { optional: true }), field(aTime.id, 'Departure time', aTime, { optional: true })),
-      field(aNote.id, 'Handover instructions', aNote, { optional: true }));
-    airportSel.addEventListener('change', () => renderPackages());
-    const methodSeg = segmented(uid + '-method', METHODS, n.method, 'neworder-method', v => { n.method = v; syncMethod(); });
-    const methodHint = el('div', { class: 'field__hint', 'data-testid': 'neworder-method-hint' });
-    function syncMethod() {
-      const m = n.method;
-      methodHint.textContent = (MDM.DELIVERY_METHODS.find(x => x.value === m) || {}).hint || '';
-      homeNote.hidden = m !== 'home'; receiverBlock.hidden = m === 'home';
-      boatBlock.hidden = m !== 'boat'; cargoBlock.hidden = m !== 'cargo'; airportBlock.hidden = m !== 'airport';
-      packagesSec.firstChild.textContent = m === 'home' ? 'Packages' : 'Receiver and packages';
-      methodSec.hidden = m === 'home';
-      methodSec.firstChild.textContent = { boat: 'Boat details', cargo: 'Maldivian Cargo details', airport: 'Airport details' }[m] || 'Delivery details';
-      syncEditor();
-      renderPackages();
-    }
-    // The delivery object for createOrder; for previews (pricing, list lines) the receiver can still be empty.
-    function deliveryFor(first) {
-      const m = n.method;
-      if (m === 'home') {
-        const d = (first && first.dropoff) || {}, r = d.recipient || {};
-        return { method: 'home', address: d.address || '', zone: d.zone || 'male', landmark: d.landmark || '', recipientName: r.name || '', recipientPhone: r.phone || '',
-          instructions: (first && first.notes) || '', meetAt: d.meetAt || 'door' };
-      }
-      const out = { method: m, recipientName: trim(rName.value), recipientPhone: phone.normalize(rPhone.value) || trim(rPhone.value), instructions: trim(dNote.value), landmark: '', meetAt: '' };
-      if (m === 'boat') {
-        out.boat = { vesselType: vessel, name: trim(boatName.value), departureDate: boatDate.value, departureTime: boatTime.value, jetty: jettySel.value, island: trim(boatIsland.value), address: trim(boatAddress.value),
-          contact: phone.normalize(boatContact.value) || trim(boatContact.value), history: [] };
-        out.address = out.boat.address || out.boat.island;
-      } else if (m === 'cargo') {
-        out.cargo = { counter: counter.label, island: trim(cargoIsland.value), consignee: trim(cargoConsignee.value) || out.recipientName };
-        out.address = out.cargo.island;
-      } else {
-        out.airport = { point: airportSel.value, counter: trim(aCounter.value), resort: trim(aResort.value), speedboat: trim(aBoat.value), departureTime: aTime.value, instructions: trim(aNote.value) };
-      }
-      return out;
-    }
-
-    // Packages (shared package editor). The collection above is every package's pickup, so the editor's pickup part is hidden; for
-    // boat, cargo and airport deliveries its drop-off part is hidden too: the method sets the hand-over point.
-    const list = el('div', { class: 'list', 'data-testid': 'neworder-packages' });
-    const editorSlot = el('div', { class: 'neworder-editor' });
-    const pkgError = el('div', { class: 'field__error', 'data-testid': 'neworder-packages-error', hidden: true });
-    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'neworder-add-package', on: { click: () => openEditor(null) } }, html(MDM.icon('plus', 16)), 'Add a package');
+    const boatContactField = clearOnInput(boatContact, field(boatContact.id, 'Contact of the boat', boatContact, { optional: true, hint: 'Captain or crew, if not the receiver' }));
     const evInput = el('input', { type: 'checkbox', id: uid + '-extra-vehicle', 'data-testid': 'neworder-extra-vehicle' });
     const evBlock = el('label', { class: 'checkbox', for: evInput.id, hidden: true, 'data-testid': 'neworder-extra-vehicle-field' }, evInput,
       el('span', null, 'Extra vehicle', el('span', { class: 'hint' }, 'Charge added when the price is confirmed')));
-    evInput.addEventListener('change', () => { n.extraVehicle = evInput.checked; renderPackages(); });
-    const codIn = input('cod', { type: 'number', min: 0, step: 1, inputmode: 'numeric', placeholder: '0' });
-    const codField = clearOnInput(codIn, field(codIn.id, 'Cash to collect (MVR)', codIn, { optional: true, hint: 'Leave empty if already paid' }));
-    const refIn = input('reference', { placeholder: 'Invoice or order number' });
     const estimate = el('div', { 'data-testid': 'neworder-estimate' });
-    const packagesSec = sec('Packages', 'neworder-packages-section', el('div', { class: 'stack-4' }, receiverBlock, list, editorSlot, pkgError, addBtn, evBlock,
-      el('div', { class: 'grid-2' }, codField, field(refIn.id, 'Reference', refIn, { optional: true }))));
-    const methodSec = sec('Delivery details', 'neworder-method-section', el('div', { class: 'stack-4' }, boatBlock, cargoBlock, airportBlock, dNoteField));
-    function me() { const a = account(); return a ? { name: a.contactName, phone: a.phone } : null; }
-    function cancelEditor() { if (n.editor) { n.editor.destroy(); n.editor = null; } n.editing = null; editorSlot.replaceChildren(); addBtn.hidden = false; }
-    function syncEditor() {
-      if (!n.editor) return;
-      const root = n.editor.el, hide = n.method !== 'home';
-      const heads = Array.from(root.querySelectorAll('h3'));
-      const pickHead = heads.find(h => trim(h.textContent) === 'Pickup'), pickBlock = root.querySelector('[data-endpoint="pickup"]');
-      if (pickHead) pickHead.hidden = true;
-      if (pickBlock) pickBlock.hidden = true;
-      const block = root.querySelector('[data-endpoint="dropoff"]');
-      const same = root.querySelector('[data-testid="package-dropoff-same-as-first"]');
-      const sameLabel = same ? same.closest('label') : null;
-      const head = heads.find(h => trim(h.textContent) === 'Drop-off');
-      if (block) block.hidden = hide || !!(same && same.checked);
-      if (sameLabel) sameLabel.hidden = hide;
-      let note = root.querySelector('[data-testid="neworder-editor-method"]');
-      if (!note && head) { note = el('p', { class: 'muted small', 'data-testid': 'neworder-editor-method' }); head.after(note); }
-      if (note) { note.hidden = !hide; note.textContent = hide ? MDM.deliveryMethodLabel(n.method) + ': handed over at ' + MDM.deliveryEndpoint(deliveryFor(null)).address + '.' : ''; }
+    let tried = false;
+    const ctx = () => ({ tiers: tierChoices() });
+    const tierNow = () => tierChoices().find(t => t.value === row.tier) || null;
+    const qtyNow = () => Math.max(1, Math.min(20, Math.round(Number(qtyIn.value) || 1)));
+    function showErrors(only) {
+      const errs = K.validateRow(row, ctx());
+      cardHost.querySelectorAll('[data-key]').forEach(c => { const k = c.dataset.key; if (only && only !== k) return; setError(c.closest('.field'), errs[k] || null); });
+      return !Object.keys(errs).length;
     }
-    function openEditor(index) {
-      cancelEditor();
-      n.editing = index;
-      // §3.3: a boat, Maldivian Cargo or airport hand-over is a delivery method with its own fee, so the package drop-off is an address
-      // only (no cargo terminal, no airport zone; either would add the cargo or airport fee to a home delivery).
-      // Each size shows this account's rate for its category (client, 31/10/2026: every size read MVR 25, the old flat business rate).
-      const sizePrice = size => { const t = tierChoices().find(x => x.size === size); return t ? t.rate : null; };
-      n.editor = MDM.packageEditor.create({ service: 'business', settings, sizePrice, dropoffKinds: 'address', value: index == null ? null : n.packages[index], first: index !== 0 && n.packages.length ? n.packages[0] : null, me: me(), savedAddresses: [],
-        onSave: pkg => {
-          // A new size in the editor picks its own category again, unless the operator chose one for that size in the list.
-          const was = index == null ? null : n.packages[index];
-          if (was && was.size !== pkg.size) delete n.tiers[was.id];
-          if (index == null) n.packages.push(pkg); else n.packages[index] = pkg;
-          cancelEditor(); renderPackages();
-        },
-        onCancel: cancelEditor });
-      editorSlot.replaceChildren(n.editor.el);
-      // A new package goes to the business's customer, not to the business: the receiver is typed.
-      const self = index == null ? n.editor.el.querySelector('[data-testid="package-dropoff-recipient-me"]') : null;
-      if (self && self.checked) { self.checked = false; self.dispatchEvent(new Event('change', { bubbles: true })); }
-      syncEditor();
-      addBtn.hidden = true; pkgError.hidden = true;
-      n.editor.focus();
-    }
-    // Business packages carry the account's size category and its agreed rate; the category also sets the package size. A size the
-    // business never agreed a rate for keeps its own category at the default rate (as the store does on a category change), instead of
-    // silently becoming the cheapest agreed category.
-    function tierChoices() {
-      const agreed = accountTiers();
-      return MDM.pricing.businessTiers(settings).map(t => agreed.find(a => a.value === t.value) || Object.assign({}, t, { rate: MDM.pricing.businessRate(account(), t.value, settings), notAgreed: true }));
-    }
-    function tierOf(pkg) {
-      const tiers = tierChoices();
-      const chosen = n.tiers[pkg.id] && tiers.find(t => t.value === n.tiers[pkg.id]);
-      return chosen || tiers.find(t => t.size === pkg.size) || tiers[0] || null;
-    }
-    // What createOrder will price: the collection as the pickup, the method's hand-over point, the extra vehicle flag, business tiers.
-    function effectivePackages() {
-      const end = n.method !== 'home' ? MDM.deliveryEndpoint(deliveryFor(null)) : null;
-      const pick = pickupEnd();
-      const eligible = MDM.extraVehicleEligible(n.packages);
-      return n.packages.map(p => {
-        let x = Object.assign({}, p, { pickup: Object.assign({}, p.pickup || {}, pick) });
-        if (end) x.dropoff = Object.assign({}, p.dropoff || {}, end, { recipient: end.recipient });
-        if (n.extraVehicle && eligible && (x.size === 'box' || x.size === 'xl')) x.needsVehicle = true;
-        const t = tierOf(p); if (t) x = Object.assign(x, { tier: t.value, tierRate: t.rate, size: t.size });
-        return x;
+    function drawCard() {
+      const rctx = Object.assign(ctx(), {
+        onInput: (r, key) => { if (tried) showErrors(key); renderPackages(); },
+        onChange: (r, key) => { if (key === 'method') { drawCard(); const sel = cardHost.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else if (tried) showErrors(key); renderPackages(); },
       });
+      const fields = K.rowFields(row, rctx, uid + '-card');
+      fields.forEach(f => { const c = f.querySelector('[data-key]'); if (c) c.setAttribute('data-testid', 'neworder-' + c.dataset.key); });
+      cardHost.replaceChildren(el('div', { class: 'bulk-item', 'data-testid': 'neworder-card' },
+        el('div', { class: 'bulk-item__head' }, el('h3', { class: 'bulk-item__title' }, 'Package'), el('span', { class: 'bulk-item__rate small muted', 'data-testid': 'neworder-card-rate' })),
+        el('div', { class: 'bulk-item__grid' }, fields)));
+      boatContactField.hidden = row.method !== 'boat';
+      if (tried) showErrors();
+      renderPackages();
+    }
+    // What createOrder records: the collection above as every package's pickup, the card's receiver and drop-off, the size category.
+    function packagesFor() {
+      const t = tierNow(), pick = pickupEnd();
+      if (!t) return [];
+      const recipient = { name: trim(row.name), phone: phone.normalize(row.phone) || trim(row.phone) };
+      const dropoff = row.method === 'home' ? { address: trim(row.address), zone: row.zone || 'male', landmark: trim(row.landmark), recipient, instructions: trim(row.instructions), meetAt: 'door' } : { recipient };
+      return Array.from({ length: qtyNow() }, () => ({ id: MDM.id('pkg'), size: t.size, tier: t.value, tierRate: t.rate, description: trim(row.description), fragile: fragileIn.checked, underOneFt: t.size === 'bag',
+        needsVehicle: false, notes: trim(row.reference), sizeSource: 'operator', shop: null, pickup: Object.assign({}, pick, { cargo: null, meetAt: '' }), dropoff }));
+    }
+    function deliveryFor() {
+      const d = K.delivery(row);
+      if (d.boat) d.boat = Object.assign({}, d.boat, { contact: phone.normalize(boatContact.value) || trim(boatContact.value), history: [] });
+      if (d.method === 'boat') d.address = d.address || (d.boat && d.boat.island) || '';
+      return d;
     }
     function renderPackages() {
-      const eligible = MDM.extraVehicleEligible(n.packages);
+      const t = tierNow(), pk = packagesFor();
+      const rate = cardHost.querySelector('[data-testid="neworder-card-rate"]');
+      if (rate) rate.textContent = t ? money(t.rate) + (t.notAgreed ? ', default rate' : '') : 'Choose a size';
+      const eligible = MDM.extraVehicleEligible(pk);
       evBlock.hidden = !eligible;
-      if (!eligible && n.extraVehicle) { n.extraVehicle = false; evInput.checked = false; }
-      if (n.editor) syncEditor();
-      if (!n.packages.length) { list.replaceChildren(el('p', { class: 'muted small' }, 'No packages yet.')); estimate.replaceChildren(el('p', { class: 'muted small' }, 'Add a package to see the price.')); return; }
-      const eff = effectivePackages();
+      if (!eligible) evInput.checked = false;
+      if (!pk.length) { estimate.replaceChildren(el('p', { class: 'muted small' }, 'Choose the package size to see the price.')); return; }
+      const end = row.method !== 'home' ? MDM.deliveryEndpoint(deliveryFor()) : null;
+      const eff = pk.map(x => Object.assign({}, x, end ? { dropoff: Object.assign({}, end, { recipient: x.dropoff.recipient }) } : {}, evInput.checked && (x.size === 'box' || x.size === 'xl') ? { needsVehicle: true } : {}));
       const q = MDM.pricing.quote({ service: 'business', packages: eff }, settings);
-      const tiers = tierChoices();
-      list.replaceChildren(...n.packages.map((pkg, i) => {
-        const s = MDM.packageEditor.summary(eff[i], 'business');
-        let tierCtl = null;
-        if (tiers.length) {
-          const t = tierOf(pkg);
-          const sel = el('select', { class: 'select', id: uid + '-tier-' + i, 'data-testid': 'neworder-package-tier', 'data-package-id': pkg.id },
-            tiers.map(x => el('option', { value: x.value }, x.label + ' · ' + MDM.pricing.sizeLabel(x.size) + ' · ' + money(x.rate) + (x.notAgreed ? ', default rate' : ''))));
-          sel.value = t ? t.value : tiers[0].value;
-          sel.addEventListener('change', () => { n.tiers[pkg.id] = sel.value; const nt = tiers.find(x => x.value === sel.value); if (nt) pkg.size = nt.size; renderPackages(); });
-          tierCtl = el('div', { class: 'field neworder-tier' }, el('label', { for: sel.id }, 'Size category'), sel);
-        }
-        return el('div', { class: 'list__item', 'data-testid': 'neworder-package', 'data-package-id': pkg.id },
-          el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, (i + 1) + '. ' + s.title + (s.description ? ' · ' + s.description : '')),
-            el('div', { class: 'list__meta' }, 'To ' + (n.method === 'home' ? s.dropoffLine : MDM.deliveryMethodLabel(n.method) + ', ' + s.dropoffLine)),
-            s.flags.length ? el('div', { class: 'tags' }, s.flags.map(f => el('span', { class: 'tag' }, f))) : null,
-            tierCtl),
-          el('div', { class: 'list__aside' }, el('span', { class: 'mono' }, money(q.packages[i].price.lineTotal)),
-            el('div', { class: 'row' },
-              el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'neworder-package-edit', on: { click: () => openEditor(i) } }, 'Edit'),
-              el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'neworder-package-remove', on: { click: () => { const gone = n.packages.splice(i, 1)[0]; if (gone) delete n.tiers[gone.id]; cancelEditor(); renderPackages(); } } }, 'Remove'))));
-      }));
       const fees = (q.feeLines || []).map(f => el('div', { class: 'summary__line summary__line--fee', 'data-testid': 'neworder-fee', 'data-key': f.key },
         el('div', { class: 'summary__desc' }, f.label, f.reason ? el('span', { class: 'summary__sub' }, f.reason) : null), el('div', { class: 'summary__amount mono' }, money(f.amount))));
-      const codAmount = Math.round(Number(codIn.value) || 0);
+      const codAmount = K.parseMoney(row.cod) || 0;
       estimate.replaceChildren(el('div', { class: 'summary' },
-        el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, plural(n.packages.length, 'package')), el('div', { class: 'summary__amount mono' }, money(q.packages.reduce((t, p) => t + p.price.lineTotal, 0)))),
+        el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, plural(pk.length, 'package') + ' · ' + t.label), el('div', { class: 'summary__amount mono' }, money(q.totals.packages))),
         fees,
         el('div', { class: 'summary__rule' }),
         el('div', { class: 'summary__total' }, el('span', null, 'Business rate'), el('span', { class: 'mono', 'data-testid': 'neworder-total' }, money(q.totals.total))),
         codAmount > 0 ? el('p', { class: 'muted small', 'data-testid': 'neworder-cod-note' }, 'Plus ' + money(codAmount) + ' cash collected for the business.') : null));
     }
-    codIn.addEventListener('input', () => renderPackages());
-    accountSel.addEventListener('change', () => { n.accountId = accountSel.value; n.tiers = {}; syncTiers(); syncPoints(); cancelEditor(); renderPackages(); });
+    [qtyIn, evInput, fragileIn].forEach(c => c.addEventListener('input', renderPackages));
+    evInput.addEventListener('change', renderPackages);
+    pointSel.addEventListener('change', () => renderPackages());
+    accountSel.addEventListener('change', () => {
+      n.accountId = accountSel.value; syncTiers(); syncPoints();
+      const tiers = tierChoices();
+      if (!tiers.some(t => t.value === row.tier && !t.notAgreed)) row.tier = ((tiers.find(t => !t.notAgreed) || tiers[0]) || {}).value || '';
+      drawCard();
+    });
 
-    // The method first, then the receiver with the packages and their size, then the boat (cargo, airport) details: the order the
-    // office takes a business's boat order in (client, 31/10/2026).
     const body = [
       sec('Account', 'neworder-account-section', accountBlock),
       sec('Collection', 'neworder-collection-section', collectionBlock),
-      sec('Delivery', 'neworder-delivery-section', el('div', { class: 'stack-4' }, groupField('Delivery method', el('div', null, methodSeg, methodHint)), homeNote)),
-      packagesSec,
-      methodSec,
+      sec('Package', 'neworder-packages-section', el('div', { class: 'stack-4' }, cardHost, boatContactField,
+        el('div', { class: 'grid-2' }, qtyField, el('label', { class: 'checkbox', for: fragileIn.id }, fragileIn, el('span', null, 'Fragile'))), evBlock)),
       sec('Price', 'neworder-estimate-section', estimate),
     ];
     const createBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'neworder-create', on: { click: () => act(createOrder) } }, 'Create order');
     const footer = [el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'neworder-cancel', on: { click: () => drawer.close() } }, 'Cancel'), createBtn];
-    syncTiers(); syncPoints(); syncMethod();
+    syncTiers(); syncPoints(); drawCard();
     drawer.open({ title: 'New business order', body, footer, size: 'lg', onClose: () => onDrawerClosed('new') });
     if (accounts.length) accountSel.focus();
 
-    // Method fields the operator must fill: the receiver; the boat name, departure time and island; the cargo island; the airport
-    // counter and resort.
-    function checkMethod() {
-      let ok = true;
-      const need = (wrap, ctrl, msg) => { if (!trim(ctrl.value)) { setError(wrap, msg); ok = false; } };
-      if (n.method === 'home') return true;
-      need(rNameField, rName, "Enter the receiver's name");
-      if (!phone.valid(rPhone.value, { intl: true })) { setError(rPhoneField, 'Enter the receiver\'s mobile number'); ok = false; }
-      if (n.method === 'boat') {
-        need(boatFields.name, boatName, 'Enter the boat, ferry or speedboat name');
-        need(boatFields.time, boatTime, 'Enter the departure time');
-        need(boatFields.island, boatIsland, 'Enter the destination island');
-        if (trim(boatContact.value) && !phone.valid(boatContact.value, { intl: true })) { setError(boatFields.contact, 'Enter a valid mobile number'); ok = false; }
-      } else if (n.method === 'cargo') need(cargoIslandField, cargoIsland, 'Enter the destination island');
-      else { need(airportFields.counter, aCounter, 'Enter the resort counter or collection point'); need(airportFields.resort, aResort, 'Enter the resort or destination'); }
-      return ok;
-    }
     async function createOrder() {
       if (!state.neworder) return;
       const acc = account();
       if (!acc) { toast('Choose a business account', 'warn'); return; }
+      tried = true;
       let ok = checkCollection();
+      if (!showErrors()) ok = false;
       if (n.level === 'advance' && !(dateIn.value && dateIn.value >= dayKey(new Date()))) { setError(dateField, 'Choose today or a later date'); ok = false; }
-      if (trim(codIn.value) && !(Number(codIn.value) >= 0)) { setError(codField, 'Enter the cash amount in MVR'); ok = false; }
-      if (!checkMethod()) ok = false;
-      if (n.editor) { if (n.editor.validate()) { const pkg = n.editor.getValue(); if (n.editing == null) n.packages.push(pkg); else n.packages[n.editing] = pkg; cancelEditor(); renderPackages(); } else ok = false; }
-      // While a package is open in the editor its own errors say what is missing.
-      if (!n.packages.length) { if (!n.editor) { pkgError.textContent = 'Add at least 1 package'; pkgError.hidden = false; } ok = false; }
-      else if (n.method === 'home') {
-        // Packages saved while another method was chosen have no drop-off address of their own.
-        const missing = n.packages.findIndex(p => !(p.dropoff && trim(p.dropoff.address)));
-        if (missing >= 0) { pkgError.textContent = 'Package ' + (missing + 1) + ' has no drop-off address. Edit it, or choose another delivery method.'; pkgError.hidden = false; ok = false; }
-      }
+      const q = Number(qtyIn.value);
+      if (!(Number.isInteger(q) && q >= 1 && q <= 20)) { setError(qtyField, 'Enter 1 to 20 packages'); ok = false; }
+      if (row.method === 'boat' && trim(boatContact.value) && !phone.valid(boatContact.value, { intl: true })) { setError(boatContactField, 'Enter a valid mobile number'); ok = false; }
       if (!ok) { MDM.ui.focusFirstInvalid(drawer.el()); return; }
       MDM.ui.setLoading(createBtn, true);
       try {
-        const eligible = MDM.extraVehicleEligible(n.packages);
-        const collection = collectionFor(), pick = pickupEnd();
-        const delivery = deliveryFor(n.packages[0]);
-        const receiver = n.method === 'home' ? null : { name: delivery.recipientName, phone: delivery.recipientPhone };
-        const packages = n.packages.map(p => {
-          let x = Object.assign({}, p, {
-            pickup: endpointCoords(Object.assign({}, p.pickup || {}, pick, { cargo: null, meetAt: '' })),
-            dropoff: receiver ? Object.assign({}, p.dropoff || {}, { recipient: receiver }) : endpointCoords(p.dropoff),
-            shop: null, sizeSource: 'operator' });
-          const t = tierOf(p); if (t) x = Object.assign(x, { tier: t.value, tierRate: t.rate, size: t.size });
-          return x;
-        });
-        const tiers = Array.from(new Set(packages.map(p => p.tier).filter(Boolean)));
-        const details = {};
-        if (trim(refIn.value)) details.reference = trim(refIn.value);
-        if (tiers.length === 1) details.tier = tiers[0];
+        const collection = collectionFor();
+        const delivery = deliveryFor();
+        const packages = packagesFor().map(x => Object.assign({}, x, { pickup: endpointCoords(x.pickup), dropoff: row.method === 'home' ? endpointCoords(x.dropoff) : x.dropoff }));
+        const details = { tier: row.tier };
+        if (trim(row.reference)) details.reference = trim(row.reference);
         const schedule = n.level === 'advance' ? { type: 'advance', collectDate: dateIn.value, collectTime: timeIn.value, deliverDate: dateIn.value, deliverTime: '' } : { type: 'asap' };
         const order = await MDM.store.createOrder({
           source: n.source, requestType: 'business', service: 'business', serviceLevel: n.level, accountId: acc.id, customerId: null,
           customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
           collection, delivery, details, packages, schedule, by: by(),
-          extraVehicle: !!(n.extraVehicle && eligible),
-          cod: Math.round(Number(codIn.value) || 0),
+          extraVehicle: !!(evInput.checked && MDM.extraVehicleEligible(packages)),
+          cod: K.parseMoney(row.cod) || 0,
           payment: { method: 'invoice', status: 'invoiced' }, status: 'confirmed' });
         toast('Order ' + order.code + ' created', 'ok');
         state.drawer.silent = true; drawer.close(); state.drawer.silent = false;

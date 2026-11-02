@@ -28,7 +28,7 @@
   const DRAFT_KEY = OFFICE ? 'mdm:request:office:v3' : 'mdm:request:v3', ME_KEY = 'mdm:me';
   // Short card hints for this form; the shared lists keep their longer wording for the other pages.
   const CATEGORY_HINT = { pick: 'We collect it and deliver it', shop: 'We buy it and deliver it', business: 'Agreed rates for business accounts' };
-  const TYPE_HINT = { home: 'From a home or office address', shop_collect: 'Already bought and paid for', postal: 'Redbox, Pikpost, post office, couriers', office: 'Documents at a government office' };
+  const TYPE_HINT = { home: 'From a home or office address', boat_collect: 'Arriving on a boat, ferry or speedboat', shop_collect: 'Already bought and paid for', postal: 'Redbox, Pikpost, post office, couriers', office: 'Documents at a government office' };
   const METHOD_HINT = { home: 'Malé, Hulhumalé or Villimalé', boat: 'To a vessel at the jetty', cargo: 'To another island by cargo', airport: 'Velana International Airport' };
   const CATEGORY_ICON = { pick: 'package', shop: 'shopping-bag', business: 'building' };
   const METHOD_ICON = { home: 'home', boat: 'ship', cargo: 'truck', airport: 'plane' };
@@ -49,7 +49,7 @@
   let settings = {};
   let draft = emptyDraft();
   let step = 1, shownStep = 0;
-  let me = null, profile = null, savedAddresses = [], reorderChoices = [], submitting = false;
+  let me = null, profile = null, savedAddresses = [], reorderChoices = [], recentBoats = [], submitting = false;
   let checks = {};   // step → [{ wrap, check() → message|null, focus() }]
 
   // ---- Draft -----------------------------------------------------------------------------------------------------------------
@@ -63,7 +63,8 @@
       category: 'pick', type: 'home', level: 'normal',
       schedule: { collectDate: '', collectTime: '', deliverDate: '', deliverTime: '' },
       details: { carrier: '', courierName: '', courierOther: '', courierAddress: '', courierZone: 'male', location: '', postOffice: '', collectionCode: '', collectBefore: '', trackingNo: '', ownerName: '', ownerContact: '', shippingAddress: '', idSent: false,
-        shopName: '', shopAddress: '', shopZone: 'male', proof: 'invoice', orderNo: '', task: 'submit', organisation: '', reference: '', details: '', returnDocs: false },
+        shopName: '', shopAddress: '', shopZone: 'male', proof: 'invoice', orderNo: '', task: 'submit', organisation: '', reference: '', details: '', returnDocs: false,
+        vesselType: 'speedboat', boatName: '', jetty: '', arrivalDate: '', arrivalTime: '', senderName: '', senderPhone: '', fromIsland: '' },
       shop: { name: '', zone: 'male', phone: '' },
       items: [blankItem()],
       docs: [],
@@ -81,6 +82,7 @@
     };
   }
   function normalizeDraft(d) {
+    d.details = Object.assign(emptyDraft().details, d.details || {});
     if (!MDM.requestTypes().some(t => t.value === d.type)) d.type = 'home';
     if (!MDM.SERVICE_CATEGORIES.some(c => c.value === d.category)) d.category = MDM.categoryOf(d.type);
     if (d.category !== 'business' && MDM.categoryOf(d.type) !== d.category) d.type = MDM.requestTypes(d.category)[0].value;
@@ -173,6 +175,11 @@
         return d.courierName ? { address: k && k.address ? k.name + ', ' + k.address : d.courierName + ' office, Malé', zone: (k && k.zone) || 'male', contactName: d.courierName } : null;
       }
       return { address: c.address, zone: c.zone, contactName: c.label };
+    }
+    // Boat collection: the jetty the boat arrives at, with the boat's name for the driver.
+    if (draft.type === 'boat_collect' && d.jetty) {
+      const j = MDM.geo.terminals().find(x => x.value === d.jetty);
+      if (j) return { address: (j.unsure ? 'Jetty to be confirmed' : j.label) + (trim(d.boatName) ? ', ' + trim(d.boatName) : ''), zone: j.zone, contactName: trim(d.senderName) || trim(d.boatName) || 'Boat crew' };
     }
     if (draft.type === 'shop_collect' && !isShop() && trim(d.shopAddress)) return { address: [trim(d.shopName), trim(d.shopAddress)].filter(Boolean).join(', '), zone: d.shopZone || 'male', contactName: trim(d.shopName) };
     return null;
@@ -584,6 +591,43 @@
   const frequentMeta = g => 'Placed ' + g.count + ' times, last on ' + MDM.ui.fmtDate(g.latest.createdAt, { dateOnly: true }) + ' (' + g.latest.code + ')';
   // The "Order again" cards: the most frequent order first, then the latest orders on other routes (one on the frequent route would
   // repeat that card), REORDER_MAX in all.
+  // Island customers send to the same receivers by the same boats (client, 01/11/2026): their last boat deliveries, like saved
+  // addresses, fill the receiver and the boat in one tap. The departure is new each time, so it is not copied.
+  async function loadRecentBoats() {
+    if (!me) return [];
+    const ph = normPhone(me.phone);
+    const mine = (await MDM.store.list('orders')).filter(o => o.customer && normPhone(o.customer.phone) === ph && (o.delivery || {}).method === 'boat' && o.delivery.boat)
+      .sort((a, b) => (String(b.createdAt) > String(a.createdAt) ? 1 : String(b.createdAt) < String(a.createdAt) ? -1 : 0));
+    const seen = new Set(), out = [];
+    mine.forEach(o => {
+      const d = o.delivery, b = d.boat;
+      const key = [trim(b.island).toLowerCase(), normPhone(d.recipientPhone) || '', trim(b.name).toLowerCase()].join('|');
+      if (seen.has(key) || out.length >= 4) return;
+      seen.add(key);
+      out.push({ id: 'b' + out.length, island: b.island || '', address: b.address || '', vesselType: b.vesselType || 'speedboat', name: b.name || '', jetty: b.jetty || '',
+        recipientName: d.recipientName || '', recipientPhone: d.recipientPhone || '', at: o.createdAt });
+    });
+    return out;
+  }
+  function boatPicker(n) {
+    if (!recentBoats.length) return null;
+    const vesselOf = v => (MDM.VESSEL_TYPES.find(x => x.value === v) || MDM.VESSEL_TYPES[0]).label.replace(' (dhoni)', '');
+    const jettyOf = v => (MDM.geo.terminals().find(t => t.value === v) || {}).label || '';
+    return cards(n, {
+      name: 'recent-boat', label: 'Send it like before', testid: 'request-boat-recent', value: draft.boat.recentId || '', cols: 2,
+      options: recentBoats.map(r => ({ value: r.id, label: [r.island, r.recipientName].filter(Boolean).join(' · ') || 'Boat delivery', hint: vesselOf(r.vesselType) + (r.name ? ': ' + r.name : '') + (jettyOf(r.jetty) ? ', ' + jettyOf(r.jetty) : ''),
+        meta: 'Last sent ' + MDM.ui.fmtDate(r.at, { dateOnly: true }) }))
+        .concat([{ value: 'new', label: 'Someone or a boat not listed', icon: 'plus' }]),
+      onChange: v => { useRecentBoat(v); saveDraft(); rerender(n); updateSummary(); },
+    });
+  }
+  function useRecentBoat(v) {
+    draft.boat.recentId = v;
+    const r = recentBoats.find(x => x.id === v);
+    if (!r) return;
+    Object.assign(draft.boat, { island: r.island, address: r.address, vesselType: r.vesselType, name: r.name, jetty: r.jetty });
+    Object.assign(draft.delivery, { recipientName: r.recipientName, recipientPhone: r.recipientPhone ? phone.format(r.recipientPhone) : '', self: false });
+  }
   async function loadReorderChoices() {
     if (!me) return [];
     const ph = normPhone(me.phone);
@@ -769,6 +813,17 @@
         d.proof === 'quotation' ? docField(n, 'payment_slip', 'Payment slip', { required: true }) : null,
         F(n, 'details.orderNo', 'Order number', { placeholder: 'If the shop gave you one', testid: 'request-order-no' }));
     }
+    // Boat collection (client, 01/11/2026): a package arriving on a boat, ferry or speedboat; our driver meets it at the jetty.
+    if (t === 'boat_collect') {
+      out.push(seg(n, 'details.vesselType', 'Arriving on', MDM.VESSEL_TYPES.map(v => ({ value: v.value, label: v.label })), { testid: 'request-arrival-vessel' }),
+        grid(F(n, 'details.boatName', 'Boat, ferry or speedboat name', { required: true, placeholder: 'For example Thulusdhoo Express', testid: 'request-arrival-boat', onChange: dictate }),
+          F(n, 'details.jetty', 'Arriving at', { type: 'select', required: true, placeholder: 'Choose the harbour or jetty', options: MDM.geo.jetties().map(j => ({ value: j.value, label: j.label })), testid: 'request-arrival-jetty', onChange: dictate })),
+        grid(F(n, 'details.arrivalDate', 'Arrival date', { type: 'date', required: true, attrs: { min: today() }, validate: v => (v && v < today() ? 'Choose today or a later date' : null), testid: 'request-arrival-date' }),
+          F(n, 'details.arrivalTime', 'Arrival time', { type: 'time', required: true, testid: 'request-arrival-time' })),
+        grid(F(n, 'details.senderName', 'Who hands it over', { placeholder: 'Captain or crew member', testid: 'request-sender-name', onChange: dictate }),
+          F(n, 'details.senderPhone', 'Their number', { type: 'tel', intl: true, testid: 'request-sender-phone' })),
+        F(n, 'details.fromIsland', 'Coming from', { placeholder: 'The island it comes from', testid: 'request-from-island' }));
+    }
     if (t === 'office') {
       out.push(grid(F(n, 'details.organisation', 'Office or ministry', { required: true, placeholder: 'For example Ministry of Economic Development', testid: 'request-organisation' }),
         F(n, 'details.task', 'What do you need?', { type: 'select', required: true, options: MDM.OFFICE_TASKS, testid: 'request-task' })),
@@ -845,7 +900,7 @@
     applyDictated();
     const locked = !!dictatedCollection();
     const t = draft.type;
-    const title = t === 'shop_collect' ? 'Collect from the shop or godown' : t === 'postal' ? 'Collect from the carrier' : t === 'office' ? 'Where do we collect the documents?' : 'Where do we collect from?';
+    const title = t === 'shop_collect' ? 'Collect from the shop or godown' : t === 'postal' ? 'Collect from the carrier' : t === 'boat_collect' ? 'Collect from the boat' : t === 'office' ? 'Where do we collect the documents?' : 'Where do we collect from?';
     const desc = locked ? 'Filled in from step 1.' : null;
     const out = [head(n, title, desc)];
     if (locked) {
@@ -998,6 +1053,7 @@
     }
     if (m === 'boat') {
       const vessel = (MDM.VESSEL_TYPES.find(v => v.value === draft.boat.vesselType) || MDM.VESSEL_TYPES[0]).label.replace(' (dhoni)', '');
+      out.push(boatPicker(n));
       out.push(grid(F(n, 'boat.island', 'Destination island', { required: true, placeholder: 'For example Thoddoo, Alifu Alifu', testid: 'request-boat-island' }),
           F(n, 'boat.address', 'Destination address', { placeholder: 'House name on the island', testid: 'request-boat-address' })),
         receiverFields(n),
@@ -1088,6 +1144,13 @@
       if (has('ownerName')) add('Owner', d.ownerName);
       if (has('ownerContact')) add('Owner contact', d.ownerContact ? phone.format(d.ownerContact) : '');
       if (has('shippingAddress')) add('Shipping address', d.shippingAddress);
+    }
+    if (t === 'boat_collect') {
+      add('Arriving on', [(MDM.VESSEL_TYPES.find(x => x.value === d.vesselType) || {}).label, d.boatName].filter(Boolean).join(': '));
+      add('Arriving at', (MDM.geo.terminals().find(x => x.value === d.jetty) || {}).label);
+      add('Arrives', [d.arrivalDate, d.arrivalTime].filter(Boolean).join(' at '));
+      add('Hands it over', [d.senderName, d.senderPhone ? phone.format(d.senderPhone) : ''].filter(Boolean).join(' · '));
+      add('Coming from', d.fromIsland);
     }
     if (t === 'shop_collect') { add('Shop or godown', [d.shopName, d.shopAddress].filter(trim).join(', ')); add('Proof', d.proof === 'quotation' ? 'Quotation and payment slip' : 'Invoice'); add('Order number', d.orderNo); }
     if (t === 'office') { add('Office or ministry', d.organisation); add('Task', (MDM.OFFICE_TASKS.find(x => x.value === d.task) || {}).label); add('References', d.reference); add('Details', d.details); if (d.returnDocs) add('Return', 'Bring the receipt or documents back'); }
@@ -1253,7 +1316,8 @@
       return { shop: { name: trim(s.name), zone: s.zone || 'male', phone: normPhone(s.phone) }, items: draft.items.filter(it => trim(it.name)).map(it => ({ name: trim(it.name), details: trim(it.details), qty: Math.max(1, Math.round(Number(it.qty) || 1)), instructions: trim(it.instructions) })) };
     }
     const keep = { postal: ['carrier'].concat(postalKeys()),
-      shop_collect: ['shopName', 'shopAddress', 'shopZone', 'proof', 'orderNo'], office: ['task', 'organisation', 'reference', 'details', 'returnDocs'], home: [] }[t] || [];
+      shop_collect: ['shopName', 'shopAddress', 'shopZone', 'proof', 'orderNo'], office: ['task', 'organisation', 'reference', 'details', 'returnDocs'], home: [],
+      boat_collect: ['vesselType', 'boatName', 'jetty', 'arrivalDate', 'arrivalTime', 'senderName', 'senderPhone', 'fromIsland'] }[t] || [];
     const details = {};
     keep.forEach(k => { const v = det[k]; if (v != null && v !== '' && v !== false) details[k] = typeof v === 'string' ? v.trim() : v; });
     if (t === 'postal') {
@@ -1265,6 +1329,7 @@
       if (det.carrier === 'post_office' && !trim(det.collectionCode)) details.idNote = 'No collection code; the owner gives their ID details to the post collections contact';
     }
     if (t === 'shop_collect') details.paidByCustomer = true;
+    if (t === 'boat_collect' && details.senderPhone) details.senderPhone = normPhone(details.senderPhone) || details.senderPhone;
     return details;
   }
   // Save the new addresses the customer ticked; an address already in the book only gets its label updated.
@@ -1386,6 +1451,7 @@
     me = found ? { name: found.name || '', phone: found.phone, email: found.email || '', notify: found.notify || 'whatsapp' } : null;
     savedAddresses = found ? (found.addresses || []).filter(a => a && a.id && trim(a.address)) : [];
     reorderChoices = found ? await loadReorderChoices() : [];
+    recentBoats = found ? await loadRecentBoats() : [];
     if (my !== lookupSeq) return;
     paintOfficeStatus(norm);
     if (o.boot) return;
@@ -1426,6 +1492,7 @@
       else if (!trim(draft.customer.name) && !trim(draft.customer.phone)) Object.assign(draft.customer, { name: me.name || '', phone: me.phone || '', email: me.email || '', notify: me.notify || 'whatsapp' });
       savedAddresses = ((cust && cust.addresses) || []).filter(a => a && a.id && trim(a.address));
       reorderChoices = await loadReorderChoices();
+      recentBoats = await loadRecentBoats();
     }
     if (OFFICE) {
       document.body.classList.add('is-office');

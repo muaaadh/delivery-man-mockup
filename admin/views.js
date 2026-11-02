@@ -615,7 +615,38 @@
     function buildList() {
       ui.tabs = el('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Business' },
         tabButton('requests', 'Requests'), tabButton('accounts', 'Accounts'));
-      root.replaceChildren(pageHead('Business'), ui.tabs, ui.body);
+      const add = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'business-new-account', on: { click: () => newAccount() } }, icon('plus'), 'New business account');
+      root.replaceChildren(pageHead('Business', null, [add]), ui.tabs, ui.body);
+    }
+    // The office opens an account without a sign-up request (client, 01/11/2026); its email or mobile number signs in to it later.
+    async function newAccount() {
+      try {
+        const settings = await MDM.store.settings();
+        const editor = tierEditor(MDM.pricing.businessTiers(settings), { picked: () => true, rate: t => t.rate });
+        const f = { name: input('name', '', { autocomplete: 'off', 'data-testid': 'new-account-name' }), contactName: input('contactName', '', { autocomplete: 'off', 'data-testid': 'new-account-contact' }),
+          phone: input('phone', '', { type: 'tel', inputmode: 'numeric', class: 'input mono', 'data-testid': 'new-account-phone' }), email: input('email', '', { type: 'email', autocomplete: 'off', 'data-testid': 'new-account-email' }),
+          zone: select('zone', 'male', MDM.geo.zoneOptions(), { 'data-testid': 'new-account-zone' }), pickupAddress: input('pickupAddress', '', { 'data-testid': 'new-account-address', placeholder: 'House or building, floor, road' }) };
+        const content = [
+          el('div', { class: 'grid-2' }, field('Business name', f.name), field('Contact person', f.contactName)),
+          el('div', { class: 'grid-2' }, field('Mobile', f.phone), field('Email for signing in', f.email, { optional: true, hint: 'Whoever signs in to the business portal with this email gets the account. You can add it later.' })),
+          el('div', { class: 'grid-2' }, field('Pickup address', f.pickupAddress, { optional: true }), field('Island or area', f.zone)),
+          el('fieldset', { class: 'tier-fieldset' }, el('legend', { class: 'field__label' }, 'Package sizes and agreed rates'), editor.el)];
+        let account = null;
+        const ok = await formDialog({ title: 'New business account', content, wide: true, okLabel: 'Open account',
+          onOk: async () => {
+            const err = (c, m) => { MDM.ui.setError(c.closest('.field'), m); return !!m; };
+            const bad = [err(f.name, f.name.value.trim() ? null : 'Enter the business name'), err(f.contactName, f.contactName.value.trim() ? null : 'Enter the contact person'),
+              err(f.phone, phone.valid(f.phone.value, { landline: true }) ? null : 'Enter a valid Maldivian number'),
+              err(f.email, !f.email.value.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.value.trim()) ? null : 'Enter a valid email address')].some(Boolean);
+            const rates = editor.read();
+            if (bad || !rates) return false;
+            try {
+              account = await MDM.store.createBusinessAccount({ name: f.name.value, contactName: f.contactName.value, phone: f.phone.value, email: f.email.value, zone: f.zone.value, pickupAddress: f.pickupAddress.value, rates, by: actor() });
+            } catch (e) { toast(storeMessage(e), 'danger'); return false; }
+            return true;
+          } });
+        if (ok && account) { toast('Account opened for ' + account.name); navigate('#/business/' + account.id); }
+      } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     function tabButton(key, label) {
       const count = el('span', { class: 'business-tab__count', 'data-tab-count': key });
@@ -723,6 +754,7 @@
     function buildAccount() {
       ui.head = pageHead('Business account', null, null, BACK);
       ui.details = el('div', { class: 'rate-table' });
+      ui.detailsAction = el('div');
       ui.rates = el('div', { class: 'card' });
       ui.ratesAction = el('div');
       ui.points = el('div', { class: 'card' });
@@ -733,7 +765,7 @@
       ui.invoices = el('div', { class: 'card' });
       root.replaceChildren(ui.head,
         el('div', { class: 'stack-6' },
-          el('section', { 'aria-labelledby': 'acc-details' }, sectionHead('acc-details', 'Account'), card(null, ui.details)),
+          el('section', { 'aria-labelledby': 'acc-details' }, sectionHead('acc-details', 'Account', null, ui.detailsAction), card(null, ui.details)),
           el('section', { 'aria-labelledby': 'acc-rates' }, sectionHead('acc-rates', 'Sizes and agreed rates', null, ui.ratesAction), ui.rates),
           el('div', { class: 'admin-grid' },
             el('section', { 'aria-labelledby': 'acc-points' }, sectionHead('acc-points', 'Collection points', null, ui.pointsAction), ui.points),
@@ -759,6 +791,7 @@
       renderPoints(account);
       renderCod(account, orders);
       const l = phone.links(account.phone);
+      ui.detailsAction.replaceChildren(el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-edit-account', on: { click: () => editAccount(account) } }, icon('edit'), 'Edit details'));
       fill(ui.details,
         rateRow('Contact person', wrapValue(account.contactName || '')),
         rateRow('Mobile', el('a', { href: l ? l.tel : null }, phone.format(account.phone)), { mono: true }),
@@ -816,6 +849,25 @@
             : photoThumb(photos[0] ? files[photos[0].fileId] : null, 'Typical package from ' + account.name, { large: true, testid: 'business-package-photo' }),
           el('div', { class: 'account-rates__assess' }, el('div', { class: 'field__label' }, 'Assessment'), el('p', { 'data-testid': 'business-assessment' }, account.assessment || 'No assessment yet.'))),
         rows));
+    }
+    // Name, contacts and the sign-in email (client, 01/11/2026: "later we give login access to their desired email").
+    async function editAccount(account) {
+      const v = await MDM.ui.dialog({ title: 'Edit ' + account.name, okLabel: 'Save details', fields: [
+        { name: 'name', label: 'Business name', type: 'text', required: true, value: account.name },
+        { name: 'contactName', label: 'Contact person', type: 'text', required: true, value: account.contactName },
+        { name: 'phone', label: 'Mobile', type: 'tel', required: true, landline: true, value: phone.format(account.phone), hint: 'Whoever signs in with this number gets the account.' },
+        { name: 'email', label: 'Email for signing in', type: 'email', value: account.email || '', hint: 'Whoever signs in to the business portal with this email gets the account.' },
+        { name: 'landline', label: 'Landline', type: 'tel', landline: true, value: account.landline ? phone.format(account.landline) : '' },
+        { name: 'tin', label: 'TIN', type: 'text', value: account.tin || '' },
+        { name: 'pickupAddress', label: 'Pickup address', type: 'text', value: account.pickupAddress || '' },
+        { name: 'zone', label: 'Island or area', type: 'select', options: MDM.geo.zoneOptions(), value: account.zone || 'male' }] });
+      if (!v) return;
+      try {
+        await MDM.store.update('business_accounts', account.id, { name: v.name, contactName: v.contactName, phone: phone.normalize(v.phone) || v.phone, email: String(v.email || '').trim().toLowerCase(),
+          landline: phone.normalize(v.landline) || '', tin: v.tin, pickupAddress: v.pickupAddress, zone: v.zone });
+        if (String(v.email || '').trim().toLowerCase() !== String(account.email || '').toLowerCase()) await MDM.store.audit('business_email', 'Sign-in email of ' + v.name + ' set to ' + (v.email || 'none'), actor(), { accountId: account.id }).catch(() => {});
+        toast('Details saved for ' + v.name);
+      } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function editRates(account, settings) {
       const tiers = MDM.pricing.businessTiers(settings);

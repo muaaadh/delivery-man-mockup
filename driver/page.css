@@ -123,17 +123,6 @@ body.page-driver .job__stops + .job__actions { border-top: 0; padding-top: 0; }
 body.page-driver .job__primary { margin-top: 4px; }
 
 /* Details fold on the jobs after the first */
-body.page-driver .job__more { border-top: 1px solid var(--border); }
-body.page-driver .job__more-summary { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 16px; cursor: pointer; list-style: none; font-size: 14px; font-weight: 500; }
-body.page-driver .job__more-summary::-webkit-details-marker { display: none; }
-body.page-driver .job__more-summary::marker { content: ''; }
-body.page-driver .job__more-summary:focus-visible { box-shadow: inset 0 0 0 2px var(--brand); }
-body.page-driver .job__more-meta { margin-left: auto; font-size: 13px; font-weight: 400; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-body.page-driver .job__more-chevron { display: inline-flex; color: var(--text-2); transition: transform .2s var(--ease-out); }
-body.page-driver .job__more[open] .job__more-chevron { transform: rotate(180deg); }
-body.page-driver .job__more > .card__body { padding-top: 0; }
-@media (min-width: 720px) { body.page-driver .job__more-summary { padding: 0 24px; } }
-@media (hover: hover) { body.page-driver .job__more-summary:hover { background: var(--surface); } }
 
 /* Progress: five bars with a short label under each. */
 body.page-driver .job__steps { list-style: none; padding: 0; margin-top: 14px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
@@ -145,6 +134,18 @@ body.page-driver .job__step.is-current { color: var(--text); font-weight: 600; }
 body.page-driver .job__step.is-current .job__dot { background: var(--brand); }
 body.page-driver .job__step.is-failed { color: var(--danger); font-weight: 600; }
 body.page-driver .job__step.is-failed .job__dot { background: var(--danger); }
+/* Stage colours (client, 01/11/2026): green to start and collect, yellow once collected, red to deliver. Done and current steps carry
+   their stage's colour; the action button carries the colour of the step it completes. */
+body.page-driver { --stage-go: #15803D; --stage-collected: #EAB308; --stage-deliver: var(--brand); }
+body.page-driver .job__step--go.is-done .job__dot, body.page-driver .job__step--go.is-current .job__dot { background: var(--stage-go); }
+body.page-driver .job__step--collected.is-done .job__dot, body.page-driver .job__step--collected.is-current .job__dot { background: var(--stage-collected); }
+body.page-driver .job__step--deliver.is-done .job__dot, body.page-driver .job__step--deliver.is-current .job__dot { background: var(--stage-deliver); }
+body.page-driver .job__primary--go { background: var(--stage-go); border-color: var(--stage-go); color: #fff; }
+body.page-driver .job__primary--collected { background: var(--stage-collected); border-color: var(--stage-collected); color: #1D1D1F; }
+body.page-driver .job__primary--deliver { background: var(--stage-deliver); border-color: var(--stage-deliver); color: #fff; }
+body.page-driver .job__primary--go:hover:not(:disabled), body.page-driver .job__primary--collected:hover:not(:disabled), body.page-driver .job__primary--deliver:hover:not(:disabled) { filter: brightness(.94); }
+body.page-driver .job__collectinfo { display: grid; gap: 12px; padding: 14px 0 4px; border-top: 1px solid var(--border); margin-top: 4px; }
+body.page-driver .job__collectinfo .job__dl { margin: 0; }
 
 /* Collection and delivery blocks */
 body.page-driver .job__multi { font-size: 12px; color: var(--text-3); margin-bottom: 4px; }
