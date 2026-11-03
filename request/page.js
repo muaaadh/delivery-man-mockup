@@ -57,7 +57,10 @@
   function blankPhoto() { return { photoId: null, photoName: '' }; }
   const blankCounts = () => ({ bag: 1, box: 0, xl: 0 });
   // id: the order's extraCollections id, made here so each package counted at the stop can point at it (package.collectionId).
-  function blankExtra() { return { id: MDM.id('col'), kind: 'collect', address: '', zone: 'male', landmark: '', contactName: '', contactPhone: '', instructions: '', shopName: '', shopPhone: '', list: '', counts: blankCounts() }; }
+  // type: the collection type of a "Collect an item" stop (client, 02/11/2026), with its details: the boat and the jetty it arrives at,
+  // the shop or godown, or the courier and its code. Their address and contact follow from those (extraPlace).
+  const blankExtraDetails = () => ({ boatName: '', jetty: '', arrivalDate: '', arrivalTime: '', carrier: '', location: '', code: '', collectBefore: '', orderNo: '' });
+  function blankExtra() { return { id: MDM.id('col'), kind: 'collect', type: 'home', details: blankExtraDetails(), address: '', zone: 'male', landmark: '', contactName: '', contactPhone: '', instructions: '', shopName: '', shopPhone: '', list: '', counts: blankCounts() }; }
   function emptyDraft() {
     return {
       category: 'pick', type: 'home', level: 'normal',
@@ -98,7 +101,8 @@
     SIZES.forEach(s => { base.photos[s] = Object.assign(blankPhoto(), (d.photos || {})[s] || {}); });
     ['category', 'type', 'level', 'description', 'fragile', 'extraVehicle', 'method', 'pay', 'remember', 'termsAck', 'editDetails', 'reorderFrom', 'source'].forEach(k => { if (d[k] != null) base[k] = d[k]; });
     if (!SOURCES.some(s => s.value === base.source)) base.source = 'phone';
-    base.extra = Array.isArray(d.extra) ? d.extra.slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(x => { const b = blankExtra(); return Object.assign(b, x, { id: (x && x.id) || b.id, kind: x && x.kind === 'shop' ? 'shop' : 'collect', counts: Object.assign({ bag: 0, box: 0, xl: 0 }, (x && x.counts) || b.counts) }); }) : [];
+    base.extra = Array.isArray(d.extra) ? d.extra.slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(x => { const b = blankExtra(); return Object.assign(b, x, { id: (x && x.id) || b.id, kind: x && x.kind === 'shop' ? 'shop' : 'collect',
+      type: EXTRA_TYPES.some(t => t.value === (x && x.type)) ? x.type : 'home', details: Object.assign(blankExtraDetails(), (x && x.details) || {}), counts: Object.assign({ bag: 0, box: 0, xl: 0 }, (x && x.counts) || b.counts) }); }) : [];
     base.docs = Array.isArray(d.docs) ? d.docs : [];
     base.items = Array.isArray(d.items) && d.items.length ? d.items.map(it => Object.assign(blankItem(), it)) : [blankItem()];
     return normalizeDraft(base);
@@ -209,13 +213,48 @@
   // Shopping is bought with the customer's money, so a shop anywhere on the order makes it paid upfront.
   const upfrontForced = () => isShop() || extraShops().length > 0;
   const shops = () => isShop() || extraShops().length > 0;
-  // A stop counts once it says where to collect, or (a shop stop) what to buy; the shop itself may be left to us.
-  const stopReady = x => (x.kind === 'shop' ? !!trim(x.list) : !!trim(x.address));
+  // A stop counts once it says where to collect (for a boat, shop or courier stop: the boat and jetty, the shop, the courier and code),
+  // or (a shop stop) what to buy; the shop itself may be left to us.
+  const stopReady = x => (x.kind === 'shop' ? !!trim(x.list) : !!trim(extraPlace(x).address) && (x.type !== 'boat_collect' || !!trim(x.details.boatName)) && (x.type !== 'postal' || !!trim(x.details.code)));
+  const EXTRA_TYPES = [{ value: 'home', label: 'Home' }, { value: 'boat_collect', label: 'Boat' }, { value: 'shop_collect', label: 'Shop or godown' }, { value: 'postal', label: 'Courier' }];
+  const EXTRA_TYPE_NAME = { boat_collect: 'Boat collection', shop_collect: 'Shop or godown collection', postal: 'Courier collection' };
+  // Couriers in one list for an extra stop: the post and lockers, DHL, then the couriers the office lists (value courier:<name>).
+  const extraCarriers = () => MDM.CARRIERS.filter(c => c.value !== 'courier').map(c => ({ value: c.value, label: c.label })).concat(couriers().map(c => ({ value: 'courier:' + c.name, label: c.name })));
+  // Where an extra stop is collected from, by its type: { address, zone, contactName }.
+  function extraPlace(x) {
+    const d = x.details || {};
+    if (x.type === 'boat_collect') {
+      const j = d.jetty ? MDM.geo.terminals().find(t => t.value === d.jetty) : null;
+      return j ? { address: (j.unsure ? 'Jetty to be confirmed' : j.label) + (trim(d.boatName) ? ', ' + trim(d.boatName) : ''), zone: j.zone, contactName: trim(d.boatName) || 'Boat crew' } : { address: '', zone: 'male', contactName: '' };
+    }
+    if (x.type === 'shop_collect') return { address: trim(x.address) ? [trim(x.shopName), trim(x.address)].filter(Boolean).join(', ') : '', zone: x.zone || 'male', contactName: trim(x.shopName) };
+    if (x.type === 'postal') {
+      const v = d.carrier || '';
+      if (v.indexOf('courier:') === 0) { const name = v.slice(8), k = couriers().find(c => c.name === name); return { address: k && k.address ? k.name + ', ' + k.address : name + ' office, Malé', zone: (k && k.zone) || 'male', contactName: name }; }
+      const c = MDM.CARRIERS.find(t => t.value === v);
+      if (!c) return { address: '', zone: 'male', contactName: '' };
+      if (c.value === 'pikpost') { const loc = MDM.PIKPOST_LOCATIONS.find(t => t.value === d.location); return loc ? { address: 'Pikpost locker, ' + loc.label, zone: loc.zone, contactName: 'Pikpost' } : { address: '', zone: 'male', contactName: '' }; }
+      if (c.value === 'post_office') { const po = MDM.POST_OFFICES.find(t => t.value === d.location); return po ? { address: po.label, zone: po.zone, contactName: 'Post collections counter' } : { address: '', zone: 'male', contactName: '' }; }
+      return { address: c.address, zone: c.zone, contactName: c.label };
+    }
+    return { address: trim(x.address), zone: x.zone || 'male', contactName: '' };
+  }
+  // What the driver reads at an extra stop: its type and details first, then the customer's own instructions.
+  function extraInstructions(x) {
+    const d = x.details || {}, own = trim(x.instructions);
+    if (x.type === 'boat_collect') return ['Boat collection: ' + trim(d.boatName) + (d.arrivalTime ? ' arriving ' + [d.arrivalDate, d.arrivalTime].filter(Boolean).join(' at ') : ''), own].filter(Boolean).join('. ');
+    if (x.type === 'shop_collect') return ['Shop or godown collection' + (trim(d.orderNo) ? ', invoice or order ' + trim(d.orderNo) : ''), own].filter(Boolean).join('. ');
+    if (x.type === 'postal') { const c = extraCarriers().find(t => t.value === d.carrier); return ['Courier collection: ' + (c ? c.label : 'courier') + (trim(d.code) ? ', code or tracking ' + trim(d.code) : '') + (d.collectBefore ? ', collect before ' + d.collectBefore : ''), own].filter(Boolean).join('. '); }
+    return own;
+  }
+  const extraDetails = x => { const d = x.details || {}, keep = { boat_collect: ['boatName', 'jetty', 'arrivalDate', 'arrivalTime'], shop_collect: ['orderNo'], postal: ['carrier', 'location', 'code', 'collectBefore'] }[x.type] || [];
+    const out = {}; keep.forEach(k => { if (trim(d[k])) out[k] = trim(d[k]); }); if (x.type !== 'home' && trim(x.instructions)) out.note = trim(x.instructions); return out; };
   // extraData() → order.extraCollections for the stops the customer added (store.createOrder cleans and caps them).
   function extraData() {
     return draft.extra.filter(stopReady).map(x => (x.kind === 'shop'
       ? { id: x.id, kind: 'shop', address: '', zone: x.zone || 'male', landmark: '', instructions: '', shop: { name: trim(x.shopName), phone: normPhone(x.shopPhone), list: trim(x.list), budget: 0, unavailable: 'call' } }
-      : { id: x.id, kind: 'collect', address: trim(x.address), zone: x.zone || 'male', landmark: trim(x.landmark), contactName: trim(x.contactName), contactPhone: normPhone(x.contactPhone), instructions: trim(x.instructions) }));
+      : (pl => ({ id: x.id, kind: 'collect', type: x.type || 'home', details: extraDetails(x), address: pl.address, zone: pl.zone, landmark: x.type === 'home' || !x.type ? trim(x.landmark) : '',
+        contactName: trim(x.contactName) || pl.contactName, contactPhone: normPhone(x.contactPhone), instructions: extraInstructions(x) }))(extraPlace(x))));
   }
   // No package photo and nothing to buy first: we collect, and the team confirms the price from the driver's photo (store rule).
   const priceAfterCollection = () => !upfrontForced() && !SIZES.some(sz => draft.counts[sz] && draft.photos[sz].photoId);
@@ -716,7 +755,11 @@
       const sh = c.shop || {};
       return Object.assign(blankExtra(), c.kind === 'shop'
         ? { kind: 'shop', zone: c.zone || 'male', shopName: sh.name || '', shopPhone: sh.phone || '', list: sh.list || '' }
-        : { kind: 'collect', address: c.address || '', zone: c.zone || 'male', landmark: c.landmark || '', contactName: c.contactName || '', contactPhone: c.contactPhone || '', instructions: c.instructions || '' },
+        : c.type && c.type !== 'home' && EXTRA_TYPES.some(t => t.value === c.type)
+          // A typed stop again: its details, the shop's own name and address, and the customer's own note (not the composed text).
+          ? { kind: 'collect', type: c.type, details: Object.assign(blankExtraDetails(), c.details || {}), contactName: c.contactName || '', contactPhone: c.contactPhone || '', instructions: (c.details || {}).note || '',
+            shopName: c.type === 'shop_collect' ? c.contactName || '' : '', address: c.type === 'shop_collect' ? String(c.address || '').replace(new RegExp('^' + String(c.contactName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ',\\s*'), '') : '', zone: c.zone || 'male' }
+          : { kind: 'collect', address: c.address || '', zone: c.zone || 'male', landmark: c.landmark || '', contactName: c.contactName || '', contactPhone: c.contactPhone || '', instructions: c.instructions || '' },
         { counts: totalCountOf(countAt(c.id)) ? countAt(c.id) : blankCounts() });
     });
     d.reorderFrom = { id: o.id, code: o.code };
@@ -964,17 +1007,41 @@
       ? [grid(F(n, p + 'shopName', 'Shop name', { placeholder: 'Leave empty and we choose', testid: tid('shop-name') }), zone()),
         F(n, p + 'list', 'What to buy', { type: 'textarea', required: true, rows: 2, placeholder: 'Items, brands, sizes and how many', testid: tid('list') }),
         F(n, p + 'shopPhone', 'Shop phone', { type: 'tel', intl: true, landline: true, testid: tid('shop-phone') })]
-      : [grid(F(n, p + 'address', 'Collection address', { required: true, placeholder: 'House or building name, street', testid: tid('address') }), zone()),
-        F(n, p + 'landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school', testid: tid('landmark') }),
-        grid(F(n, p + 'contactName', 'Contact person', { placeholder: 'Who hands it over', testid: tid('contact-name') }),
-          F(n, p + 'contactPhone', 'Contact number', { type: 'tel', intl: true, landline: true, testid: tid('contact-phone') })),
-        F(n, p + 'instructions', 'What to collect and instructions', { type: 'textarea', rows: 2, placeholder: 'What the driver picks up, floor, gate', testid: tid('instructions') })];
+      : [seg(n, p + 'type', 'Collection type', EXTRA_TYPES, { testid: tid('type'), onChange: () => { saveDraft(); rerender(n); updateSummary(); } })].concat(extraTypeFields(n, x, p, tid, zone));
     const remove = () => { draft.extra.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="request-extra-add"]'); if (b) b.focus({ preventScroll: true }); };
     return el('div', { class: 'request-extra', 'data-testid': 'request-extra' },
       el('div', { class: 'request-extra__head' }, el('h4', { class: 'request-extra__title' }, 'Stop ' + (i + 2)),
         el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': tid('remove'), on: { click: remove } }, 'Remove', el('span', { class: 'sr-only' }, ' stop ' + (i + 2)))),
       seg(n, p + 'kind', 'At this stop', MDM.EXTRA_COLLECTION_KINDS, { testid: tid('kind'), onChange: () => { saveDraft(); rerender(n); updateSummary(); } }),
       fields);
+  }
+  // The fields of a "Collect an item" stop by its collection type (client, 02/11/2026), as stop 1 asks them, kept short.
+  function extraTypeFields(n, x, p, tid, zone) {
+    const again = () => { saveDraft(); rerender(n); updateSummary(); };
+    const note = F(n, p + 'instructions', x.type === 'home' ? 'What to collect and instructions' : 'Instructions', { type: 'textarea', rows: 2, placeholder: 'What the driver picks up, floor, gate', testid: tid('instructions') });
+    const contact = (name, number, ph) => grid(F(n, p + 'contactName', name, { placeholder: ph, testid: tid('contact-name') }), F(n, p + 'contactPhone', number, { type: 'tel', intl: true, landline: true, testid: tid('contact-phone') }));
+    if (x.type === 'boat_collect') return [
+      grid(F(n, p + 'details.boatName', 'Boat, ferry or speedboat name', { required: true, placeholder: 'For example Thulusdhoo Express', testid: tid('boat') }),
+        F(n, p + 'details.jetty', 'Arriving at', { type: 'select', required: true, placeholder: 'Choose the harbour or jetty', options: MDM.geo.jetties().map(j => ({ value: j.value, label: j.label })), testid: tid('jetty') })),
+      grid(F(n, p + 'details.arrivalDate', 'Arrival date', { type: 'date', attrs: { min: today() }, validate: v => (v && v < today() ? 'Choose today or a later date' : null), testid: tid('arrival-date') }),
+        F(n, p + 'details.arrivalTime', 'Arrival time', { type: 'time', required: true, testid: tid('arrival-time') })),
+      contact('Who hands it over', 'Their number', 'Captain or crew member'), note];
+    if (x.type === 'shop_collect') return [
+      grid(F(n, p + 'shopName', 'Shop or godown', { required: true, placeholder: 'For example Agora Mall, electronics counter', testid: tid('shop') }), zone()),
+      F(n, p + 'address', 'Shop or godown address', { required: true, placeholder: 'Building name, street', testid: tid('address') }),
+      grid(F(n, p + 'details.orderNo', 'Invoice or order number', { testid: tid('order-no') }), F(n, p + 'contactPhone', 'Shop number', { type: 'tel', intl: true, landline: true, testid: tid('contact-phone') })), note];
+    if (x.type === 'postal') {
+      const c = x.details.carrier;
+      return [
+        F(n, p + 'details.carrier', 'Courier', { type: 'select', required: true, placeholder: 'Choose one', options: extraCarriers(), testid: tid('carrier'), onChange: again }),
+        c === 'pikpost' ? F(n, p + 'details.location', 'Pikpost location', { type: 'select', required: true, placeholder: 'Choose a location', options: MDM.PIKPOST_LOCATIONS, testid: tid('location') }) : null,
+        c === 'post_office' ? F(n, p + 'details.location', 'Post office', { type: 'select', required: true, placeholder: 'Choose a post office', options: MDM.POST_OFFICES, testid: tid('location') }) : null,
+        grid(F(n, p + 'details.code', 'Collection code or tracking number', { required: true, testid: tid('code') }), F(n, p + 'details.collectBefore', 'Collect before', { type: 'time', testid: tid('collect-before') })),
+        contact('Owner name', 'Owner contact number', 'Name on the parcel'), note].filter(Boolean);
+    }
+    return [grid(F(n, p + 'address', 'Collection address', { required: true, placeholder: 'House or building name, street', testid: tid('address') }), zone()),
+      F(n, p + 'landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school', testid: tid('landmark') }),
+      contact('Contact person', 'Contact number', 'Who hands it over'), note];
   }
   function extraGroup(n) {
     const max = MDM.MAX_EXTRA_COLLECTIONS, full = draft.extra.length >= max;
@@ -994,7 +1061,9 @@
     if (i === 0) return isShop() ? [MDM.shopName({ name: draft.shop.name }), MDM.geo.zoneLabel(draft.shop.zone || 'male')].join(', ')
       : [trim(draft.collection.address), MDM.geo.zoneLabel(draft.collection.zone || 'male')].filter(Boolean).join(', ');
     const x = draft.extra[i - 1];
-    return x.kind === 'shop' ? 'Buy at ' + [MDM.shopName({ name: x.shopName }), MDM.geo.zoneLabel(x.zone || 'male')].join(', ') : [trim(x.address), MDM.geo.zoneLabel(x.zone || 'male')].filter(Boolean).join(', ');
+    if (x.kind === 'shop') return 'Buy at ' + [MDM.shopName({ name: x.shopName }), MDM.geo.zoneLabel(x.zone || 'male')].join(', ');
+    const pl = extraPlace(x);
+    return (EXTRA_TYPE_NAME[x.type] ? EXTRA_TYPE_NAME[x.type] + ': ' : '') + [pl.address, MDM.geo.zoneLabel(pl.zone || 'male')].filter(Boolean).join(', ');
   }
   // Bag / Box / XL steppers for one stop's counts. Stop 1 keeps the plain test ids (request-qty-bag…); stop k uses request-qty-s<k>-bag.
   function sizeRows(n, counts, key, o) {
@@ -1405,7 +1474,7 @@
     officeEls.phone = el('input', { class: 'input', id: 'rq-office-phone', type: 'tel', inputmode: 'tel', autocomplete: 'off', placeholder: '7XX XXXX', maxlength: MAXLEN.tel, 'data-testid': 'office-phone', value: draft.customer.phone || '' });
     officeEls.name = el('input', { class: 'input', id: 'rq-office-name', type: 'text', autocomplete: 'off', maxlength: MAXLEN.text, 'data-testid': 'office-name', value: draft.customer.name || '' });
     officeEls.status = el('div', { class: 'field__hint request-office__status', 'data-testid': 'office-customer', 'aria-live': 'polite', hidden: true });
-    const source = el('fieldset', { class: 'segmented', 'data-testid': 'office-source' }, SOURCES.map(s => el('label', { class: 'segmented__option', 'data-testid': 'office-source-' + s.value },
+    const source = el('fieldset', { class: 'segmented segmented--source', 'data-testid': 'office-source' }, SOURCES.map(s => el('label', { class: 'segmented__option', 'data-testid': 'office-source-' + s.value, 'data-value': s.value },
       el('input', { class: 'sr-only', type: 'radio', name: 'rq-office-source', value: s.value, checked: draft.source === s.value }), el('span', null, s.label))));
     source.addEventListener('change', e => { if (e.target && e.target.checked) { draft.source = e.target.value; saveDraft(); } });
     officeEls.phone.addEventListener('input', () => { draft.customer.phone = officeEls.phone.value; saveDraft(); syncStep5(); lookupSoon(); });

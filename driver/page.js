@@ -38,7 +38,7 @@
 
   const state = {
     driverId: null, driver: null, drivers: [], staff: null, settings: {},
-    route: { orders: [], stops: [], polyline: [], returns: [] }, upcoming: [], doneToday: [], zoneQueue: [], batches: {},
+    route: { orders: [], stops: [], polyline: [], returns: [] }, upcoming: [], doneToday: [], zoneQueue: [], batches: {}, collections: [], openFolds: new Set(),
     shift: null, today: [], leaves: [], offDays: null, cashHeld: [], owed: [], notes: [], notesAll: false, noteIds: null, readMem: {},
     online: false, sim: null, gpsOn: false, gpsFix: null, nearId: null, focusOrder: null,
     wakeLock: null, speed: null, renderSeq: 0, entered: false,
@@ -340,7 +340,7 @@
   function directionsHref(stop) { return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(Number(stop.lat).toFixed(5) + ',' + Number(stop.lng).toFixed(5)) + '&travelmode=driving'; }
   function officeAlert(o) {
     const stop = (o.route.stops || []).find(s => s.status === 'failed');
-    const reason = stop ? optLabel(MDM.FAIL_REASONS, stop.failReason) : '';
+    const reason = stop ? MDM.failReasonLabel(stop) || String(stop.remarks || '').replace(/[.\s]+$/, '') : '';
     const phone = (state.settings.contact || {}).phone;
     const links = phone ? MDM.ui.phone.links(phone) : null;
     return el('div', { class: 'alert alert--warn job__alert', role: 'status', 'data-testid': 'driver-waiting' }, icon('clock', 16),
@@ -428,7 +428,11 @@
       el('div', { class: 'card__body job__body job__stops' },
         pickups.length > 1 ? el('div', { class: 'job__multi' }, pickups.every(s => s.status === 'done') ? 'All ' + pickups.length + ' collections done' : 'Collection ' + (pickups.indexOf(showPick) + 1) + ' of ' + pickups.length) : null,
         showPick ? stopBlock(o, showPick, 'Collect from', 'driver-pickup') : null,
-        collectInfo(o),
+        // Once everything is collected the package details fold into one line, so the delivery and its button come up (client,
+        // 02/11/2026: as little scrolling as possible for the drivers).
+        pickups.length && pickups.every(s => s.status === 'done')
+          ? el('details', { class: 'job__fold', 'data-testid': 'driver-collect-fold', open: state.openFolds.has(o.id), on: { toggle: e => { if (e.currentTarget.open) state.openFolds.add(o.id); else state.openFolds.delete(o.id); } } }, el('summary', { class: 'job__fold-summary' }, 'Packages and details', el('span', { class: 'job__count' }, packagesLine(o))), collectInfo(o))
+          : collectInfo(o),
         drops.length > 1 ? el('div', { class: 'job__multi' }, 'Delivery ' + (drops.indexOf(showDrop) + 1) + ' of ' + drops.length) : null,
         showDrop ? stopBlock(o, showDrop, showDrop.type === 'return' ? 'Return to' : 'Deliver to', 'driver-drop') : null),
       el('div', { class: 'card__body job__actions' },
@@ -490,6 +494,25 @@
           pick ? el('a', { class: 'btn btn--secondary', href: directionsHref(pick), target: '_blank', rel: 'noopener', 'data-testid': 'driver-return-directions' }, icon('navigation', 16), 'Directions') : null,
           el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), 'data-testid': 'driver-return-label' }, icon('printer', 16), 'Label'))));
   }
+  // A bulk order to collect from a business (client, 02/11/2026): where, who, and the packages to tick off with one photo.
+  function collectionCard(c) {
+    const b = c.batch, col = b.collection || {};
+    return el('article', { class: 'card job job--collection', 'data-testid': 'driver-collection', 'data-batch-id': b.id, 'data-code': b.code },
+      el('div', { class: 'card__body job__top' },
+        el('div', { class: 'job__head' }, el('h3', { class: 'mono mono--code job__code' }, b.code), el('span', { class: 'job__count' }, plural(c.kids.length, 'package'))),
+        el('div', { class: 'job__meta' }, [b.name, b.preferredTime ? 'at ' + b.preferredTime : ''].filter(Boolean).join(' · '))),
+      el('div', { class: 'card__body job__body' },
+        el('div', { class: 'job__stop' },
+          el('div', { class: 'job__label' }, 'Collect from'),
+          el('div', { class: 'job__address' }, col.address || b.name),
+          col.zone || col.landmark ? el('div', { class: 'job__line' }, [col.zone ? MDM.geo.zoneLabel(col.zone) : '', col.landmark].filter(Boolean).join(' · ')) : null,
+          contactRow(col.contactName || '', col.contactPhone || '', 'driver-collection-contact')),
+        el('div', { class: 'job__pkgs' },
+          el('div', { class: 'job__label' }, 'Packages'),
+          el('ul', { class: 'job__pkglist' }, c.kids.map(o => { const p = (o.packages || [])[0] || {}; return el('li', null, el('span', { class: 'job__pkgsize' }, String(o.batchIndex || '')), el('span', { class: 'job__pkgtext' }, [(o.delivery || {}).recipientName, optLabel(MDM.pricing.businessTiers(state.settings), p.tier) || sizeName(p.size)].filter(Boolean).join(' · '))); })))),
+      el('div', { class: 'card__body job__actions' },
+        el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary--go', 'data-testid': 'driver-collection-collect', on: { click: e => onBatchCollect(e.currentTarget, c) } }, 'Collect ' + plural(c.kids.length, 'package'))));
+  }
   // When a finished job was finished: the return to the sender for a business cancellation, otherwise the last update.
   const doneAt = o => (o.status === 'cancelled' && o.cancellation && o.cancellation.returnedAt) || o.updatedAt || '';
   function doneAside(o) {
@@ -500,9 +523,11 @@
     const waiting = state.route.orders.filter(o => o.status === 'failed');
     const returns = state.route.returns || [];
     const parts = [];
-    if (!active.length && !waiting.length && !returns.length && !state.upcoming.length) {
+    const collections = state.collections || [];
+    if (!active.length && !waiting.length && !returns.length && !state.upcoming.length && !collections.length) {
       parts.push(el('div', { class: 'empty driver-empty', 'data-testid': 'driver-empty' }, el('div', { class: 'empty__title' }, 'No jobs right now'), el('div', { class: 'empty__hint' }, 'New jobs appear here.')));
     }
+    if (collections.length) parts.push(group('Bulk collections', 'Collect from the business and tick each package off.', el('div', { class: 'jobs-list' }, collections.map(collectionCard)), 'driver-collections'));
     if (returns.length) parts.push(group('Returns', 'Bring each package back to the sender.', el('div', { class: 'jobs-list' }, returns.map(returnCard)), 'driver-returns'));
     // The first active job (priority first, then oldest) is the one to work on now; the rest follow under Next.
     if (active.length) parts.push(el('div', { class: ['jobs-list', returns.length && 'jobs-list--after'], 'data-testid': 'driver-active' },
@@ -1055,13 +1080,11 @@
   async function onDelivered(btn, o, stop) {
     const isReturn = stop.type === 'return';
     const cod = !isReturn && codDue(o) ? o.cod.amount : 0;
-    const nameField = { name: 'recipientName', label: isReturn ? 'Received by' : 'Recipient name', type: 'text', required: true, autocomplete: 'off', value: !isReturn && stop.contact && stop.contact.name ? stop.contact.name : '', requiredMessage: 'Enter who received it' };
-    // Short on a phone (client, 01/11/2026): who took it is one list, a hand-over in person needs no photo (only a package left as
-    // instructed does), and the charges fold into one line so "Confirm delivery" stays close.
+    // Short on a phone (client, 02/11/2026): no "handed to" and no "received it" tick, the photo is the proof (required for every
+    // delivery, business ones too), the name is filled in, and the charges fold into one line so "Confirm delivery" stays close.
     const fields = [
-      { name: 'handedTo', label: 'Handed to', type: 'select', required: true, value: 'recipient', options: MDM.HANDED_TO },
-      nameField,
-      { name: 'photo', label: 'Proof of delivery', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Needed when the package is left as instructed.' },
+      { name: 'photo', label: 'Proof of delivery', type: 'file', required: !isReturn, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', requiredMessage: 'Take a photo of the package at the delivery' },
+      { name: 'recipientName', label: 'Received by', type: 'text', required: isReturn, autocomplete: 'off', value: !isReturn && stop.contact && stop.contact.name ? stop.contact.name : '', requiredMessage: 'Enter who received it' },
     ];
     if (cod) fields.push({ name: 'cashCollected', label: 'Cash collected (MVR)', type: 'number', required: true, min: 0, step: 1, placeholder: String(cod), validate: wholeMvr('cashCollected'),
       hint: 'Amount to collect: ' + money(cod), requiredMessage: 'Enter the cash you collected (amount to collect: ' + money(cod) + '). Enter 0 if the receiver did not pay.' });
@@ -1084,14 +1107,11 @@
     fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2, fold });
     const p = MDM.ui.dialog({ title: isReturn ? 'Returned to sender' : 'Delivered', message: o.code + ' · ' + addressText(o, stop), fields,
       validate: vals => {
-        if (vals.handedTo === 'left' && !vals.photo) return { photo: 'Take a photo of where you left it' };
         if (cargo && Number(vals.cargoCharge) > 0 && !vals.cargoBill) return { cargoBill: 'Take a photo of the Maldivian Cargo bill' };
         return (cargo ? amountOrNote('cargoCharge', 'cargoNote', 'Enter the Maldivian Cargo charges, or clear the note')(vals) : null)
           || amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note')(vals) || (isReturn ? null : amountOrNote('packing', 'packingNote', 'Enter the packing charge, or clear the note')(vals));
       },
       okLabel: isReturn ? 'Confirm return' : 'Confirm delivery' });
-    const handed = document.querySelector('dialog[open] [data-testid="dialog-handedTo"]');
-    if (handed) handed.addEventListener('change', () => { nameField.required = handed.value !== 'left'; });
     if (cod) {
       // A different amount is allowed (the receiver paid part, or nothing) but called out, and the office is told about the difference.
       const wrap = document.querySelector('dialog[open] [data-field="cashCollected"]');
@@ -1110,7 +1130,7 @@
     const v = await p;
     if (!v || !(await stillYours(o))) return;
     btn.disabled = true;
-    const patch = { status: 'done', by: by(), handedTo: v.handedTo, recipientName: v.recipientName || '', confirmed: v.handedTo !== 'left', remarks: v.remarks || '' };
+    const patch = { status: 'done', by: by(), recipientName: v.recipientName || '', remarks: v.remarks || '' };
     if (cod) patch.cashCollected = Math.round(Number(v.cashCollected) || 0);
     if (Number(v.naalu) > 0) { patch.naalu = Math.round(v.naalu); patch.naaluNote = v.naaluNote || ''; }
     if (!isReturn && Number(v.packing) > 0) { patch.packing = Math.round(v.packing); patch.packingNote = v.packingNote || ''; }
@@ -1152,6 +1172,27 @@
     KEYS.forEach(k => { boat[k] = v[k] || ''; });
     await run(btn, o, () => MDM.store.updateBoat(o.id, boat, { reason: v.reason, note: v.note || '', by: by() }), o.code + ': boat details updated, the office has been told', 'Could not update the boat details');
   }
+  // Bulk collection (client, 02/11/2026): the driver ticks off each package they were handed, takes one photo of them, and notes
+  // anything missing; the ticked ones go to the hub, the others stay to collect and the business is told.
+  async function onBatchCollect(btn, c) {
+    const b = c.batch;
+    const fields = c.kids.map(o => { const d = o.delivery || {}, p = (o.packages || [])[0] || {};
+      return { name: 'got_' + o.id, label: (o.batchIndex || '') + '. ' + (d.recipientName || o.code) + ' · ' + (optLabel(MDM.pricing.businessTiers(state.settings), p.tier) || sizeName(p.size)), type: 'checkbox', value: false,
+        hint: [o.code, (o.details || {}).reference ? 'ref ' + o.details.reference : '', p.description].filter(Boolean).join(' · ') }; });
+    fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: true, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', requiredMessage: 'Take a photo of the packages you collected' },
+      { name: 'note', label: 'Missing packages', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Not packed yet', fold: 'A package is missing' });
+    const v = await MDM.ui.dialog({ title: 'Collect ' + b.code, message: 'Tick each package you have. ' + b.name + '.', fields, okLabel: 'Confirm collection',
+      validate: vals => (c.kids.some(o => vals['got_' + o.id]) ? null : { ['got_' + c.kids[0].id]: 'Tick the packages you have' }) });
+    if (!v) return;
+    btn.disabled = true;
+    const got = c.kids.filter(o => v['got_' + o.id]).map(o => o.id), missing = c.kids.length - got.length;
+    try {
+      const photoId = await storePhoto(v.photo, 'proof_collection', null);
+      await MDM.store.batchCollected(b.id, { orderIds: got, note: v.note || '', photoId, by: by() });
+      MDM.ui.toast(missing ? plural(got.length, 'package') + ' collected, ' + missing + ' missing: the office and the business are told' : b.code + ' collected: bring it to the hub', missing ? 'warn' : 'ok');
+      requestRender();
+    } catch (e) { btn.disabled = false; fail(e, 'Could not save the collection'); }
+  }
   // Returned to sender (§5.5): closes a business cancellation after the driver hands the package back.
   async function onReturned(btn, o) {
     const col = o.collection || {};
@@ -1165,19 +1206,18 @@
     const note = [v.receivedBy ? 'received by ' + v.receivedBy : '', v.note].filter(Boolean).join('. ');
     await run(btn, o, () => MDM.store.markReturned(o.id, { note, by: by() }), o.code + ' returned to the sender', 'Could not confirm the return', { anyStatus: true });
   }
-  // Failed collection or delivery (client requirements §14): reason, remarks, optional photo; the office decides what happens next.
+  // Failed collection or delivery (client requirements §14): what happened in the driver's words (client, 02/11/2026: remarks
+  // only, required, no list of reasons) and an optional photo; the office decides what happens next.
   async function onFailed(btn, o, stop) {
     const v = await MDM.ui.dialog({ title: stop.type === 'pickup' ? 'Collection problem' : 'Delivery problem', message: 'The office decides what happens next.',
       fields: [
-        { name: 'failReason', label: 'Reason', type: 'select', required: true, placeholder: 'Choose a reason', options: MDM.FAIL_REASONS, requiredMessage: 'Choose a reason' },
-        { name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 3, hint: 'What you tried, for example called twice' },
+        { name: 'remarks', label: 'What happened', type: 'textarea', required: true, rows: 3, placeholder: 'e.g. Called twice, no answer', requiredMessage: 'Tell the office what happened' },
         { name: 'photo', label: 'Photo', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo' },
       ],
-      validate: vals => vals.failReason === 'other' && !vals.remarks ? { remarks: 'Tell the office what happened' } : null,
       okLabel: 'Report problem', danger: true });
     if (!v) return;
     btn.disabled = true;
-    const patch = { status: 'failed', failReason: v.failReason, remarks: v.remarks || '', by: by() };
+    const patch = { status: 'failed', failReason: 'other', remarks: v.remarks || '', by: by() };
     if (v.photo) { try { patch.photoId = await storePhoto(v.photo, 'failed', o.id); } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; } }
     const r = await run(btn, o, () => MDM.store.setStop(o.id, stop.id, patch), null, 'Could not report the problem');
     if (r) { resumeSimAt(stop.id); MDM.ui.toast(o.code + ' sent to the office', 'warn'); }
@@ -1217,17 +1257,18 @@
     const seq = ++state.renderSeq;
     const [drivers, settings] = await Promise.all([MDM.store.list('drivers', { order: 'createdAt' }), MDM.store.settings()]);
     const driver = state.driverId ? drivers.find(d => d.id === state.driverId) || null : null;
-    let route = { orders: [], stops: [], polyline: [], returns: [] }, upcoming = [], done = [], zoneQueue = [], staff = null, shift = null, today = [], leaves = [], batches = {};
+    let route = { orders: [], stops: [], polyline: [], returns: [] }, upcoming = [], done = [], zoneQueue = [], staff = null, shift = null, today = [], leaves = [], batches = {}, collections = [];
     let offDays = null, cashHeld = [], owed = [], notes = [];
     if (driver) {
       const today0 = new Date(); today0.setHours(0, 0, 0, 0);
-      const [r, mine, collected, st, bl, nt] = await Promise.all([
+      const [r, mine, collected, st, bl, nt, toCollect] = await Promise.all([
         MDM.store.driverRoute(driver.id),
         MDM.store.list('orders', { where: { driverId: driver.id } }),
         MDM.store.list('orders', { where: { status: 'collected' } }),
         driver.staffId ? MDM.store.get('staff', driver.staffId) : null,
         MDM.store.list('batches'),
         MDM.store.list('notifications', { where: { audience: 'driver' } }),
+        MDM.store.list('orders', { where: { status: 'confirmed', collectorId: driver.id } }),
       ]);
       route = r; staff = st;
       upcoming = mine.filter(o => o.status === 'assigned');
@@ -1237,6 +1278,9 @@
       cashHeld = mine.filter(o => o.cod && o.cod.status === 'collected').sort((a, b) => (a.cod.collectedAt || '') < (b.cod.collectedAt || '') ? 1 : -1);
       zoneQueue = collected.filter(o => o.batchId && !o.driverId && o.delivery && (driver.zones || []).indexOf(o.delivery.zone) >= 0);
       bl.forEach(b => { batches[b.id] = b; });
+      // Bulk orders this driver collects from the business (client, 02/11/2026), with the packages still to collect.
+      collections = bl.filter(b => b.collectorId === driver.id).map(b => ({ batch: b, kids: toCollect.filter(o => o.batchId === b.id).sort((x, y) => (x.batchIndex || 0) - (y.batchIndex || 0)) }))
+        .filter(c => c.kids.length);
       const phone = MDM.ui.phone.normalize(driver.phone) || driver.phone;
       notes = nt.filter(n => n.to === driver.phone || MDM.ui.phone.normalize(n.to) === phone).sort((a, b) => (a.at || '') < (b.at || '') ? 1 : -1);
       if (staff) {
@@ -1249,7 +1293,7 @@
       }
     }
     if (seq !== state.renderSeq) return;
-    Object.assign(state, { drivers, settings: settings || {}, driver, route, upcoming, doneToday: done, zoneQueue, staff, shift, today, leaves, batches, offDays, cashHeld, owed, notes });
+    Object.assign(state, { drivers, settings: settings || {}, driver, route, upcoming, doneToday: done, zoneQueue, staff, shift, today, leaves, batches, collections, offDays, cashHeld, owed, notes });
     if (driver) announceNew(notes);
     if (!driver && state.driverId) { state.driverId = null; writeSession(); watchPositions(); }
     const wasOnline = state.online;

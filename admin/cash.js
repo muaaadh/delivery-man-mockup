@@ -19,6 +19,26 @@
   const variance = c => c.variance != null ? c.variance : (c.collectedAmount != null ? c.collectedAmount - c.amount : 0);
   const diffText = v => v === 0 ? 'None' : (v > 0 ? '+' : '') + money(v);
 
+  // Charges paid out for orders (§6.1), shared by Cash & COD, Petty cash and the order drawer: what each is called, who paid it (the
+  // driver who recorded it, or the order's driver for an office entry made for them) and whether it is still owed to that driver.
+  const chargeName = c => ((MDM.CHARGE_TYPES.find(t => t.value === c.type) || {}).label) || 'Other charge';
+  const payerOf = x => x.c.paidBy === 'driver' ? (K.driverOfBy(x.c.by, x.o) || 'unknown') : 'office';
+  const owedOf = x => x.c.paidBy === 'driver' && !x.c.void && !x.c.reimbursedAt;
+  async function reimburse(driverId, name, list) {
+    const total = list.reduce((t, x) => t + x.c.amount, 0);
+    const v = await MDM.ui.dialog({ title: 'Pay back ' + name, message: money(total) + ' for ' + plural(list.length, 'charge') + ' they paid. Untick any you are not paying now.', okLabel: 'Record payment', testid: 'payback-dialog',
+      fields: list.map(x => ({ name: 'c_' + x.c.id, label: x.o.code + ' · ' + chargeName(x.c) + ' ' + (K.STAGE[x.c.stage] || '').toLowerCase() + ' · ' + money(x.c.amount), type: 'checkbox', value: true }))
+        .concat([{ name: 'reference', label: 'Petty cash voucher or reference', type: 'text', required: true, placeholder: 'PCV-0412', hint: 'Or the transfer reference' }]),
+      validate: vals => list.some(x => vals['c_' + x.c.id]) ? null : 'Tick at least one charge' });
+    if (!v) return;
+    const ids = list.filter(x => v['c_' + x.c.id]).map(x => x.c.id);
+    const r = await MDM.store.reimburseCharges(driverId, { chargeIds: ids, reference: v.reference, by: by() });
+    if (!r.count) { toast('Nothing paid back: these charges were already paid back or the order is now with another driver', 'warn'); return; }
+    const missed = ids.length - r.count;
+    toast('Paid back ' + money(r.total) + ' to ' + name + ' for ' + plural(r.count, 'charge') + ', reference ' + v.reference + (missed ? '. ' + plural(missed, 'charge') + ' could not be paid back here (already paid back or the order is now with another driver)' : ''), missed ? 'warn' : 'ok');
+  }
+  MDM.admin.kit.payBack = reimburse;
+
   MDM.admin.views.cash = (function () {
     let ctx = null, root = null, tabsEl = null, filtersEl = null, body = null, tab = 'cod', range = null, account = '', enterNext = false;
     const TABS = [{ value: 'cod', label: 'Cash on delivery' }, { value: 'charges', label: 'Naalu and charges' }];
@@ -197,9 +217,6 @@
     // A charge a driver paid out of pocket (naalu at a jetty, packing, a fee) is owed to that driver until the office reimburses it
     // (MDM.store.reimburseCharges stamps reimbursedAt / reimbursedBy / reimbursementRef). Charges the office paid are never owed.
     // Maldivian Cargo charges (17/10/2026) are the counter's bill the driver paid at delivery; they are owed back like the rest.
-    const chargeName = c => c.type === 'naalu' ? 'Naalu' : c.type === 'packing' ? 'Packing charge' : c.type === 'cargo' ? 'Maldivian Cargo charges' : 'Other charge';
-    const payerOf = x => x.c.paidBy === 'driver' ? (K.driverOfBy(x.c.by, x.o) || 'unknown') : 'office';
-    const owedOf = x => x.c.paidBy === 'driver' && !x.c.void && !x.c.reimbursedAt;
     function chargesTab(d) {
       const every = [];
       d.orders.forEach(o => (o.charges || []).forEach(c => { if (!c.void) every.push({ o, c }); }));
@@ -287,19 +304,6 @@
       if (x.c.paidBy !== 'driver') return null;
       return x.c.reimbursedAt ? badge('ok', 'Reimbursed', { 'data-testid': 'naalu-reimbursed', title: 'Reimbursed ' + MDM.ui.fmtDate(x.c.reimbursedAt) + (x.c.reimbursementRef ? ', ref ' + x.c.reimbursementRef : '') }) : badge('warn', 'Owed', { 'data-testid': 'naalu-owed' });
     }
-    async function reimburse(driverId, name, list) {
-      const total = list.reduce((t, x) => t + x.c.amount, 0);
-      const v = await MDM.ui.dialog({ title: 'Reimburse ' + name, message: money(total) + ' for ' + plural(list.length, 'charge') + '. Untick any you are not paying now.', okLabel: 'Record reimbursement',
-        fields: list.map(x => ({ name: 'c_' + x.c.id, label: x.o.code + ' · ' + chargeName(x.c) + ' ' + (K.STAGE[x.c.stage] || '').toLowerCase() + ' · ' + money(x.c.amount), type: 'checkbox', value: true }))
-          .concat([{ name: 'reference', label: 'Reimbursement reference', type: 'text', required: true, placeholder: 'PCV-0412', hint: 'Petty cash voucher or transfer reference' }]),
-        validate: vals => list.some(x => vals['c_' + x.c.id]) ? null : 'Tick at least one charge' });
-      if (!v) return;
-      const ids = list.filter(x => v['c_' + x.c.id]).map(x => x.c.id);
-      const r = await MDM.store.reimburseCharges(driverId, { chargeIds: ids, reference: v.reference, by: by() });
-      if (!r.count) { toast('Nothing reimbursed: these charges were already paid back or the order is now with another driver', 'warn'); return; }
-      const missed = ids.length - r.count;
-      toast('Reimbursed ' + money(r.total) + ' to ' + name + ' for ' + plural(r.count, 'charge') + ', reference ' + v.reference + (missed ? '. ' + plural(missed, 'charge') + ' could not be reimbursed here (already paid back or the order is now with another driver)' : ''), missed ? 'warn' : 'ok');
-    }
     // Bill a charge to the customer (it becomes a price adjustment) or take it off the price again.
     function billToggle(x) {
       const done = ['delivered', 'cancelled', 'returned'].indexOf(x.o.status) >= 0 && x.o.payment && x.o.payment.status === 'paid';
@@ -309,5 +313,115 @@
         x.c.billable ? 'Stop billing' : 'Bill customer');
     }
     return { title: 'Cash & COD', mount, update, unmount };
+  })();
+  // ==== #/petty, Petty cash (client, 02/11/2026) ===================================================================================
+  // Every amount paid out for an order, to balance petty cash: by kind (naalu, vehicle, Maldivian Cargo, packing, other), by driver
+  // and period, what is still to pay back to a driver (any date) with "Pay back", and what was paid in the period.
+  MDM.admin.views.petty = (function () {
+    let ctx = null, root = null, body = null, range = null, kind = '', driver = '', enterNext = false;
+    const PRESETS = [{ value: 'today', label: 'Today' }, { value: '7d', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last', label: 'Last month' }];
+    function preset(p) {
+      const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+      if (p === 'today') return { from: dayKey(now), to: dayKey(now) };
+      if (p === '7d') return { from: dayKey(new Date(Date.now() - 6 * 864e5)), to: dayKey(now) };
+      if (p === 'last') return { from: dayKey(new Date(y, m - 1, 1)), to: dayKey(new Date(y, m, 0)) };
+      return { from: dayKey(new Date(y, m, 1)), to: dayKey(now) };
+    }
+    function readQuery(params) {
+      const q = queryOf(params);
+      range = q.get('from') ? { from: q.get('from'), to: q.get('to') || dayKey(new Date()) } : preset('month');
+      kind = MDM.CHARGE_TYPES.some(t => t.value === q.get('kind')) ? q.get('kind') : '';
+      driver = q.get('driver') || '';
+    }
+    function setQuery() { MDM.admin.setQuery({ from: range.from, to: range.to, kind: kind || null, driver: driver || null }); }
+    // setQuery fires no hashchange: render here.
+    function changed() { setQuery(); ctx.schedule(render); }
+    async function mount(host, params) {
+      ctx = K.context(); root = host; readQuery(params);
+      body = el('div', { class: 'stack-6' });
+      root.replaceChildren(pageHead('Petty cash', 'Money paid out for orders: naalu, vehicles, Maldivian Cargo. Pay drivers back and balance petty cash.'), body);
+      ['orders', 'drivers'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
+      ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
+      await render();
+    }
+    async function update(params) { readQuery(params); enterNext = true; await render(); }
+    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; }
+    const sum = list => list.reduce((t, x) => t + x.c.amount, 0);
+    async function render() {
+      const [orders, drivers] = await Promise.all([MDM.store.list('orders', { order: 'code' }), MDM.store.list('drivers', { order: 'name' })]);
+      if (!ctx || !ctx.alive) return;
+      const driverName = id => F.driverName(id, drivers) || 'Driver';
+      const every = [];
+      orders.forEach(o => (o.charges || []).forEach(c => { if (!c.void) every.push({ o, c }); }));
+      const pick = every.filter(x => (!kind || x.c.type === kind) && (!driver || payerOf(x) === driver));
+      const owed = pick.filter(owedOf);
+      const paidOut = pick.filter(x => inRange(x.c.at, range.from, range.to)).sort((a, b) => a.c.at < b.c.at ? 1 : -1);
+      const paidBack = pick.filter(x => x.c.reimbursedAt && inRange(x.c.reimbursedAt, range.from, range.to));
+      const byOffice = paidOut.filter(x => x.c.paidBy !== 'driver');
+      // From petty cash in the period: what the office paid itself, and what it paid back to drivers.
+      const fromPetty = sum(byOffice) + sum(paidBack);
+
+      const kinds = [{ value: '', label: 'All' }].concat(MDM.CHARGE_TYPES.map(t => ({ value: t.value, label: t.value === 'cargo' ? 'Maldivian Cargo' : t.value === 'other' ? 'Other' : t.label })));
+      const from = dateInput('petty-from', range.from, 'From'), to = dateInput('petty-to', range.to, 'To');
+      [from, to].forEach(x => x.addEventListener('change', () => { range = { from: from.value, to: to.value }; changed(); }));
+      const who = el('select', { class: 'select', 'aria-label': 'Driver', 'data-testid': 'petty-driver' }, el('option', { value: '' }, 'All drivers'), drivers.map(d => el('option', { value: d.id }, d.name)));
+      who.value = driver; who.addEventListener('change', () => { driver = who.value; changed(); });
+      const filtersEl = el('div', { class: 'filters' },
+        el('div', { class: 'row row--wrap', role: 'group', 'aria-label': 'Kind of charge', 'data-testid': 'petty-kinds', style: { flexBasis: '100%' } }, kinds.map(k => el('button', { type: 'button', class: 'chip', 'aria-pressed': kind === k.value ? 'true' : 'false', 'data-testid': 'petty-kind-' + (k.value || 'all'),
+          on: { click: () => { kind = k.value; changed(); } } }, k.label))),
+        el('div', { class: 'row row--wrap' }, PRESETS.map(p => { const r = preset(p.value); return el('button', { type: 'button', class: 'chip', 'aria-pressed': r.from === range.from && r.to === range.to ? 'true' : 'false', 'data-testid': 'petty-preset-' + p.value, on: { click: () => { range = r; changed(); } } }, p.label); })),
+        el('span', { class: 'filters__dates' }, from, el('span', { class: 'filters__dash' }, 'to'), to), who,
+        range.from && range.to && range.from > range.to ? K.rangeWarning() : null);
+
+      const kpis = el('div', { class: 'kpi-row kpi-row--fluid', 'data-testid': 'petty-kpis' },
+        kpi('To pay back', money(sum(owed)), plural(owed.length, 'charge') + ' · any date', 'petty-owed'),
+        kpi('Paid back', money(sum(paidBack)), plural(paidBack.length, 'charge') + ' in period', 'petty-paid-back'),
+        kpi('Paid by the office', money(sum(byOffice)), plural(byOffice.length, 'charge') + ' in period', 'petty-office'),
+        kpi('From petty cash', money(fromPetty), 'Paid back plus paid by the office', 'petty-total'));
+      // Totals by kind in the period, the line the client balances petty cash with.
+      const byKind = MDM.CHARGE_TYPES.map(t => ({ t, list: paidOut.filter(x => x.c.type === t.value) })).filter(k => k.list.length);
+      const kindTable = byKind.length ? el('div', { class: 'rate-table', 'data-testid': 'petty-by-kind' }, byKind.map(k => el('div', { class: 'rate-table__row', 'data-kind': k.t.value },
+        el('div', { class: 'rate-table__label' }, k.t.label + ' × ' + k.list.length), el('div', { class: 'rate-table__value mono' }, money(sum(k.list)),
+          el('small', null, [sum(k.list.filter(owedOf)) ? money(sum(k.list.filter(owedOf))) + ' to pay back' : '', sum(k.list.filter(x => x.c.paidBy !== 'driver')) ? money(sum(k.list.filter(x => x.c.paidBy !== 'driver'))) + ' by the office' : ''].filter(Boolean).join(' · ')))))) : null;
+
+      // Still owed, any date: one card per driver with "Pay back".
+      const owedBy = {}; owed.forEach(x => { const k = payerOf(x); (owedBy[k] = owedBy[k] || []).push(x); });
+      const owedCols = [
+        { label: 'Paid', nowrap: true, render: x => F.whenCell(x.c.at) },
+        { label: 'Order', primary: true, render: x => orderLink(x.o) },
+        { label: 'Charge', render: x => el('span', null, chargeName(x.c), x.c.description ? el('span', { class: 'table__sub wrap-anywhere' }, x.c.description) : null) },
+        { label: 'Amount', num: true, render: x => money(x.c.amount) },
+      ];
+      const owedCards = Object.keys(owedBy).sort((a, b) => sum(owedBy[b]) - sum(owedBy[a])).map(k => {
+        const list = owedBy[k].slice().sort((a, b) => a.c.at < b.c.at ? -1 : 1), name = k === 'unknown' ? 'Driver not recorded' : driverName(k);
+        return card([el('div', { class: 'cash-group__title' }, el('h3', null, name), el('span', { class: 'cash-group__sub' }, plural(list.length, 'charge') + ' · ' + money(sum(list)) + ' to pay back')),
+          k === 'unknown' ? null : el('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-testid': 'petty-payback', on: { click: () => run(() => reimburse(k, name, list)) } }, 'Pay back')],
+          table(owedCols, list.map(x => ({ data: x, attrs: { 'data-testid': 'petty-owed-row', 'data-code': x.o.code, 'data-charge-id': x.c.id, 'data-type': x.c.type } })), { testid: 'petty-owed-' + k }), { 'data-testid': 'petty-owed-driver', 'data-driver-id': k });
+      });
+
+      const state = x => x.c.paidBy !== 'driver' ? badge('neutral', 'Paid by the office', { 'data-state': 'office' })
+        : x.c.reimbursedAt ? badge('ok', 'Paid back ' + MDM.ui.fmtDate(x.c.reimbursedAt, { dateOnly: true }), { 'data-state': 'paid-back', title: x.c.reimbursementRef ? 'Reference ' + x.c.reimbursementRef : null })
+        : badge('warn', 'To pay back', { 'data-state': 'owed' });
+      const cols = [
+        { label: 'Date', nowrap: true, render: x => F.whenCell(x.c.at) },
+        { label: 'Order', primary: true, render: x => orderLink(x.o) },
+        { label: 'Charge', render: x => el('span', null, chargeName(x.c), el('span', { class: 'table__sub wrap-anywhere' }, [K.STAGE[x.c.stage] || '', x.c.description].filter(Boolean).join(' · '))) },
+        { label: 'Paid by', render: x => x.c.paidBy === 'driver' ? driverName(payerOf(x)) : 'Office' },
+        { label: 'Amount', num: true, render: x => money(x.c.amount) },
+        { label: 'Status', render: x => el('span', null, state(x), x.c.reimbursementRef ? el('span', { class: 'table__sub mono' }, 'ref ' + x.c.reimbursementRef) : null) },
+      ];
+      const csv = () => [['Date', 'Order', 'Charge', 'Description', 'Paid by', 'Amount MVR', 'Billed to customer', 'Status', 'Paid back on', 'Reference']].concat(paidOut.map(x => [dayKey(x.c.at), x.o.code, chargeName(x.c), x.c.description || '',
+        x.c.paidBy === 'driver' ? driverName(payerOf(x)) : 'Office', x.c.amount, x.c.billable ? 'yes' : 'no', x.c.paidBy !== 'driver' ? 'paid by the office' : x.c.reimbursedAt ? 'paid back' : 'to pay back', x.c.reimbursedAt ? dayKey(x.c.reimbursedAt) : '', x.c.reimbursementRef || '']));
+      const csvBtn = el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'petty-export', on: { click: () => { F.downloadCsv(csv(), 'mdm-petty-cash-' + range.from + '-' + range.to + '.csv'); toast('Petty cash exported'); } } }, icon('download'), 'CSV');
+
+      body.replaceChildren(filtersEl, kpis,
+        el('section', { 'aria-labelledby': 'petty-owed-sec' }, sectionHead('petty-owed-sec', 'To pay back to drivers', 'Paid from their own pocket · any date'),
+          owedCards.length ? el('div', { class: 'stack-4', 'data-testid': 'petty-owed-list' }, owedCards) : card(null, empty('Nothing to pay back.'))),
+        el('section', { 'aria-labelledby': 'petty-out-sec' }, sectionHead('petty-out-sec', 'Paid out', 'In this period', csvBtn),
+          kindTable ? card(null, el('div', { class: 'card__body' }, kindTable)) : null,
+          card(null, paidOut.length ? table(cols, paidOut.map(x => ({ data: x, attrs: { 'data-testid': 'petty-row', 'data-code': x.o.code, 'data-type': x.c.type, 'data-charge-id': x.c.id } })), { testid: 'petty-table' }) : empty('Nothing paid out in this period.'))));
+      if (enterNext) { enterNext = false; if (MDM.motion) MDM.motion.enter(body); }
+    }
+    return { title: 'Petty cash', mount, update, unmount };
   })();
 })(window.MDM);

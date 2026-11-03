@@ -27,6 +27,7 @@
     { view: 'customers', label: 'Customers', icon: 'users', group: 'Accounts' },
     { view: 'business', label: 'Business', icon: 'building', group: 'Accounts' },
     { view: 'cash', label: 'Cash & COD', icon: 'wallet', group: 'Accounts' },
+    { view: 'petty', label: 'Petty cash', icon: 'receipt', group: 'Accounts' },
     { view: 'store', label: 'E-store', icon: 'store', group: 'Accounts' },
     { view: 'team', label: 'Team & HR', icon: 'clock', group: 'Team and insights' },
     { view: 'reports', label: 'Reports', icon: 'sliders', group: 'Team and insights' },
@@ -39,8 +40,8 @@
   // Role permissions (client requirements §21): operators run the day, office staff handle customers and payments, admin sees everything.
   const ROLE_VIEWS = {
     admin: ADMIN_NAV.map(n => n.view),
-    operator: ['overview', 'orders', 'bulk', 'live', 'drivers', 'customers', 'business', 'cash', 'store', 'reports', 'notifications', 'zones'],
-    office: ['overview', 'orders', 'customers', 'business', 'cash', 'store', 'notifications'],
+    operator: ['overview', 'orders', 'bulk', 'live', 'drivers', 'customers', 'business', 'cash', 'petty', 'store', 'reports', 'notifications', 'zones'],
+    office: ['overview', 'orders', 'customers', 'business', 'cash', 'petty', 'store', 'notifications'],
   };
   function session() { try { return JSON.parse(localStorage.getItem('mdm:session') || 'null'); } catch (e) { return null; } }
   function allowedViews() { const s = session(); return ROLE_VIEWS[(s && s.role) || 'admin'] || ROLE_VIEWS.admin; }

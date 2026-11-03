@@ -521,8 +521,8 @@
       // Confirmed and the driver steps: the hero's status, ETA and short line say it all.
       case 'failed': {
         const failed = stops.find(x => x.status === 'failed');
-        const r = failed ? MDM.FAIL_REASONS.find(x => x.value === failed.failReason) : null;
-        items.push(notice('danger', null, (failed ? (failed.type === 'pickup' ? 'Collection' : 'Delivery') + ' could not be completed' : 'A stop could not be completed') + (r ? ' (' + r.label.toLowerCase() + ')' : '') + '. We contact you ' + channelOn + ' to reschedule.'));
+        const why = failed ? MDM.failReasonLabel(failed) : '';
+        items.push(notice('danger', null, (failed ? (failed.type === 'pickup' ? 'Collection' : 'Delivery') + ' could not be completed' : 'A stop could not be completed') + (why ? ' (' + why.toLowerCase() + ')' : '') + '. We contact you ' + channelOn + ' to reschedule.'));
         break;
       }
       case 'delivered':

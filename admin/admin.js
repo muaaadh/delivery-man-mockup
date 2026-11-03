@@ -413,8 +413,7 @@
       group('payments', 'Payments to verify', q.reviews.map(o => link(o, 'Slip · ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total), MDM.ui.timeAgo(o.payment.submittedAt || o.updatedAt))));
       group('failed', 'Failed attempts', q.failed.map(o => {
         const s = (o.route && o.route.stops || []).find(x => x.status === 'failed');
-        const r = s && MDM.FAIL_REASONS.find(x => x.value === s.failReason);
-        return link(o, (r ? r.label : 'Could not complete') + ' · ' + (driverName(o.driverId, drivers) || 'driver') + ' waiting', MDM.ui.timeAgo(o.updatedAt));
+        return link(o, (MDM.failReasonLabel(s) || (s && s.remarks) || 'Could not complete') + ' · ' + (driverName(o.driverId, drivers) || 'driver') + ' waiting', MDM.ui.timeAgo(o.updatedAt));
       }));
       group('cancels', 'Cancellation requests', q.cancels.map(o => link(o, (o.cancellation.reason || 'No reason given') + ' · ' + MDM.STATUS[o.status].label, MDM.ui.timeAgo(o.cancellation.requestedAt))));
       group('priority', 'Priority requests', q.priority.map(o => { const r = (o.priority.requests || []).slice().reverse().find(x => x.decision === 'pending') || {}; return link(o, (r.reason || 'Priority delivery') + (r.deadline ? ' · by ' + r.deadline : ''), MDM.ui.timeAgo(r.at || o.updatedAt)); }));

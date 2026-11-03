@@ -160,7 +160,9 @@
   ];
   // Charges recorded on proof of collection / delivery or by the office (§6).
   // cargo: the Maldivian Cargo bill the driver pays at the counter (updates 17/10/2026), always added to the customer's delivery charges.
-  MDM.CHARGE_TYPES = [{ value: 'naalu', label: 'Naalu' }, { value: 'packing', label: 'Packing charge' }, { value: 'cargo', label: 'Maldivian Cargo charges' }, { value: 'other', label: 'Other charge' }];
+  // Money paid out for an order (§6). Vehicle (client, 02/11/2026): what was paid for an extra vehicle, so petty cash can be balanced
+  // by naalu, vehicle and Maldivian Cargo.
+  MDM.CHARGE_TYPES = [{ value: 'naalu', label: 'Naalu' }, { value: 'vehicle', label: 'Vehicle' }, { value: 'packing', label: 'Packing charge' }, { value: 'cargo', label: 'Maldivian Cargo charges' }, { value: 'other', label: 'Other charge' }];
   // Pick & deliver orders without a package photo are collected first; the operator sets the price from the proof of collection
   // (updates 17/10/2026). pricing.afterCollection is set when the order is created, or when the office assigns a driver before
   // confirming the price (client, 28/10/2026: a shopping stop or a package photo no longer holds the driver back).
@@ -238,6 +240,9 @@
     { value: 'wrong_phone', label: 'Wrong contact number' }, { value: 'not_ready', label: 'Package not ready' },
     { value: 'refused', label: 'Recipient refused package' }, { value: 'other', label: 'Other reason' },
   ];
+  // The reason a stop failed, for people: a reason from the list, or nothing when the driver only wrote what happened (client,
+  // 02/11/2026: the driver's dialog asks for remarks only, saved as 'other').
+  MDM.failReasonLabel = s => { const r = s && s.failReason && s.failReason !== 'other' ? MDM.FAIL_REASONS.find(x => x.value === s.failReason) : null; return r ? r.label : ''; };
   MDM.FAIL_ACTIONS = [
     { value: 'reschedule', label: 'Reschedule' }, { value: 'reassign', label: 'Reassign' }, { value: 'return', label: 'Return the package' },
     { value: 'contact', label: 'Contact the customer' }, { value: 'cancel', label: 'Cancel the order' },
@@ -1041,9 +1046,9 @@
       }
     } else if (p.status === 'failed') {
       s.status = 'failed'; s.failReason = p.failReason || 'other'; s.remarks = p.remarks || ''; s.failedAt = now(); s.failPhotoId = p.photoId || null;
-      const r = MDM.FAIL_REASONS.find(x => x.value === s.failReason);
+      const why = MDM.failReasonLabel(s);
       const what = s.type === 'pickup' ? 'Collection failed' : 'Delivery failed';
-      setStatus(o, 'failed', 'failed', what + ': ' + (r ? r.label.toLowerCase() : s.failReason), by, 'public', { stopId });
+      setStatus(o, 'failed', 'failed', what + (why ? ': ' + why.toLowerCase() : ''), by, 'public', { stopId });
       if (p.remarks) pushEvent(o, makeEvent('note', 'Driver remark: ' + p.remarks, by, 'internal', { stopId }));
     }
     return save(o);
@@ -1158,6 +1163,29 @@
     pushEvent(o, makeEvent('note', 'Taken back: ' + reason, by, 'internal', { stopId: s.id }));
     return save(o);
   }
+  // A proof photo added after the step (client, 02/11/2026: a driver forgot it and the office had to undo the delivery to add
+  // one): the office adds the photo the driver sent to a collection or delivery that is done, without taking the step back.
+  function addStopPhoto(orderId, stopId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId);
+    const s = ((o.route && o.route.stops) || []).find(x => x.id === stopId); if (!s) throw new StoreError('not_found', 'Stop not found');
+    if (s.status !== 'done') throw new StoreError('transition', 'This step is not done yet: the photo goes with it');
+    if (!p.photoId) throw new StoreError('validation', 'Choose the photo');
+    const by = p.by || 'admin';
+    if (s.type === 'pickup') {
+      if (s.proofPhotoId) throw new StoreError('validation', 'This collection already has a photo');
+      s.proofPhotoId = p.photoId; s.proofPhotoIds = [p.photoId];
+      (o.packages || []).filter(k => (s.packageIds || [s.packageId]).indexOf(k.id) >= 0).forEach(k => {
+        if (!k.collectionPhotoId) k.collectionPhotoId = p.photoId;
+        if (!k.photoId) { k.photoId = p.photoId; k.photoSource = 'driver'; }
+      });
+    } else {
+      if (s.photoId) throw new StoreError('validation', 'This delivery already has a photo');
+      s.photoId = p.photoId;
+    }
+    pushEvent(o, makeEvent('proof_added', (s.type === 'pickup' ? 'Proof of collection' : s.type === 'return' ? 'Proof of return' : 'Proof of delivery') + ' photo added', by, 'internal', { stopId }));
+    return save(o);
+  }
   function driverRoute(driverId) {
     const mine = readCol('orders').filter(o => o.driverId === driverId && ['dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery', 'failed'].indexOf(o.status) >= 0);
     // Priority and express jobs first, then oldest first.
@@ -1209,15 +1237,42 @@
     audit('batch_created', 'Bulk order ' + saved.code + ' with ' + ids.length + ' packages', b.by || ('business:' + acc.id), { batchId: saved.id });
     return clone(saved);
   }
-  // batchCollected(batchId, { orderIds?, note?, by }): orderIds are the packages received (client, 31/10/2026); the others stay awaiting
-  // collection, their timeline says so and the business is told. Without orderIds every package awaiting collection is collected.
+  // A driver collects a bulk order (client, 02/11/2026): the office names the collector; the bulk order and its packages still to
+  // collect show on that driver's phone, where they tick each package off with a photo. The packages stay without a delivery driver
+  // until the office assigns them by zone at the hub.
+  function assignCollector(batchId, driverId, p) {
+    p = p || {};
+    const batch = readCol('batches').find(x => x.id === batchId); if (!batch) throw new StoreError('not_found', 'Batch not found');
+    const d = driverId ? readCol('drivers').find(x => x.id === driverId) : null;
+    if (driverId && !d) throw new StoreError('not_found', 'Driver not found');
+    const waiting = readCol('orders').filter(o => o.batchId === batchId && o.status === 'confirmed');
+    if (!waiting.length) throw new StoreError('transition', 'Every package of ' + batch.code + ' is already collected');
+    const by = p.by || 'admin';
+    waiting.forEach(o => { const x = clone(o); x.collectorId = driverId || null; save(x); });
+    const saved = update('batches', batchId, { collectorId: driverId || null, collectorAssignedAt: driverId ? now() : null });
+    if (d) insert('notifications', { orderId: waiting[0].id, code: batch.code, to: d.phone, name: d.name, audience: 'driver', channel: 'app', event: 'staff_driver', title: 'Bulk collection',
+      message: batch.code + ': collect ' + waiting.length + ' package' + (waiting.length > 1 ? 's' : '') + ' from ' + batch.name + ((batch.collection || {}).address ? ', ' + batch.collection.address : ''), status: 'sent', at: now() });
+    audit('batch_collector', batch.code + ': ' + (d ? 'collected by ' + d.name : 'no collector'), by, { batchId });
+    return saved;
+  }
+  // batchCollected(batchId, { orderIds?, note?, photoId?, by }): orderIds are the packages received (client, 31/10/2026); the others stay
+  // awaiting collection, their timeline says so and the business is told. Without orderIds every package awaiting collection is
+  // collected. The collector driver ticks the packages off and the photo is their proof of collection (required from a driver).
   function batchCollected(batchId, p) {
     p = p || {};
     const batch = readCol('batches').find(x => x.id === batchId); if (!batch) throw new StoreError('not_found', 'Batch not found');
+    const byDriver = String(p.by || '').indexOf('driver:') === 0 ? String(p.by).slice(7) : null;
+    if (byDriver && batch.collectorId !== byDriver) throw new StoreError('validation', 'This bulk collection is not assigned to you');
+    if (byDriver && !p.photoId) throw new StoreError('validation', 'Take a photo of the packages you collected');
     const waiting = readCol('orders').filter(o => o.batchId === batchId && o.status === 'confirmed');
     const got = Array.isArray(p.orderIds) ? waiting.filter(o => p.orderIds.indexOf(o.id) >= 0) : waiting;
     if (waiting.length && !got.length) throw new StoreError('validation', 'Tick at least one package we received');
-    got.forEach(o => { const x = clone(o); ensureRoute(x); x.route.stops.filter(s => s.type === 'pickup').forEach(s => { s.status = 'done'; s.at = now(); }); setStatus(x, 'collected', 'collected', 'Collected, sorting at our hub', p.by); save(x); });
+    got.forEach(o => {
+      const x = clone(o); ensureRoute(x);
+      x.route.stops.filter(s => s.type === 'pickup').forEach(s => { s.status = 'done'; s.at = now(); if (p.photoId) { s.proofPhotoId = p.photoId; s.proofPhotoIds = [p.photoId]; } });
+      if (p.photoId) (x.packages || []).forEach(k => { k.collectionPhotoId = p.photoId; });
+      setStatus(x, 'collected', 'collected', 'Collected' + (byDriver ? ' by ' + driverName(byDriver) : '') + ', sorting at our hub', p.by); save(x);
+    });
     const missed = waiting.filter(o => got.indexOf(o) < 0), note = String(p.note || '').trim();
     if (missed.length) {
       missed.forEach(o => { const x = clone(o); pushEvent(x, makeEvent('not_received', 'Not received at collection' + (note ? ': ' + note : ''), p.by, 'public')); save(x); });
@@ -1226,7 +1281,8 @@
         message: batch.code + ': ' + missed.length + ' of ' + waiting.length + ' packages not received (' + missed.map(o => o.code).join(', ') + ')' + (note ? '. ' + note : ''), status: 'sent', at: now() });
       audit('batch_partly_collected', batch.code + ': ' + got.length + ' collected, ' + missed.length + ' not received', p.by, { batchId });
     }
-    return update('batches', batchId, missed.length ? { collectedAt: now() } : { status: 'collected', collectedAt: now() });
+    const stamp = { collectedAt: now(), collectedBy: p.by || 'admin', collectionPhotoId: p.photoId || batch.collectionPhotoId || null };
+    return update('batches', batchId, missed.length ? stamp : Object.assign(stamp, { status: 'collected' }));
   }
   // assignByZone: every package goes to the first active driver of its delivery zone (requirements §10, §16).
   function assignByZone(batchId, p) {
@@ -1373,9 +1429,12 @@
     // Extra collection points (multi collection): cleaned here so every page stores the same shape. A shop stop needs no address
     // (round 4): the customer names the shop, or leaves it to us, and lists what to buy; our team confirms both on a call.
     const usable = c => c && (String(c.address || '').trim() || (c.kind === 'shop' && c.shop && (String(c.shop.list || '').trim() || String(c.shop.name || '').trim())));
+    // A "Collect an item" stop carries its collection type and details (client, 02/11/2026): boat, shop or godown, courier, or home.
+    const EXTRA_DETAIL_KEYS = ['boatName', 'jetty', 'arrivalDate', 'arrivalTime', 'carrier', 'location', 'code', 'collectBefore', 'orderNo', 'note'];
+    const extraDetails = x => { const out = {}; EXTRA_DETAIL_KEYS.forEach(k => { const v = x && typeof x[k] === 'string' ? x[k].trim().slice(0, 300) : ''; if (v) out[k] = v; }); return out; };
     const extraCollections = (Array.isArray(d.extraCollections) ? d.extraCollections : []).filter(usable).slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(c => {
       const shop = c.kind === 'shop';
-      return { id: c.id || MDM.id('col'), kind: shop ? 'shop' : 'collect', address: String(c.address || '').trim(), zone: c.zone && c.zone !== 'airport' ? c.zone : 'male', landmark: String(c.landmark || '').trim(),
+      return { id: c.id || MDM.id('col'), kind: shop ? 'shop' : 'collect', type: shop ? null : ['boat_collect', 'shop_collect', 'postal'].indexOf(c.type) >= 0 ? c.type : 'home', details: shop ? null : extraDetails(c.details), address: String(c.address || '').trim(), zone: c.zone && c.zone !== 'airport' ? c.zone : 'male', landmark: String(c.landmark || '').trim(),
         contactName: shop ? '' : String(c.contactName || '').trim(), contactPhone: shop ? '' : normPhone(c.contactPhone) || String(c.contactPhone || '').trim(), instructions: String(c.instructions || '').trim(),
         shop: shop ? { name: String((c.shop || {}).name || '').trim(), phone: normPhone((c.shop || {}).phone) || '', list: String((c.shop || {}).list || '').trim(), budget: Math.round(Number((c.shop || {}).budget) || 0), unavailable: (c.shop || {}).unavailable || 'call', receiptTotal: null, receiptPhotoId: null } : null };
     });
@@ -1535,6 +1594,9 @@
     recalc(o); priceHistory(o, before, o.totals.total, 'Extra vehicle charge' + (p.remarks ? ': ' + p.remarks : ''), p.by);
     const visible = o.pricing && o.pricing.status === 'confirmed';
     pushEvent(o, makeEvent('adjustment', (visible ? 'Price updated: ' : 'Adjustment: ') + 'extra vehicle ' + fmt(amount), p.by, visible ? 'public' : 'internal'));
+    // What was paid for the vehicle (client, 02/11/2026): a charge for petty cash, owed back to the driver who paid it. The customer is
+    // already billed through the vehicle charge above, so this one is not billed again.
+    if (Number(p.paidOut) > 0) addChargeOn(o, { type: 'vehicle', stage: 'office', amount: p.paidOut, description: p.remarks || 'Extra vehicle', paidBy: p.paidBy === 'office' ? 'office' : 'driver', billable: false, by: p.by });
     invoiceFollows(o, before, p.by);
     return save(o);
   }
@@ -1788,8 +1850,8 @@
     createOrder: P(createOrder), modifyOrder: P(modifyOrder), addAdjustment: P(addAdjustment), confirmPrice: P(confirmPrice), updatePackages: P(updatePackages),
     requestPayment: P(requestPayment), submitPayment: P(submitPayment), verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), recordRefund: P(recordRefund), markSettled: P(markSettled),
     cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
-    assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep),
-    driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
+    assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep), addStopPhoto: P(addStopPhoto),
+    driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
     createStoreOrder: P(createStoreOrder), punchIn: P(punchIn), punchOut: P(punchOut), openShift: P(openShift), requestLeave: P(requestLeave), decideLeave: P(decideLeave),
     upsertCustomer: P(upsertCustomer), createInvoice: P(createInvoice), orderByCode: P(orderByCode),
     addCharge: P(addCharge), setChargeBillable: P(setChargeBillable), voidCharge: P(voidCharge), reimburseCharges: P(reimburseCharges), addVehicleCharge: P(addVehicleCharge),

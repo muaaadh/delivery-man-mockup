@@ -334,9 +334,9 @@
       [smallBtn('Reject', 'alert-reject', () => rejectPayment(o)), smallBtn('Verify payment', 'alert-verify', () => verify(o), 'btn--primary')], 'drawer-alert-payment');
     if (o.status === 'failed') {
       const s = ((o.route && o.route.stops) || []).find(x => x.status === 'failed');
-      const r = s && MDM.FAIL_REASONS.find(x => x.value === s.failReason);
+      const why = MDM.failReasonLabel(s);
       const photo = s && thumbButton(ctx.fileById[s.failPhotoId], 'photo from the attempt');
-      banner('danger', (s && s.type === 'pickup' ? 'Collection' : 'Delivery') + ' failed: ' + (r ? r.label.toLowerCase() : 'reason not given'), [s && s.remarks ? el('div', null, 'Driver: ' + s.remarks) : null, photo ? el('div', { class: 'thumbs' }, photo) : null],
+      banner('danger', (s && s.type === 'pickup' ? 'Collection' : 'Delivery') + ' failed' + (why ? ': ' + why.toLowerCase() : ''), [s && s.remarks ? el('div', null, 'Driver: ' + s.remarks) : null, photo ? el('div', { class: 'thumbs' }, photo) : null],
         [smallBtn('Decide what happens next', 'alert-resolve', () => resolveFailure(o, ctx), 'btn--primary')], 'drawer-alert-failed');
     }
     if (o.cancellation && o.cancellation.status === 'requested' && open(o)) banner('danger', 'Customer asked to cancel', (o.cancellation.reason || 'No reason given') + ' · ' + timeAgo(o.cancellation.requestedAt),
@@ -488,7 +488,7 @@
   function extraCollectionBlock(o, c, n) {
     const sh = c.shop || {}, shop = c.kind === 'shop', sizes = stopSizes(o, c.id);
     return el('div', { class: 'addr', 'data-testid': 'drawer-extra-collection', 'data-kind': c.kind },
-      el('div', { class: 'addr__label' }, 'Collection ' + n + (shop ? ' · buy at a shop' : '')),
+      el('div', { class: 'addr__label' }, 'Collection ' + n + (shop ? ' · buy at a shop' : c.type && c.type !== 'home' ? ' · ' + ({ boat_collect: 'boat', shop_collect: 'shop or godown', postal: 'courier' }[c.type] || '') : '')),
       el('div', { class: 'addr__line' }, shop ? [MDM.shopName(sh), c.address].filter(Boolean).join(', ') : c.address || ''),
       sizes ? el('div', { class: 'addr__meta', 'data-testid': 'drawer-stop-sizes' }, 'Packages: ' + sizes) : null,
       el('div', { class: 'addr__meta' }, [MDM.geo.zoneLabel(c.zone), c.landmark].filter(Boolean).join(' · ')),
@@ -668,19 +668,30 @@
       if (s.landmark) meta.push(s.landmark);
       if (s.type === 'pickup' && (s.packageIds || []).length) { const n = {}; (o.packages || []).forEach(p => { if (s.packageIds.indexOf(p.id) >= 0) n[p.size] = (n[p.size] || 0) + 1; }); meta.push(['bag', 'box', 'xl'].filter(k => n[k]).map(k => n[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(', ')); }
       else if ((s.packageIds || []).length > 1) meta.push(plural(s.packageIds.length, 'package'));
-      if (s.status === 'done' && s.type !== 'pickup') { const h = MDM.HANDED_TO.find(x => x.value === s.handedTo); meta.push('Handed to ' + (s.recipientName || '') + (h && h.value !== 'recipient' ? ' (' + h.label.toLowerCase() + ')' : '') + (s.confirmed ? ', confirmed' : '')); }
+      if (s.status === 'done' && s.type !== 'pickup') { const h = MDM.HANDED_TO.find(x => x.value === s.handedTo); const note = h && h.value !== 'recipient' ? h.label.toLowerCase() : ''; if (s.recipientName || note) meta.push((s.recipientName ? 'Received by ' + s.recipientName : '') + (note ? (s.recipientName ? ' (' + note + ')' : note.charAt(0).toUpperCase() + note.slice(1)) : '')); }
       if (s.status === 'done' && s.receiptTotal != null) meta.push('Receipt ' + money(s.receiptTotal));
-      if (s.status === 'failed') { const r = MDM.FAIL_REASONS.find(x => x.value === s.failReason); meta.push((r ? r.label : 'Could not complete') + (s.remarks ? ': ' + s.remarks : '')); }
+      if (s.status === 'failed') { const why = MDM.failReasonLabel(s); meta.push(why && s.remarks ? why + ': ' + s.remarks : why || s.remarks || 'Could not complete'); }
       else if (s.remarks) meta.push('Remark: ' + s.remarks);
       if (s.attempts > 0) meta.push('Attempt ' + (s.attempts + 1));
       const aside = s.status === 'done' ? fmtDate(s.at) : s.status === 'failed' ? 'Failed ' + fmtDate(s.failedAt) : s.status === 'arrived' ? 'Arrived ' + fmtDate(s.arrivedAt) : s.status === 'skipped' ? 'Skipped' : 'Pending';
       const photos = [...(s.proofPhotoIds || [s.proofPhotoId]).map(id => thumbButton(ctx.fileById[id], 'proof of collection')), thumbButton(ctx.fileById[s.photoId], 'proof of delivery'), thumbButton(ctx.fileById[s.receiptPhotoId], 'shop receipt'), thumbButton(ctx.fileById[s.failPhotoId], 'photo from the failed attempt')].filter(Boolean);
       return el('div', { class: cls.filter(Boolean).join(' '), 'data-testid': 'drawer-stop', 'data-stop-id': s.id, 'data-status': s.status },
         el('div', { class: 'stop__marker' }, s.status === 'done' ? html(MDM.icon('check', 14)) : String(i + 1)),
-        el('div', null, el('div', { class: 'stop__title' }, s.label + ' · ' + s.address), el('div', { class: 'stop__meta' }, meta.join(' · ')), photos.length ? el('div', { class: 'thumbs' }, photos) : null),
+        el('div', null, el('div', { class: 'stop__title' }, s.label + ' · ' + s.address), el('div', { class: 'stop__meta' }, meta.join(' · ')), photos.length ? el('div', { class: 'thumbs' }, photos) : null,
+          photoMissing(s) ? el('div', { class: 'stop__add' }, rowBtn('Add photo', 'drawer-stop-add-photo', () => addStopPhoto(o, s), 'btn--secondary', { 'data-stop-id': s.id })) : null),
         el('div', { class: 'stop__aside' }, aside));
     });
     return sec('Route', 'drawer-route', el('div', { class: 'stops' }, items));
+  }
+  // A collection or delivery done without its photo takes one afterwards (client, 02/11/2026: no undo needed for that).
+  const photoMissing = s => s.status === 'done' && (s.type === 'pickup' ? !s.proofPhotoId && !s.shop : !s.photoId);
+  async function addStopPhoto(o, s) {
+    const v = await dialog({ title: (s.type === 'pickup' ? 'Proof of collection · ' : 'Proof of delivery · ') + o.code, message: s.label + ' · ' + s.address + '. The photo the driver sent you, for example on WhatsApp.',
+      okLabel: 'Add photo', fields: [{ name: 'photo', label: 'Photo', type: 'file', accept: 'image/*', required: true, requiredMessage: 'Choose the photo' }] });
+    if (!v) return;
+    const photoId = await storePhoto(v.photo, o.id, s.type === 'pickup' ? 'proof_collection' : 'proof');
+    await MDM.store.addStopPhoto(o.id, s.id, { photoId, by: by() });
+    toast((s.type === 'pickup' ? 'Proof of collection' : 'Proof of delivery') + ' added to ' + o.code, 'ok');
   }
   function pricingSection(o) {
     const t = o.totals || {}, p = o.pricing || {};
@@ -739,6 +750,7 @@
       cargo ? row('Maldivian Cargo charges', money(cargo), { mono: true }) : null,
       row('Billed to the customer', money(billed), { mono: true }),
       owed ? rowNode('To pay back to the driver', el('span', { class: 'mono', 'data-testid': 'drawer-charges-owed' }, money(owed))) : null,
+      owed && MDM.admin.kit.payBack && MDM.admin.can('petty') ? el('div', { class: 'row row--wrap' }, payBackButtons(o, live)) : null,
       repaid ? row('Paid back to the driver', money(repaid), { mono: true }) : null) : null;
     const items = list.slice().reverse().map(c => {
       const kind = c.void ? badgeNode('neutral', 'Voided', { 'data-testid': 'drawer-charge-state' }) : c.billable ? badgeNode('ok', 'Billed to the customer', { 'data-testid': 'drawer-charge-state' }) : badgeNode('neutral', 'Not billed', { 'data-testid': 'drawer-charge-state' });
@@ -759,6 +771,15 @@
     return sec('Charges', 'drawer-charges',
       items.length ? el('div', { class: 'stack-3' }, totals, el('div', { class: 'list' }, items)) : el('p', { class: 'muted small' }, 'No naalu, packing, Maldivian Cargo or other charges recorded.'),
       el('div', { class: 'row', style: { marginTop: '12px' } }, smallBtn('Add charge', 'drawer-add-charge', () => addCharge(o))));
+  }
+  // Paying a driver back from the order (client, 02/11/2026: "where do we record it?"): the same dialog as Petty cash, for the
+  // charges each driver paid on this order and is still owed.
+  function payBackButtons(o, live) {
+    const owedBy = {};
+    live.filter(c => c.paidBy === 'driver' && !c.reimbursedAt).forEach(c => { const d = MDM.admin.kit.driverOfBy(c.by, o); if (d) (owedBy[d] = owedBy[d] || []).push({ o, c }); });
+    const ids = Object.keys(owedBy);
+    return ids.map(d => { const name = F.driverName(d, state.drivers) || 'the driver';
+      return smallBtn(ids.length > 1 ? 'Pay back ' + name : 'Pay back', 'drawer-charges-payback', () => MDM.admin.kit.payBack(d, name, owedBy[d]), 'btn--primary'); });
   }
   // ---- Cash on delivery (§5.6): the amount the business asked for, what the driver collected, and where the cash is now -----------
   function codSection(o, ctx) {
@@ -1099,9 +1120,11 @@
         (isPaid(o) ? ' The customer already paid ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total) + ': the charge is due on top.' : ''),
       fields: [
         { name: 'amount', label: 'Vehicle charge (MVR)', type: 'number', required: true, min: 1, step: 1, value: rate, hint: rate ? 'Rate card: ' + money(rate) : 'No vehicle rate on the rate card: enter the agreed amount' },
-        { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2, placeholder: 'Pickup truck for the 2 wardrobe boxes' }] });
+        { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2, placeholder: 'Pickup truck for the 2 wardrobe boxes' },
+        { name: 'paidOut', label: 'Paid for the vehicle (MVR)', type: 'number', min: 0, step: 1, hint: 'What the driver or the office paid the vehicle, for petty cash', fold: 'Paid for the vehicle' },
+        { name: 'paidBy', label: 'Paid by', type: 'segmented', options: PAID_BY, value: 'driver', fold: 'Paid for the vehicle' }] });
     if (!v) return;
-    const upd = await MDM.store.addVehicleCharge(o.id, { amount: v.amount, remarks: v.remarks, by: by() });
+    const upd = await MDM.store.addVehicleCharge(o.id, { amount: v.amount, remarks: v.remarks, paidOut: v.paidOut || null, paidBy: v.paidBy, by: by() });
     toast('Vehicle charge ' + money(v.amount) + ' added · total ' + money(upd.totals.total), 'ok');
   }
   // §2.3: change one package's category (Bag, Box, XL-size package). The store re-prices it and logs the change with the price.
@@ -1386,10 +1409,10 @@
     if (!s) { toast('No delivery stop left', 'warn'); return; }
     const isReturn = s.type === 'return';
     const cod = !isReturn && o.cod && Number(o.cod.amount) > 0 && o.cod.status === 'pending' ? o.cod : null;
+    // As on the driver's phone (client, 02/11/2026): who received it and the photo, no "handed to" list or "confirmed" tick. The
+    // photo stays optional here: the office may record it before the driver's photo comes in ("Add photo" adds it later).
     const fields = [
-      { name: 'handedTo', label: 'Handed to', type: 'segmented', required: true, options: MDM.HANDED_TO, value: 'recipient' },
-      { name: 'recipientName', label: 'Name of the person', type: 'text', hint: 'Not needed when the package was left as instructed', value: s.contact && s.contact.name || '', validate: (val, all) => all.handedTo !== 'left' && !trim(val) ? 'Enter who received it' : null },
-      { name: 'confirmed', label: 'Recipient confirmed receipt', type: 'checkbox', value: true },
+      { name: 'recipientName', label: 'Received by', type: 'text', value: s.contact && s.contact.name || '' },
       { name: 'photo', label: 'Proof of delivery photo', type: 'file', accept: 'image/*' }];
     if (cod) fields.push({ name: 'cashCollected', label: 'Cash collected (MVR)', type: 'number', required: true, min: 0, step: 1, requiredMessage: 'Enter the cash the driver collected, 0 if none',
       hint: 'The business asked for ' + money(cod.amount) + '. Enter what the driver actually collected.' });
@@ -1402,17 +1425,12 @@
       { name: 'cargoNote', label: 'Bill note', type: 'text', placeholder: 'Bill MC-204517' });
     fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2 });
     const p = dialog({ title: (isReturn ? 'Returned to ' : 'Delivered at ') + s.address, message: s.label + (s.contact && s.contact.name ? ' · ' + s.contact.name : '') + '. Recorded on behalf of ' + (F.driverName(o.driverId, state.drivers) || 'the driver') + '.', okLabel: isReturn ? 'Mark returned' : 'Mark delivered', fields });
-    // The name is required unless the package was left as instructed: only then does the label say optional.
-    const v = await withDialog(p, dlg => {
-      const opt = dlg.querySelector('[data-field="recipientName"] .optional'), seg = dlg.querySelector('[data-testid="dialog-handedTo"]');
-      const sync = () => { const c = seg.querySelector('input:checked'); if (opt) opt.hidden = !c || c.value !== 'left'; };
-      seg.addEventListener('change', sync); sync();
-    });
+    const v = await p;
     if (!v) return;
     const photoId = await storePhoto(v.photo, o.id, 'proof');
     const cargoCharge = cargo && Number(v.cargoCharge) > 0 ? Math.round(v.cargoCharge) : null;
     const cargoBillPhotoId = cargoCharge ? await storePhoto(v.cargoBill, o.id, 'cargo_bill') : null;
-    const upd = await MDM.store.setStop(o.id, s.id, { status: 'done', handedTo: v.handedTo, recipientName: trim(v.recipientName), confirmed: !!v.confirmed, photoId, remarks: v.remarks,
+    const upd = await MDM.store.setStop(o.id, s.id, { status: 'done', recipientName: trim(v.recipientName), photoId, remarks: v.remarks,
       cashCollected: cod ? v.cashCollected : undefined, naalu: v.naalu || null, naaluNote: v.naaluNote, packing: isReturn ? null : (v.packing || null), packingNote: v.packingNote,
       cargoCharge, cargoNote: cargoCharge ? trim(v.cargoNote) : '', cargoBillPhotoId, by: by() });
     const diff = cod && upd.cod && typeof upd.cod.variance === 'number' && upd.cod.variance !== 0;
@@ -1570,7 +1588,7 @@
 
   function segmented(name, options, current, testid, onChange) {
     const fs = el('fieldset', { class: 'segmented', 'data-testid': testid },
-      options.map(o => el('label', { class: 'segmented__option', 'data-testid': testid + '-' + o.value }, el('input', { class: 'sr-only', type: 'radio', name, value: o.value, checked: o.value === current }), el('span', null, o.label))));
+      options.map(o => el('label', { class: 'segmented__option', 'data-testid': testid + '-' + o.value, 'data-value': o.value }, el('input', { class: 'sr-only', type: 'radio', name, value: o.value, checked: o.value === current }), el('span', null, o.label))));
     fs.addEventListener('change', () => { const c = fs.querySelector('input:checked'); if (c) onChange(c.value); });
     return fs;
   }
@@ -1624,6 +1642,7 @@
     const accountField = field(accountSel.id, 'Business account', accountSel);
     accountField.appendChild(tiersHint);
     const sourceSeg = segmented(uid + '-source', SOURCES, n.source, 'neworder-source', v => { n.source = v; });
+    sourceSeg.classList.add('segmented--source');
     const accountBlock = el('div', { class: 'stack-4', 'data-testid': 'neworder-business' },
       accounts.length ? accountField : el('div', { class: 'alert alert--info' }, html(MDM.icon('info', 16)), el('div', { class: 'alert__body' }, 'No approved business accounts yet.')),
       groupField('Order received by', sourceSeg));
