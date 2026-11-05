@@ -495,6 +495,7 @@
     if (schema !== MDM.SCHEMA || !m.seededAt) { clearAll(); writeSeed(buildSeed(new Date())); }
     else if (!m.dirty && Date.now() - m.seededAt > RESEED_AFTER_MS) { clearAll(); writeSeed(buildSeed(new Date())); }
     else upgradeSettings();
+    try { settings(); } catch (e) { /* the office's place lists wait for the first read */ }
     readyState = 'ready'; readyResolve();
   }
   function reset() {

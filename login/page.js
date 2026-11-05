@@ -158,14 +158,14 @@
     const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
       e.preventDefault();
       const u = user.value.trim().toLowerCase();
-      const s = staff.find(x => x.username === u && ['admin', 'operator', 'office'].indexOf(x.role) >= 0);
+      const s = staff.find(x => x.username === u && MDM.OFFICE_ROLES.indexOf(x.role) >= 0);
       if (s && pass.value === passwordFor(u)) {
         save(localStorage, 'mdm:session', { user: u, staffId: s.id, role: s.role, name: s.name, at: new Date().toISOString() });
         MDM.store.audit('signed_in', s.name + ' signed in to the office portal', s.role === 'admin' ? 'admin' : 'operator:' + s.id);
         go('admin/');
       } else { err.hidden = false; pass.value = ''; pass.focus(); }
     } } },
-      field('user', 'Username', user, 'Demo: admin, operator or lamya'),
+      field('user', 'Username', user, 'Demo: admin, operator, lamya or care'),
       field('pass', 'Password', pass, 'Demo password: delivery'),
       err,
       actions(submit('Sign in'), el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'login-forgot', on: { click: () => { state.reset = { step: 1, user: user.value.trim() }; render(); } } }, 'Forgot password?')));
@@ -179,7 +179,7 @@
       const user = el('input', { class: 'input', id: 'reset-user', type: 'text', autocapitalize: 'off', value: r.user || '', 'data-testid': 'reset-user' });
       const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
         e.preventDefault();
-        const s = staff.find(x => x.username === user.value.trim().toLowerCase() && ['admin', 'operator', 'office'].indexOf(x.role) >= 0);
+        const s = staff.find(x => x.username === user.value.trim().toLowerCase() && MDM.OFFICE_ROLES.indexOf(x.role) >= 0);
         if (!s) { setError(user, 'No office account with that username'); return; }
         state.reset = { step: 2, user: s.username, phone: s.phone, name: s.name }; render();
       } } },

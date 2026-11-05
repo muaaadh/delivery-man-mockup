@@ -42,6 +42,8 @@
     admin: ADMIN_NAV.map(n => n.view),
     operator: ['overview', 'orders', 'bulk', 'live', 'drivers', 'customers', 'business', 'cash', 'petty', 'store', 'reports', 'notifications', 'zones'],
     office: ['overview', 'orders', 'customers', 'business', 'cash', 'petty', 'store', 'notifications'],
+    // Customer service (client, 05/11/2026): its own sign-in, with the orders and the people behind them, no money pages.
+    cs: ['overview', 'orders', 'bulk', 'live', 'customers', 'business', 'notifications'],
   };
   function session() { try { return JSON.parse(localStorage.getItem('mdm:session') || 'null'); } catch (e) { return null; } }
   function allowedViews() { const s = session(); return ROLE_VIEWS[(s && s.role) || 'admin'] || ROLE_VIEWS.admin; }

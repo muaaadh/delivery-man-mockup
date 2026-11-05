@@ -22,7 +22,7 @@
 (function (MDM) { 'use strict';
   const { el, html, setError, phone } = MDM.ui;
   const OFFICE = new URLSearchParams(location.search).get('office') === '1';
-  const OFFICE_ROLES = ['admin', 'operator', 'office'];
+  const OFFICE_ROLES = MDM.OFFICE_ROLES;
   // How an office order came in: the same values as the office's own New order (admin/orders.js SOURCES).
   const SOURCES = [{ value: 'phone', label: 'Phone' }, { value: 'whatsapp', label: 'WhatsApp' }, { value: 'viber', label: 'Viber' }, { value: 'walkin', label: 'Walk-in' }];
   const DRAFT_KEY = OFFICE ? 'mdm:request:office:v3' : 'mdm:request:v3', ME_KEY = 'mdm:me';

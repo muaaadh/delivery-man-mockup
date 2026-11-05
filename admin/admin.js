@@ -148,7 +148,7 @@
       const u = userIn.value.trim().toLowerCase(), pw = passIn.value;
       state.loginUser = u;
       const staff = await MDM.store.list('staff');
-      const s = staff.find(x => String(x.username || '').toLowerCase() === u && ['admin', 'operator', 'office'].indexOf(x.role) >= 0 && x.status !== 'inactive');
+      const s = staff.find(x => String(x.username || '').toLowerCase() === u && MDM.OFFICE_ROLES.indexOf(x.role) >= 0 && x.status !== 'inactive');
       if (s && pw === PASSWORD) { signIn({ user: s.username, staffId: s.id, role: s.role, name: s.name, at: new Date().toISOString() }); return; }
       errBox.hidden = false; passIn.value = ''; passIn.focus();
     } } },

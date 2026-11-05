@@ -6,7 +6,7 @@
 (function (MDM) { 'use strict';
   const { el, html, setError } = MDM.ui;
   const SESSION = 'mdm:staff';
-  const ROLE = { admin: 'Admin', operator: 'Operator', office: 'Office staff', driver: 'Driver' };
+  const ROLE = { admin: 'Admin', operator: 'Operator', office: 'Office staff', cs: 'Customer service', driver: 'Driver' };
   const app = document.querySelector('[data-slot="app"]');
   const state = { me: null, settings: {}, tick: null, leavesOpen: false, formOpen: false, draft: null, stale: false, shownId: null };
   const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -25,7 +25,7 @@
   async function renderSignin() {
     const staff = (await MDM.store.list('staff', { order: 'name' })).filter(s => s.status !== 'inactive');
     const who = el('select', { class: 'select', 'data-testid': 'staff-who' }, el('option', { value: '' }, 'Choose your name'),
-      ['admin', 'operator', 'office', 'driver'].map(r => { const g = staff.filter(s => s.role === r); return g.length ? el('optgroup', { label: ROLE[r] + (r === 'driver' ? 's' : '') }, g.map(s => el('option', { value: s.id }, s.name))) : null; }));
+      MDM.OFFICE_ROLES.concat(['driver']).map(r => { const g = staff.filter(s => s.role === r); return g.length ? el('optgroup', { label: ROLE[r] + (r === 'driver' ? 's' : '') }, g.map(s => el('option', { value: s.id }, s.name))) : null; }));
     const pin = el('input', { class: 'input', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '4', placeholder: '4 digits', 'data-testid': 'staff-pin' });
     const form = el('form', { class: 'form', novalidate: true, on: { submit: e => {
       e.preventDefault();
@@ -233,7 +233,7 @@
         el('p', { class: 'page-head__desc' }, [d.me.title, d.me.title && d.me.title.toLowerCase().indexOf(String(ROLE[d.me.role]).toLowerCase()) >= 0 ? null : ROLE[d.me.role]].filter(Boolean).join(' · ')),
         el('div', { class: 'page-head__actions' },
           d.me.role === 'driver' ? el('a', { class: 'btn btn--secondary', href: MDM.href('driver/') }, html(MDM.icon('bike', 16)), 'Driver app') : null,
-          ['admin', 'operator', 'office'].indexOf(d.me.role) >= 0 ? el('a', { class: 'btn btn--secondary', href: MDM.href('login/?as=admin') }, 'Office portal') : null,
+          MDM.OFFICE_ROLES.indexOf(d.me.role) >= 0 ? el('a', { class: 'btn btn--secondary', href: MDM.href('login/?as=admin') }, 'Office portal') : null,
           el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'staff-signout', on: { click: () => { clearSession(); clearInterval(state.tick); Object.assign(state, { draft: null, formOpen: false, leavesOpen: false, shownId: null }); render(); } } }, 'Sign out'))),
       el('div', { class: 'stack-6 staff-main' },
         punchCard(d), kpis(d),

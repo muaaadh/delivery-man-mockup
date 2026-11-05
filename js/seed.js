@@ -40,6 +40,7 @@
       { id: 'stf_admin', name: 'Aminath Shiuna', role: 'admin', title: 'Operations manager', phone: '7790001', username: 'admin', email: 'ops@example.com', status: 'active', joinedAt: dateOnly(days(700)), leaveBalance: { annual: 22, sick: 28 } },
       { id: 'stf_fayaz', name: 'Ahmed Fayaz', role: 'operator', title: 'Dispatcher', phone: '7790002', username: 'operator', email: 'dispatch@example.com', status: 'active', joinedAt: dateOnly(days(400)), leaveBalance: { annual: 18, sick: 30 } },
       { id: 'stf_lamya', name: 'Mariyam Lamya', role: 'office', title: 'Customer care and payments', phone: '7790003', username: 'lamya', email: 'care@example.com', status: 'active', joinedAt: dateOnly(days(350)), leaveBalance: { annual: 25, sick: 27 } },
+      { id: 'stf_care', name: 'Hawwa Nisha', role: 'cs', title: 'Customer service', phone: '7790004', username: 'care', email: 'support@example.com', status: 'active', joinedAt: dateOnly(days(60)), leaveBalance: { annual: 30, sick: 30 } },
     ].concat(drivers.map(d => ({ id: d.staffId, name: d.name, role: 'driver', title: d.vehicle === 'pickup' ? 'Driver (pickup truck)' : 'Rider', phone: d.phone, username: d.phone, driverId: d.id, status: d.id === 'drv_hamid' ? 'on_leave' : 'active', joinedAt: dateOnly(Math.round((NOW - new Date(d.createdAt)) / 60000)), leaveBalance: { annual: 20, sick: 30 } })));
     const SHIFTS = { stf_lamya: ['09:00', '18:00'], stf_rasheed: ['08:15', '18:00'] };
     const OFF_OPENING = { stf_nazim: 3, stf_shiyam: 4, stf_rasheed: 2, stf_faisal: 1, stf_fayaz: 2, stf_lamya: 1 };
