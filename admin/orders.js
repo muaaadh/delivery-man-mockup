@@ -21,6 +21,8 @@
     { value: 'price', label: 'Needs price', test: o => o.status === 'requested' || MDM.priceToFinalise(o) },
     { value: 'payments', label: 'Payments to verify', test: o => o.payment && o.payment.status === 'received' },
     { value: 'unassigned', label: 'Unassigned', test: o => F.toAssign(o) },
+    // Collected and back at the office without a driver (store.handToOffice, client 05/11/2026), bulk packages sorted at the hub too.
+    { value: 'office', label: 'At the office', test: o => MDM.waitingAtOffice(o) },
     { value: 'active', label: 'Active', test: o => IN_PROGRESS.indexOf(o.status) >= 0 },
     { value: 'failed', label: 'Failed', test: o => o.status === 'failed' },
     { value: 'cancels', label: 'Cancel requests', test: o => o.cancellation && o.cancellation.status === 'requested' && open(o) },
@@ -308,6 +310,12 @@
         photos.length ? el('div', { class: 'thumbs' }, photos) : null],
       [vehicleBtn, smallBtn('Confirm price', 'alert-confirm-price', () => confirmPrice(o), 'btn--primary'), sel, smallBtn('Assign driver', 'alert-assign', () => assign(o, sel.value))].filter(Boolean), 'drawer-alert-price');
     }
+    // Handed over to the office by the driver (client, 05/11/2026): it waits there, collected, for a driver to deliver it.
+    if (MDM.waitingAtOffice(o) && o.atOffice) {
+      const a = o.atOffice, sel = assignSelect(o, ctx, 'alert-office-driver');
+      banner('info', 'At the office since ' + fmtDate(a.at), [el('div', null, 'Handed over by ' + (F.driverName(a.driverId, ctx.drivers) || 'the driver') + (a.remarks ? ': ' + a.remarks : '') + '.'),
+        el('div', null, 'Give it to a driver for the delivery.')], [sel, smallBtn('Assign driver', 'alert-office-assign', () => assign(o, sel.value), 'btn--primary')], 'drawer-alert-office');
+    }
     if (MDM.priceToFinalise(o)) {
       const proofIds = [].concat(...((o.route && o.route.stops) || []).filter(s => s.type === 'pickup' && s.proofPhotoId).map(s => s.proofPhotoIds || [s.proofPhotoId]));
       const ids = proofIds.concat((o.packages || []).map(p => p.photoId).filter(id => id && proofIds.indexOf(id) < 0));
@@ -509,8 +517,11 @@
       extra.map((x, i) => extraCollectionBlock(o, x, i + 2)),
       deliverToBlock(o)),
       extra.length ? el('p', { class: 'muted small', style: { marginTop: '8px' }, 'data-testid': 'drawer-multi-note' }, plural(extra.length + 1, 'collection') + ', delivered together to one address.') : null,
-      open(o) ? el('div', { class: 'row', style: { marginTop: '12px' } }, smallBtn('Modify order', 'drawer-modify', () => modifyOrder(o))) : null);
+      open(o) ? el('div', { class: 'row row--wrap', style: { marginTop: '12px' } }, smallBtn('Modify order', 'drawer-modify', () => modifyOrder(o)), methodOf(o) === 'home' ? methodBtn(o) : null) : null);
   }
+  // Another delivery method for an order on its way (client, 05/11/2026): under the address for a home delivery, in the method's own
+  // section for a boat, cargo or airport delivery.
+  const methodBtn = o => open(o) && o.service !== 'store' ? smallBtn('Change delivery method', 'drawer-change-method', () => changeMethod(o)) : null;
   // ---- Delivery method details (§3.2 boat, §3.3 Maldivian Cargo, §3.4 airport), with the boat change log (§5.3) ----------------
   const BOAT_FIELD = { vesselType: 'Vessel', name: 'Name', departureDate: 'Departure date', departureTime: 'Departure time', jetty: 'Harbour or jetty', island: 'Island', address: 'Destination address', contact: 'Contact of the boat' };
   function boatValue(k, v) {
@@ -560,7 +571,7 @@
           b.contact && phone.normalize(b.contact) !== phone.normalize(d.recipientPhone) ? rowNode('Contact of the boat', el('span', null, el('span', { class: 'mono' }, phone.format(b.contact)), contactLinks(b.contact))) : null,
           row('Instructions', d.instructions)),
         pkgLabel, log,
-        el('div', { class: 'row row--wrap' }, open(o) ? smallBtn('Update boat details', 'drawer-update-boat', () => updateBoat(o), 'btn--secondary') : null, labelsLink)));
+        el('div', { class: 'row row--wrap' }, open(o) ? smallBtn('Update boat details', 'drawer-update-boat', () => updateBoat(o), 'btn--secondary') : null, methodBtn(o), labelsLink)));
     }
     if (m === 'cargo') {
       const c = d.cargo || {};
@@ -574,7 +585,7 @@
           row('Instructions', d.instructions),
           // The amount is itemised once, in Pricing; here only whether it is charged, so the drawer never shows the fee twice.
           rowNode('Maldivian Cargo fee', el('span', { 'data-testid': 'drawer-cargo-fee', 'data-amount': String(fee) }, fee ? 'Charged once, see Pricing' : 'Not charged on this order'))),
-        el('div', { class: 'row row--wrap' }, labelsLink)));
+        el('div', { class: 'row row--wrap' }, methodBtn(o), labelsLink)));
     }
     const a = d.airport || {};
     const fee = (o.fees || {}).airport || 0;
@@ -589,7 +600,7 @@
         row('Handover instructions', a.instructions),
         row('Delivery instructions', d.instructions),
         rowNode('Airport fee', el('span', { 'data-testid': 'drawer-airport-fee', 'data-amount': String(fee) }, fee ? 'Charged, see Pricing' : 'Not charged on this order'))),
-      el('div', { class: 'row row--wrap' }, labelsLink)));
+      el('div', { class: 'row row--wrap' }, methodBtn(o), labelsLink)));
   }
   function packagesSection(o, ctx) {
     const items = (o.packages || []).map((pkg, i) => {
@@ -962,14 +973,15 @@
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
       items.push(cancelBtn(), sel, btn('Assign driver', 'drawer-assign', 'btn--secondary', () => assign(o, sel.value)), btn('Confirm price', 'drawer-confirm', 'btn--primary', () => confirmPrice(o)));
     }
-    else if (st === 'confirmed' || (st === 'collected' && o.batchId && !o.driverId)) {
+    else if (st === 'confirmed' || MDM.waitingAtOffice(o)) {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
       if (st === 'confirmed') items.push(cancelBtn());
       items.push(sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
     } else if (st === 'assigned') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('Dispatch', 'drawer-dispatch', 'btn--primary', () => dispatchOrder(o)));
     else if (st === 'dispatched') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('On the way', 'drawer-start', 'btn--primary', () => startRoute(o)));
-    else if (st === 'on_the_way') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn('Arrived', 'drawer-arrived', 'btn--secondary', () => arrived(o)), btn('Mark collected', 'drawer-collected', 'btn--primary', () => collected(o)));
-    else if (st === 'arrived') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn('Mark collected', 'drawer-collected', 'btn--primary', () => collected(o)));
+    // Reassign at every stage (client, 05/11/2026): before the collection too, the new driver goes to collect it.
+    else if (st === 'on_the_way') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn('Reassign', 'drawer-reassign', 'btn--ghost', () => reassign(o, ctx)), btn('Arrived', 'drawer-arrived', 'btn--secondary', () => arrived(o)), btn('Mark collected', 'drawer-collected', 'btn--primary', () => collected(o)));
+    else if (st === 'arrived') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('Mark collected', 'drawer-collected', 'btn--primary', () => collected(o)));
     else if (st === 'collected') items.push(o.driverId ? btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)) : null, btn(o.batchId ? 'Dispatch for delivery' : 'Out for delivery', 'drawer-out', 'btn--primary', () => outForDelivery(o)));
     else if (st === 'out_for_delivery') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), o.driverId ? btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)) : null, btn(nextStop(o, ['return']) ? 'Mark returned' : 'Mark delivered', 'drawer-deliver', 'btn--primary', () => delivered(o)));
     else if (st === 'failed') items.push(btn('Decide what happens next', 'drawer-resolve', 'btn--primary', () => resolveFailure(o, ctx)));
@@ -1188,6 +1200,64 @@
     const changed = ((upd.delivery && upd.delivery.boat && upd.delivery.boat.history) || []).length > count;
     toast(changed ? 'Boat details updated' + (upd.driverId ? ', the driver is notified' : '') : 'Nothing changed', 'ok');
   }
+  // Change the delivery method (client, 05/11/2026: a Maldivian Cargo order the customer then wanted delivered home). Step one picks
+  // the method, step two its details and the receiver; store.changeDeliveryMethod moves every package there and the fee follows it.
+  async function changeMethod(o) {
+    o = await fresh(o);
+    const d = o.delivery || {}, cur = methodOf(o);
+    // 'home delivery', 'Maldivian Cargo' (a name keeps its capitals)
+    const said = v => v === 'cargo' ? MDM.deliveryMethodLabel(v) : MDM.deliveryMethodLabel(v).toLowerCase();
+    const choices = MDM.DELIVERY_METHODS.filter(x => x.value !== cur).map(x => ({ value: x.value, label: x.label }));
+    const pick = await dialog({ title: 'Change delivery method · ' + o.code, okLabel: 'Next',
+      message: 'Now ' + said(cur) + '. Every package goes to the new delivery, and the Maldivian Cargo or airport fee follows the method.',
+      fields: [{ name: 'method', label: 'New delivery method', type: 'segmented', required: true, options: choices, value: choices[0].value }] });
+    if (!pick) return;
+    const m = pick.method, name = MDM.deliveryMethodLabel(m);
+    const b = d.boat || {}, c = d.cargo || {}, a = d.airport || {};
+    const zones = MDM.geo.zoneOptions().filter(z => z.value !== 'airport');
+    const jetties = MDM.geo.jetties().map(t => ({ value: t.value, label: t.label }));
+    const points = MDM.geo.airportPoints().map(x => ({ value: x.value, label: x.label }));
+    const atCounter = (v, all) => all.point === 'resort_counters' && !v ? 'Needed for a resort counter' : null;
+    const own = {
+      home: [
+        { name: 'address', label: 'Delivery address', type: 'text', required: true, placeholder: 'House or building, street' },
+        { name: 'zone', label: 'Delivery zone', type: 'select', required: true, options: zones, value: zones.some(z => z.value === d.zone) ? d.zone : 'male' },
+        { name: 'landmark', label: 'Landmark', type: 'text' }],
+      boat: [
+        { name: 'island', label: 'Destination island', type: 'text', required: true, value: b.island || c.island || '', placeholder: 'For example Thoddoo, Alifu Alifu' },
+        { name: 'boatAddress', label: 'Destination address', type: 'text', value: b.address || '', placeholder: 'House name on the island' },
+        { name: 'vesselType', label: 'Vessel', type: 'segmented', required: true, options: MDM.VESSEL_TYPES, value: b.vesselType || 'speedboat' },
+        { name: 'name', label: 'Boat, ferry or speedboat name', type: 'text', value: b.name || '', hint: 'Can follow later with Update boat details' },
+        { name: 'jetty', label: 'Harbour or jetty', type: 'select', required: true, options: jetties, value: b.jetty && jetties.some(j => j.value === b.jetty) ? b.jetty : jetties[0].value },
+        { name: 'departureDate', label: 'Departure date', type: 'date', value: b.departureDate || '' },
+        { name: 'departureTime', label: 'Departure time', type: 'time', value: b.departureTime || '' },
+        { name: 'contact', label: 'Contact of the boat', type: 'tel', intl: true, value: b.contact || '' }],
+      cargo: [
+        { name: 'island', label: 'Destination island', type: 'text', required: true, value: c.island || b.island || '', placeholder: 'For example Kulhudhuffushi, Haa Dhaalu' },
+        { name: 'consignee', label: 'Name on the cargo', type: 'text', value: c.consignee || '', hint: 'The receiver when left empty' }],
+      airport: [
+        { name: 'point', label: 'Collection point at the airport', type: 'select', required: true, options: points, value: a.point || 'resort_counters' },
+        { name: 'counter', label: 'Resort counter or collection point', type: 'text', value: a.counter || '', validate: atCounter },
+        { name: 'resort', label: 'Resort or destination', type: 'text', value: a.resort || '', validate: atCounter }],
+    }[m];
+    const v = await dialog({ title: name + ' · ' + o.code, okLabel: 'Change to ' + said(m),
+      message: m === 'cargo' ? 'Handed in at the Maldivian Cargo counter, main bus terminal. The cargo fee is added.' : m === 'airport' ? 'Handed over at Velana International Airport. The airport fee is added.'
+        : cur === 'cargo' || cur === 'airport' ? 'The ' + (cur === 'cargo' ? 'Maldivian Cargo' : 'airport') + ' fee comes off.' : null,
+      fields: own.concat([
+        { name: 'recipientName', label: 'Receiver', type: 'text', required: true, value: d.recipientName || '' },
+        { name: 'recipientPhone', label: 'Receiver number', type: 'tel', intl: true, value: d.recipientPhone || '' },
+        { name: 'remarks', label: 'Reason', type: 'text', placeholder: 'Customer asked for home delivery instead' }]) });
+    if (!v) return;
+    const ph = x => (x ? phone.normalize(x) || trim(x) : '');
+    const delivery = { method: m, recipientName: v.recipientName, recipientPhone: ph(v.recipientPhone) };
+    if (m === 'home') Object.assign(delivery, { address: v.address, zone: v.zone, landmark: v.landmark || '' });
+    if (m === 'boat') delivery.boat = { vesselType: v.vesselType, name: v.name || '', departureDate: v.departureDate || '', departureTime: v.departureTime || '', jetty: v.jetty, island: v.island, address: v.boatAddress || '', contact: ph(v.contact) };
+    if (m === 'cargo') delivery.cargo = { island: v.island, consignee: v.consignee || v.recipientName };
+    if (m === 'airport') delivery.airport = Object.assign({}, a, { point: v.point, counter: v.counter || '', resort: v.resort || '' });
+    const before = o.totals.total;
+    const upd = await MDM.store.changeDeliveryMethod(o.id, delivery, { by: by(), remarks: v.remarks });
+    toast('Delivery changed to ' + said(m) + (upd.totals.total !== before ? ', total now ' + money(upd.totals.total) : '') + (upd.driverId ? ', the driver is told' : ''), 'ok');
+  }
   // §6: charges recorded by the office. Packing is normally billed, naalu only when the rules say so; the checkbox follows the type until touched.
   async function addCharge(o) {
     const naaluBilled = !!(((state.settings || {}).rules) || {}).naaluBillable;
@@ -1346,7 +1416,8 @@
   async function reassign(o, ctx) {
     const options = driverChoices(o, ctx, o.driverId);
     const first = options.find(x => !x.disabled);
-    const v = await dialog({ title: 'Reassign ' + o.code, message: 'Currently with ' + (F.driverName(o.driverId, ctx.drivers) || 'nobody') + '. The route stays the same' + (o.status === 'out_for_delivery' ? '; the new driver takes it out again.' : '.'), okLabel: 'Reassign',
+    const next = o.status === 'out_for_delivery' ? '; the new driver takes it out again.' : ['on_the_way', 'arrived'].indexOf(o.status) >= 0 ? '; the new driver goes to collect it.' : '.';
+    const v = await dialog({ title: 'Reassign ' + o.code, message: 'Currently with ' + (F.driverName(o.driverId, ctx.drivers) || 'nobody') + '. The route stays the same' + next, okLabel: 'Reassign',
       fields: [{ name: 'driverId', label: 'New driver', type: 'select', options, value: first ? first.value : '' }, { name: 'remarks', label: 'Remarks', type: 'text' }] });
     if (!v || !v.driverId) return;
     await MDM.store.assignDriver(o.id, v.driverId, { by: by() });

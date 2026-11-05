@@ -189,6 +189,7 @@
       quotes: orders.filter(o => (o.status === 'requested' && !MDM.priceAfterCollection(o)) || MDM.priceToFinalise(o)),
       reviews: orders.filter(o => o.payment && o.payment.status === 'received'),
       unassigned: orders.filter(toAssign),
+      atOffice: orders.filter(MDM.waitingAtOffice),
       failed: orders.filter(o => o.status === 'failed'),
       cancels: orders.filter(o => o.cancellation && o.cancellation.status === 'requested' && ['cancelled', 'delivered', 'returned'].indexOf(o.status) < 0),
       priority: orders.filter(o => o.priority && o.priority.status === 'requested' && ['cancelled', 'delivered', 'returned'].indexOf(o.status) < 0),
@@ -395,7 +396,7 @@
       // Cash queues open the Cash & COD page when this role has it; otherwise the matching orders.
       const cashPage = can('cash') && !!views.cash;
       // Each queue shows its 3 oldest-first items; the rest are one click away in the matching orders tab.
-      const MORE = { price: '#/orders?tab=price', payments: '#/orders?tab=payments', failed: '#/orders?tab=failed', cancels: '#/orders?tab=cancels', priority: '#/orders?tab=priority', unassigned: '#/orders?tab=unassigned', bulk: '#/bulk', leave: '#/team?tab=leave', business: '#/business',
+      const MORE = { price: '#/orders?tab=price', payments: '#/orders?tab=payments', failed: '#/orders?tab=failed', cancels: '#/orders?tab=cancels', priority: '#/orders?tab=priority', unassigned: '#/orders?tab=unassigned', atOffice: '#/orders?tab=office', bulk: '#/bulk', leave: '#/team?tab=leave', business: '#/business',
         returns: '#/orders?tab=returns', cashDrivers: cashPage ? '#/cash' : '#/orders', cashBusiness: cashPage ? '#/cash' : '#/orders' };
       const group = (key, title, items) => {
         if (!items.length) return;
@@ -418,6 +419,8 @@
       group('cancels', 'Cancellation requests', q.cancels.map(o => link(o, (o.cancellation.reason || 'No reason given') + ' · ' + MDM.STATUS[o.status].label, MDM.ui.timeAgo(o.cancellation.requestedAt))));
       group('priority', 'Priority requests', q.priority.map(o => { const r = (o.priority.requests || []).slice().reverse().find(x => x.decision === 'pending') || {}; return link(o, (r.reason || 'Priority delivery') + (r.deadline ? ' · by ' + r.deadline : ''), MDM.ui.timeAgo(r.at || o.updatedAt)); }));
       group('unassigned', 'Driver to assign', q.unassigned.map(o => link(o, routeText(o) + ' · ' + typeLabel(o) + (o.status === 'requested' ? ' · price after collection' : ''), MDM.ui.timeAgo(o.updatedAt))));
+      // Collected and back at the office without a driver (store.handToOffice, or a bulk package sorted at the hub): give it to a driver.
+      group('atOffice', 'At the office', q.atOffice.map(o => link(o, routeText(o) + ' · ' + (o.atOffice && o.atOffice.driverId ? 'from ' + (driverName(o.atOffice.driverId, drivers) || 'the driver') : typeLabel(o)), MDM.ui.timeAgo((o.atOffice && o.atOffice.at) || o.updatedAt))));
       const accountName = id => ((accounts || []).find(a => a.id === id) || {}).name || 'the business';
       group('returns', 'Returns to bring back', q.returns.map(o => {
         const c = o.cancellation || {}, prev = MDM.STATUS[c.previousStatus];
@@ -462,7 +465,6 @@
       const n = st => orders.filter(o => (Array.isArray(st) ? st.indexOf(o.status) >= 0 : o.status === st)).length;
       const onDay = (list, at) => list.filter(o => MDM.ui.dayKey(at(o)) === today).length;
       const pendingPay = orders.filter(o => o.payment && (o.payment.status === 'requested' || o.payment.status === 'received'));
-      const revenueToday = orders.filter(o => o.payment && o.payment.status === 'paid' && o.payment.verifiedAt && MDM.ui.dayKey(o.payment.verifiedAt) === today).reduce((t, o) => t + (o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total), 0);
       const now = Date.now();
       const active = drivers.filter(d => d.status !== 'offline' && (d.status === 'on_route' || positions.some(p => p.driverId === d.id && now - new Date(p.at).getTime() < ONLINE_MS)));
       const delivered = orders.filter(o => o.status === 'delivered'), cancelled = orders.filter(o => o.status === 'cancelled');
@@ -478,7 +480,6 @@
       setTile('cancelled', cancelled.length, onDay(cancelled, o => o.cancelledAt || o.updatedAt) + ' today');
       setTile('pending-payments', pendingPay.length, money(pendingPay.reduce((t, o) => t + o.totals.total, 0)) + ' due');
       setTile('active-drivers', active.length, 'of ' + drivers.length);
-      v.slots.revenue.textContent = money(revenueToday) + ' received today';
       v.slots.attention.replaceChildren(attention(orders, requests, leaves, batches, drivers, accounts));
       const recent = orders.slice(0, 10);
       const cols = ['code', 'total', 'status', 'created'];
@@ -540,9 +541,8 @@
         const recentSec = section('recent', 'Recent orders', null, more('#/orders', 'All orders'));
         recentSec.appendChild(v.slots.recent);
         const s = state.session || {};
-        v.slots.revenue = el('a', { href: can('reports') ? '#/reports' : '#/orders?payment=paid', 'data-testid': 'overview-revenue' });
         host.append(
-          el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, greeting() + (s.name ? ', ' + s.name.split(' ')[0] : '')), el('p', { class: 'page-head__desc' }, todayLine() + ' · ', v.slots.revenue)),
+          el('div', { class: 'page-head' }, el('h1', { tabindex: '-1' }, greeting() + (s.name ? ', ' + s.name.split(' ')[0] : '')), el('p', { class: 'page-head__desc' }, todayLine())),
           v.slots.kpis,
           attentionSec,
           el('div', { class: 'admin-grid admin-grid--overview' }, recentSec, ridersSec));

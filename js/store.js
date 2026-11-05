@@ -864,9 +864,10 @@
     o.fees = Object.assign({}, o.fees, { cargo: q.fees.cargo, airport: q.fees.airport });
     if (!(o.pricing && o.pricing.status === 'confirmed')) o.packages = q.packages.map((k, i) => Object.assign({}, o.packages[i], { price: k.price }));
     recalc(o);
-    const methodLabel = v => MDM.deliveryMethodLabel(v);
+    // In a sentence: "home delivery", "boat, ferry or speedboat", but Maldivian Cargo keeps its name.
+    const methodLabel = v => { const l = MDM.deliveryMethodLabel(v); return v === 'cargo' ? l : l.toLowerCase(); };
     o.changes = (o.changes || []).concat([{ at: now(), by, field: 'delivery.method', from, to: method }]);
-    if (o.totals.total !== before) priceHistory(o, before, o.totals.total, 'Delivery method changed to ' + methodLabel(method).toLowerCase(), by);
+    if (o.totals.total !== before) priceHistory(o, before, o.totals.total, 'Delivery method changed to ' + methodLabel(method), by);
     // The stops still to do move to the new end; with nothing done yet the route is planned again.
     if (o.route && o.route.stops && o.route.stops.length) {
       const done = o.route.stops.filter(x => x.status === 'done');
@@ -883,8 +884,8 @@
       }
     }
     const priced = o.totals.total !== before && o.pricing && o.pricing.status === 'confirmed';
-    pushEvent(o, makeEvent('method_changed', 'Delivery changed to ' + methodLabel(method).toLowerCase() + (priced ? ', price ' + fmt(before) + ' to ' + fmt(o.totals.total) : '') + (p.remarks ? ' (' + txt(p.remarks) + ')' : ''), by, 'public'));
-    if (o.driverId && ['assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery'].indexOf(o.status) >= 0) notifyStaff(o, 'driver', 'Delivery changed', 'now ' + methodLabel(method).toLowerCase() + ': ' + end.address);
+    pushEvent(o, makeEvent('method_changed', 'Delivery changed to ' + methodLabel(method) + (priced ? ', price ' + fmt(before) + ' to ' + fmt(o.totals.total) : '') + (p.remarks ? ' (' + txt(p.remarks) + ')' : ''), by, 'public'));
+    if (o.driverId && ['assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery'].indexOf(o.status) >= 0) notifyStaff(o, 'driver', 'Delivery changed', 'now ' + methodLabel(method) + ': ' + end.address);
     invoiceFollows(o, before, by);
     return save(o);
   }
