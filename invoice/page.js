@@ -115,7 +115,10 @@
     let o = key ? await MDM.store.orderByCode(key) : null;
     if (!o && key) o = await MDM.store.get('orders', key);
     if (!o) { notFound(); return; }
-    if (MDM.ownsOrder && !MDM.ownsOrder(o)) { notOwner(o); return; }
+    // The link we send carries the order's secret (client, 05/11/2026): with it the invoice opens like the tracking page, no sign-in.
+    const t = new URLSearchParams(location.search).get('t');
+    const viaLink = !!(t && o.trackToken && t === o.trackToken);
+    if (MDM.ownsOrder && !MDM.ownsOrder(o) && !viaLink) { notOwner(o); return; }
     if (!mayOpen(o)) { billedToBusiness(o); return; }
     const settings = await MDM.store.settings();
     const contact = settings.contact || {}, banks = settings.banks || [];
@@ -129,9 +132,10 @@
     document.title = 'Invoice ' + number + ' · ' + BRAND;
 
     const printBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'invoice-print', on: { click: () => window.print() } }, html(MDM.icon('printer', 16)), 'Print or save PDF');
-    const trackBtn = el('a', { class: 'btn btn--ghost', href: MDM.href('track/?code=' + encodeURIComponent(o.code)) }, 'Track ' + o.code);
+    const withT = viaLink ? '&t=' + encodeURIComponent(t) : '';
+    const trackBtn = el('a', { class: 'btn btn--ghost', href: MDM.href('track/?code=' + encodeURIComponent(o.code) + withT) }, 'Track ' + o.code);
     const payBtn = (p.status === 'requested' || (p.status === 'pending' && confirmed)) && p.method !== 'invoice' && o.status !== 'cancelled'
-      ? el('a', { class: 'btn btn--brand', href: MDM.href('checkout/?order=' + encodeURIComponent(o.id)), 'data-testid': 'invoice-pay' }, 'Pay ' + MDM.pricing.format(o.totals.total)) : null;
+      ? el('a', { class: 'btn btn--brand', href: MDM.href(viaLink ? 'checkout/?code=' + encodeURIComponent(o.code) + withT : 'checkout/?order=' + encodeURIComponent(o.id)), 'data-testid': 'invoice-pay' }, 'Pay ' + MDM.pricing.format(o.totals.total)) : null;
 
     const brand = el('div', { class: 'invoice-brand' },
       el('img', { src: '../assets/logo-lockup.svg', alt: BRAND }),

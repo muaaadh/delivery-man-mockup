@@ -417,6 +417,8 @@
     const target = (ph.stop || cur || showDrop || showPick);
     const primary = ph.label ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary job__primary--' + (PHASE_TONE[ph.key] || 'go'), 'data-testid': 'driver-action', 'data-action': ph.key, on: { click: e => act(e.currentTarget, o, ph) } }, ph.label) : null;
     const canFail = ACTIVE.indexOf(o.status) >= 0 && cur;
+    // Collected and not delivered yet: the driver may bring it to the office instead (client, 05/11/2026), next to the problem button.
+    const canHandOver = ['collected', 'out_for_delivery'].indexOf(o.status) >= 0 && pickups.every(s => s.status === 'done') && cur && cur.type === 'dropoff';
     const charges = chargesBlock(o);
     const more = charges ? el('div', { class: 'card__body job__body' }, charges) : null;
     return el('article', { class: ['card', 'job', hero && 'job--hero', pri.rank < 9 && 'is-priority', state.focusOrder === o.id && 'is-focus'], 'data-testid': 'driver-job', 'data-order-id': o.id, 'data-code': o.code, 'data-status': o.status },
@@ -443,7 +445,8 @@
         el('div', { class: 'job__links' },
           target ? el('a', { class: 'btn btn--secondary', href: directionsHref(target), target: '_blank', rel: 'noopener', 'data-testid': 'driver-directions' }, icon('navigation', 16), 'Directions') : null,
           el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), 'data-testid': 'driver-label' }, icon('printer', 16), 'Label'),
-          canFail ? el('button', { type: 'button', class: 'btn btn--ghost job__problem', 'data-testid': 'driver-problem', on: { click: e => onFailed(e.currentTarget, o, cur) } }, icon('flag', 16), 'Report a problem') : null)),
+          canFail ? el('button', { type: 'button', class: 'btn btn--ghost job__problem', 'data-testid': 'driver-problem', on: { click: e => onFailed(e.currentTarget, o, cur) } }, icon('flag', 16), 'Report a problem') : null,
+          canHandOver ? el('button', { type: 'button', class: 'btn btn--ghost job__office', 'data-testid': 'driver-hand-office', on: { click: e => onHandOver(e.currentTarget, o) } }, icon('building', 16), 'Hand to office') : null)),
       methodBlock(o),
       more);
   }
@@ -1221,6 +1224,17 @@
     if (v.photo) { try { patch.photoId = await storePhoto(v.photo, 'failed', o.id); } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; } }
     const r = await run(btn, o, () => MDM.store.setStop(o.id, stop.id, patch), null, 'Could not report the problem');
     if (r) { resumeSimAt(stop.id); MDM.ui.toast(o.code + ' sent to the office', 'warn'); }
+  }
+
+  // Handed to the office (client, 05/11/2026: a package collected and brought back to the office was reported as a failed delivery).
+  // It stays collected; the office gives it to a driver for the delivery and it leaves this list.
+  async function onHandOver(btn, o) {
+    const v = await MDM.ui.dialog({ title: 'Hand it to the office?', message: 'The office gives it to a driver for the delivery. It leaves your list.',
+      fields: [{ name: 'remarks', label: 'Note for the office', type: 'textarea', rows: 2, placeholder: 'Customer asked for tomorrow' }],
+      okLabel: 'Handed over' });
+    if (!v) return;
+    const r = await run(btn, o, () => MDM.store.handToOffice(o.id, { by: by(), remarks: v.remarks || '' }), o.code + ' handed to the office', 'Could not hand it over');
+    if (r) state.focusOrder = null;
   }
 
   // ---- Driver choice ----------------------------------------------------------------------------------------------------------------

@@ -208,6 +208,8 @@ body.page-driver .job__actions { display: grid; gap: 10px; }
 body.page-driver .job__links { display: flex; flex-wrap: wrap; gap: 8px; }
 body.page-driver .job__links > * { flex: 1 1 120px; }
 body.page-driver .job__problem { flex-basis: 100%; color: var(--danger); }
+/* With "Hand to office" next to it (05/11/2026), the two share one row on a phone: each as wide as its label. */
+body.page-driver .job__problem:has(+ .job__office), body.page-driver .job__office { flex: 1 1 auto; padding-inline: 12px; gap: 6px; }
 body.page-driver .job__alert-link { margin-top: 6px; }
 body.page-driver .job__alert-link a { display: inline-block; padding: 10px 0; margin: -10px 0; font-weight: 500; }
 

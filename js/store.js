@@ -1381,7 +1381,7 @@
       estimate: { min: q.totals.total, max: q.totals.total }, pricing: { status: 'confirmed', confirmedAt: now(), confirmedBy: 'system', remarks: 'Business rate: ' + (tierInfo.label || tier), history: [] },
       schedule: { type: 'asap' }, payment: { method: 'invoice', status: 'invoiced' }, cod: cod > 0 ? { amount: cod, status: 'pending', collectedAmount: null } : null, charges: [],
       priority: { level: 'normal', status: 'none', requests: [] }, cancellation: { status: 'none' }, changes: [], statusHistory: [{ at: now(), from: null, to: 'confirmed', by }],
-      status: 'confirmed', driverId: null, collectorId: batch.collectorId || null, route: { stops: [], polyline: [] }, events: [], notes: [] });
+      status: 'confirmed', driverId: null, collectorId: batch.collectorId || null, route: { stops: [], polyline: [] }, events: [], notes: [], trackToken: trackSecret() });
   }
   // addToBatch(batchId, rows, { by }): another package for a bulk order already made (client, 05/11/2026: "keep an add another
   // package"). It waits for the collection like the others: with the bulk order's collector when it has one, else the office collects it.
@@ -1579,6 +1579,13 @@
     return insert('customers', { name: c.name || '', phone, email: c.email || '', notify: c.notify || 'whatsapp', addresses: c.address ? [Object.assign({ id: MDM.id('adr'), label: 'Home' }, c.address)] : [], lastOrderAt: c.touch === false ? null : t, orderCount: c.touch === false ? 0 : 1, termsAcceptedAt: c.termsAcceptedAt || null });
   }
   // createOrder: the one place customer and admin requests become orders (keeps the shape identical everywhere).
+  // The secret of an order's tracking link (orders.track_token on the live service, where the database makes it): with it the link
+  // opens the whole order without signing in (client, 05/11/2026). The demo makes its own.
+  function trackSecret() {
+    if (window.MDM_SERVER) return undefined;
+    const b = new Uint8Array(16); (window.crypto || {}).getRandomValues ? window.crypto.getRandomValues(b) : b.forEach((x, i) => { b[i] = Math.floor(Math.random() * 256); });
+    return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  }
   function createOrder(d) {
     const s = settings();
     d = Object.assign({}, d, { delivery: Object.assign({ method: 'home' }, d.delivery || {}) });
@@ -1625,7 +1632,7 @@
       priority: { level: level === 'express' ? 'express' : 'normal', status: 'none', requests: [] }, cancellation: { status: 'none' }, changes: [],
       statusHistory: [{ at: now(), from: null, to: d.status || 'requested', by: d.by || 'customer' }],
       status: d.status || 'requested', driverId: null, route: { stops: [], polyline: [] }, events: [], notes: d.notes || [],
-      extraVehicle: !!d.extraVehicle, items: d.items || null, charges: [],
+      extraVehicle: !!d.extraVehicle, items: d.items || null, charges: [], trackToken: trackSecret(),
       cod: Number(d.cod) > 0 ? { amount: Math.round(Number(d.cod)), status: 'pending', collectedAmount: null } : null });
     const x = clone(order);
     const acc = d.accountId ? readCol('business_accounts').find(a => a.id === d.accountId) : null;

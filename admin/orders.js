@@ -1020,7 +1020,7 @@
   }
   async function fresh(o) { return (await MDM.store.get('orders', o.id)) || o; }
   // The live service's link carries the order's secret (MDM.remote.trackLink), so the customer opens it on any phone without signing in.
-  function trackUrl(o) { return MDM.remote && MDM.remote.trackLink ? MDM.remote.trackLink(o) : MDM.href('track/?order=' + encodeURIComponent(o.id)); }
+  function trackUrl(o) { return MDM.remote && MDM.remote.trackLink ? MDM.remote.trackLink(o) : o.trackToken ? MDM.href('track/?code=' + encodeURIComponent(o.code) + '&t=' + o.trackToken) : MDM.href('track/?order=' + encodeURIComponent(o.id)); }
   // A delivered order still to be paid says what is due, so Send update also works as a payment reminder.
   function statusMessage(o) {
     const due = o.status === 'delivered' && o.payment && o.payment.method !== 'invoice' && o.payment.status === 'requested';
