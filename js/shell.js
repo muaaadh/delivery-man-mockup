@@ -497,7 +497,7 @@
       nav,
       el('div', { class: 'sidebar__foot' },
         el('span', { class: 'sidebar__avatar', 'aria-hidden': 'true' }, ((session() || {}).name || 'Admin').charAt(0)),
-        el('span', { class: 'sidebar__who' }, el('span', { class: 'sidebar__name' }, (session() || {}).name || 'Admin'), el('span', { class: 'sidebar__role' }, { admin: 'Admin', operator: 'Operator', office: 'Office staff' }[(session() || {}).role] || 'Admin')),
+        el('span', { class: 'sidebar__who' }, el('span', { class: 'sidebar__name' }, (session() || {}).name || 'Admin'), el('span', { class: 'sidebar__role' }, { admin: 'Admin', operator: 'Operator', office: 'Office staff', cs: 'Customer service' }[(session() || {}).role] || 'Admin')),
         signout));
     admin.menu = el('button', { type: 'button', class: 'btn btn--ghost btn--icon topbar__menu', 'aria-label': 'Menu', 'aria-expanded': 'false', 'aria-controls': 'admin-sidebar',
       on: { click: () => setSidebarOpen(!admin.open) } }, iconNode('menu', 20));
