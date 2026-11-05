@@ -36,6 +36,16 @@
     { value: 'unsure', label: 'Not sure, kindly assist in checking', zone: 'male', point: [4.1790, 73.5090], unsure: true },
     { value: 'maldivian_cargo', label: 'Maldivian Cargo counter, main bus terminal', zone: 'male', point: [4.1773, 73.5066], cargo: true },
   ];
+  // The office's own jetty list (settings.ops.jetties, MDM.applyPlaces): replaces the harbours and jetties above in place, keeping
+  // "Not sure" and the cargo counter last; null puts the built-in ones back. A jetty without a point is placed at its zone's centre.
+  const DEFAULT_JETTIES = TERMINALS.filter(t => !t.cargo && !t.unsure).map(t => Object.assign({}, t));
+  function setJetties(list) {
+    const fixed = TERMINALS.filter(t => t.cargo || t.unsure);
+    const known = v => DEFAULT_JETTIES.find(t => t.value === v);
+    const own = (list || DEFAULT_JETTIES).map(j => ({ value: j.value, label: j.label, zone: ZONES[j.zone] ? j.zone : 'male',
+      point: Array.isArray(j.point) ? j.point : (known(j.value) && known(j.value).zone === j.zone ? known(j.value).point : (ZONES[j.zone] || ZONES.male).center.slice()) }));
+    TERMINALS.splice(0, TERMINALS.length, ...own, ...fixed.filter(t => t.unsure), ...fixed.filter(t => t.cargo));
+  }
   const AIRPORT_POINTS = [
     { value: 'resort_counters', label: 'Resort counters, arrivals hall', point: [4.1913, 73.5277] },
     { value: 'arrivals', label: 'Arrivals hall', point: [4.1915, 73.5280] },
@@ -194,7 +204,7 @@
   }
 
   MDM.geo = {
-    ZONES, get ZONE_LIST() { return ZONE_LIST; }, registerZones, CENTER, HIGHWAY_BBOX, TERMINALS, AIRPORT_POINTS, MEET_AT,
+    ZONES, get ZONE_LIST() { return ZONE_LIST; }, registerZones, setJetties, CENTER, HIGHWAY_BBOX, TERMINALS, AIRPORT_POINTS, MEET_AT,
     zone: k => ZONES[k] || null,
     zoneLabel: k => k === 'other' ? "Other (we'll confirm)" : ((ZONES[k] || {}).label || k),
     zoneShort: k => k === 'other' ? 'Other' : ((ZONES[k] || {}).short || k),

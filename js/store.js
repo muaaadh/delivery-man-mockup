@@ -166,6 +166,9 @@
   // Pick & deliver orders without a package photo are collected first; the operator sets the price from the proof of collection
   // (updates 17/10/2026). pricing.afterCollection is set when the order is created, or when the office assigns a driver before
   // confirming the price (client, 28/10/2026: a shopping stop or a package photo no longer holds the driver back).
+  // Collected and with no driver: handed over to the office (store.handToOffice) or a bulk package sorted at the hub, waiting to be
+  // given to a driver for the delivery.
+  MDM.waitingAtOffice = o => !!o && o.status === 'collected' && !o.driverId;
   MDM.priceAfterCollection = o => !!(o && o.pricing && o.pricing.afterCollection && o.pricing.status !== 'confirmed');
   // priceToFinalise(o) → true once the proof of collection is in and the price still waits for the operator.
   MDM.priceToFinalise = o => MDM.priceAfterCollection(o) && ['cancelled', 'returned'].indexOf(o.status) < 0 && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
@@ -221,6 +224,29 @@
     { value: 'hm_amin', label: 'Hulhumalé, Amin Avenue', zone: 'hulhumale_p1' },
   ];
   MDM.POST_OFFICES = [{ value: 'male_7th', label: 'Post Office, 7th floor (Malé)', zone: 'male' }, { value: 'hulhumale', label: 'Hulhumalé Post Office', zone: 'hulhumale_p1' }];
+  // The office keeps these lists up to date (client, 05/11/2026: postal collection addresses and jetty details): settings.ops.pikpost,
+  // .postOffices and .jetties ([{ value, label, zone }]) and .carrierAddresses ({ carrier: address }). applyPlaces(settings) puts them
+  // into MDM.PIKPOST_LOCATIONS, MDM.POST_OFFICES, MDM.CARRIERS and the jetties of MDM.geo, in place, so every page reads the office's
+  // lists; an empty or missing list keeps the built-in one. Orders keep the address text they were placed with.
+  MDM.DEFAULT_PIKPOST = MDM.PIKPOST_LOCATIONS.map(x => Object.assign({}, x));
+  MDM.DEFAULT_POST_OFFICES = MDM.POST_OFFICES.map(x => Object.assign({}, x));
+  MDM.DEFAULT_CARRIER_ADDRESSES = {};
+  MDM.CARRIERS.forEach(c => { MDM.DEFAULT_CARRIER_ADDRESSES[c.value] = c.address; });
+  MDM.MAX_PLACES = 30;
+  const cleanPlaces = (list, prefix) => (Array.isArray(list) ? list : []).filter(x => x && String(x.label || '').trim()).slice(0, MDM.MAX_PLACES)
+    .map((x, i) => ({ value: String(x.value || '').trim() || prefix + '_' + (i + 1), label: String(x.label).trim(), zone: x.zone || 'male' }));
+  MDM.cleanPlaces = cleanPlaces;
+  function applyPlaces(st) {
+    const ops = (st && st.ops) || {};
+    const put = (arr, list) => { arr.splice(0, arr.length, ...list.map(x => Object.assign({}, x))); };
+    const pik = cleanPlaces(ops.pikpost, 'pik'), post = cleanPlaces(ops.postOffices, 'post');
+    put(MDM.PIKPOST_LOCATIONS, pik.length ? pik : MDM.DEFAULT_PIKPOST);
+    put(MDM.POST_OFFICES, post.length ? post : MDM.DEFAULT_POST_OFFICES);
+    const addr = ops.carrierAddresses || {};
+    MDM.CARRIERS.forEach(c => { c.address = String(addr[c.value] || '').trim() || MDM.DEFAULT_CARRIER_ADDRESSES[c.value]; });
+    if (MDM.geo && MDM.geo.setJetties) { const j = cleanPlaces(ops.jetties, 'jetty'); MDM.geo.setJetties(j.length ? j : null); }
+  }
+  MDM.applyPlaces = applyPlaces;
   MDM.OFFICE_TASKS = [
     { value: 'submit', label: 'Document submission' }, { value: 'collect', label: 'Document collection' },
     { value: 'procedure', label: 'Procedure or application assistance' }, { value: 'other', label: 'Other administrative request' },
@@ -252,7 +278,9 @@
   ];
   MDM.PRIORITY_LEVELS = [{ value: 'priority', label: 'Priority' }, { value: 'urgent', label: 'Urgent' }, { value: 'express', label: 'Express' }];
   MDM.LEAVE_TYPES = [{ value: 'annual', label: 'Annual leave' }, { value: 'sick', label: 'Sick leave' }, { value: 'emergency', label: 'Emergency leave' }, { value: 'off_day', label: 'Accumulated off day' }, { value: 'unpaid', label: 'Unpaid leave' }];
-  MDM.ROLES = [{ value: 'admin', label: 'Admin' }, { value: 'operator', label: 'Operator' }, { value: 'office', label: 'Office staff' }, { value: 'driver', label: 'Driver' }];
+  MDM.ROLES = [{ value: 'admin', label: 'Admin' }, { value: 'operator', label: 'Operator' }, { value: 'office', label: 'Office staff' }, { value: 'cs', label: 'Customer service' }, { value: 'driver', label: 'Driver' }];
+  // The roles that sign in to the office portal (customer service: its own sign-in, client 05/11/2026, with the order pages only).
+  MDM.OFFICE_ROLES = ['admin', 'operator', 'office', 'cs'];
   // Events that reach the customer as a notification (client requirements §17).
   const NOTIFY = {
     created: 'Order submitted', confirmed: 'Order confirmed', price_confirmed: 'Price confirmed', assigned: 'Driver assigned',
@@ -394,7 +422,7 @@
   }
   function remove(col, id) { const arr = readCol(col).filter(x => x.id !== id); writeCol(col, arr); notifyLocal(col, id, 'remove'); }
   const SETTINGS_KEYS = ['rates', 'rules', 'sizeGuide', 'ops', 'banks', 'contact', 'terms', 'notice', 'invoiceDueDays', 'gstPercent', 'demo', 'notifications', 'hr', 'store'];
-  function settings() { if (!settingsCache) settingsCache = readRaw(PREFIX + 'settings', {}); return clone(settingsCache); }
+  function settings() { if (!settingsCache) { settingsCache = readRaw(PREFIX + 'settings', {}); applyPlaces(settingsCache); } return clone(settingsCache); }
   function deepMerge(a, b) {
     if (Array.isArray(b) || b === null || typeof b !== 'object') return clone(b);
     const out = Object.assign({}, a || {});
@@ -405,7 +433,7 @@
     const cur = settings(); const next = Object.assign({}, cur);
     const keys = Object.keys(patch || {}).filter(k => SETTINGS_KEYS.indexOf(k) >= 0);
     keys.forEach(k => { next[k] = deepMerge(cur[k], patch[k]); });
-    writeRaw(PREFIX + 'settings', next); settingsCache = next;
+    writeRaw(PREFIX + 'settings', next); settingsCache = next; applyPlaces(next);
     schedule('settings', null, 'update', 'local'); broadcast({ collection: 'settings', op: 'update' });
     audit('settings_changed', 'Settings updated: ' + keys.join(', '), (patch && patch.__by) || 'admin');
     return clone(next);
@@ -416,7 +444,7 @@
   function writeSeed(seed) {
     const t = now();
     COLLECTIONS.forEach(c => { cache[c] = seed[c] || []; writeRaw(PREFIX + c, cache[c]); });
-    settingsCache = seed.settings || {}; writeRaw(PREFIX + 'settings', settingsCache);
+    settingsCache = seed.settings || {}; writeRaw(PREFIX + 'settings', settingsCache); applyPlaces(settingsCache);
     const codes = (seed.orders || []).map(o => Number(String(o.code || '').replace(/\D/g, ''))).filter(n => n > 0);
     const bcodes = (seed.batches || []).map(o => Number(String(o.code || '').replace(/\D/g, ''))).filter(n => n > 0);
     writeMeta({ seededAt: Date.now(), dirty: false, orderSeq: (codes.length ? Math.max.apply(null, codes) : 1000) + 1, batchSeq: (bcodes.length ? Math.max.apply(null, bcodes) : 1000) + 1, invoiceSeq: (seed.invoices || []).length + 1, seededISO: t, settingsRev: SETTINGS_REV });
@@ -483,7 +511,7 @@
     let data; try { data = JSON.parse(text); } catch (e) { throw new StoreError('schema', 'Not valid JSON'); }
     if (!data || data.schema !== MDM.SCHEMA || !data.collections) throw new StoreError('schema', 'This file is not a Mr. Delivery Man export');
     COLLECTIONS.forEach(c => { if (data.collections[c]) { cache[c] = data.collections[c]; writeRaw(PREFIX + c, cache[c]); } });
-    if (data.settings) { settingsCache = data.settings; writeRaw(PREFIX + 'settings', settingsCache); }
+    if (data.settings) { settingsCache = data.settings; writeRaw(PREFIX + 'settings', settingsCache); applyPlaces(settingsCache); }
     if (data.meta) writeMeta(Object.assign({}, meta(), data.meta, { dirty: true }));
     schedule('*', null, 'reset', 'local'); COLLECTIONS.forEach(c => schedule(c, null, 'reset', 'local')); schedule('settings', null, 'reset', 'local');
     broadcast({ op: 'reset' });
@@ -525,6 +553,31 @@
     const channel = cfg.channel === 'customer' || !cfg.channel ? (c.notify || 'sms') : cfg.channel;
     const message = 'Mr. Delivery Man: ' + order.code + ' ' + NOTIFY[ev.type].toLowerCase() + '. ' + ev.label;
     insert('notifications', { orderId: order.id, code: order.code, to: c.phone || '', name: c.name || '', channel, event: ev.type, title: NOTIFY[ev.type], message, status: 'sent', at: ev.at });
+    notifyEmail(order, ev, cfg);
+  }
+  // Emails to the customer (client, 05/11/2026, in place of automatic WhatsApp messages): order confirmed, collected, delivered and
+  // payment due, each one on or off in Settings (notifications.emails; all on when not set). Bulk packages send none (the business
+  // follows them in its portal). On the live service the row is 'queued' and the API sends it (api/store.js), then marks it sent.
+  MDM.EMAIL_UPDATES = [
+    { value: 'confirmed', label: 'Order confirmed', subject: 'is confirmed' }, { value: 'collected', label: 'Collected', subject: 'is collected' },
+    { value: 'delivered', label: 'Delivered', subject: 'is delivered' }, { value: 'payment_due', label: 'Payment due', subject: ': payment due' },
+  ];
+  MDM.emailUpdateOf = function (order, ev) {
+    if (ev.type === 'price_confirmed' || ev.type === 'confirmed' || (ev.type === 'created' && order.status === 'confirmed')) return 'confirmed';
+    if (ev.type === 'collected' || ev.type === 'delivered') return ev.type;
+    if (ev.type === 'payment_requested' || ev.type === 'invoice_updated') return 'payment_due';
+    return null;
+  };
+  function notifyEmail(order, ev, cfg) {
+    const kind = MDM.emailUpdateOf(order, ev);
+    const email = String(((order.customer || {}).email) || '').trim().toLowerCase();
+    if (!kind || order.batchId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+    if ((cfg.channels || {}).email === false || (cfg.emails || {})[kind] === false) return;
+    // One email per update: a price confirmed on an order that also turns confirmed is one "confirmed" email.
+    if (readCol('notifications').some(n => n.orderId === order.id && n.channel === 'email' && n.update === kind && (kind !== 'payment_due' || n.at === ev.at))) return;
+    const u = MDM.EMAIL_UPDATES.find(x => x.value === kind);
+    insert('notifications', { orderId: order.id, code: order.code, to: email, name: (order.customer || {}).name || '', channel: 'email', event: ev.type, update: kind,
+      title: 'Your order ' + order.code + ' ' + u.subject, message: ev.label, status: window.MDM_SERVER ? 'queued' : 'sent', at: ev.at });
   }
   // notifyStaff: operational messages for the driver, the operations desk or the business (not the end customer). In production these
   // become push notifications in the driver and office apps; here they are rows in the same notifications log with an audience.
@@ -775,6 +828,66 @@
     return save(o);
   }
 
+  // changeDeliveryMethod(orderId, delivery, { by }): another delivery method for an order on its way (client, 05/11/2026: a Maldivian
+  // Cargo order the customer then wanted delivered home; before, only the details of the same method could change). delivery is what
+  // the request form records: { method, address, zone, landmark (home), boat, cargo, airport, recipientName, recipientPhone,
+  // instructions }; a receiver left out stays. Every package goes to the new end, the cargo and airport fees follow the method (the
+  // package prices too while the price is still an estimate), and the stops still to do move there.
+  function changeDeliveryMethod(orderId, d, p) {
+    p = p || {}; d = d || {};
+    const o = orderOrThrow(orderId);
+    if (['delivered', 'cancelled', 'returned'].indexOf(o.status) >= 0) throw new StoreError('transition', 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase());
+    if (o.service === 'store') throw new StoreError('validation', 'E-store orders keep their delivery');
+    const method = d.method;
+    if (!MDM.DELIVERY_METHODS.some(m => m.value === method)) throw new StoreError('validation', 'Choose a delivery method');
+    const d0 = o.delivery || {}, from = d0.method || 'home';
+    const txt = v => String(v == null ? '' : v).trim();
+    if (method === 'home' && (!txt(d.address) || !d.zone)) throw new StoreError('validation', 'Enter the delivery address and zone');
+    if (method === 'home' && d.zone === 'airport') throw new StoreError('validation', 'For the airport choose Airport delivery');
+    if (method === 'boat' && !txt((d.boat || {}).island)) throw new StoreError('validation', 'Enter the destination island');
+    if (method === 'cargo' && !txt((d.cargo || {}).island)) throw new StoreError('validation', 'Enter the destination island');
+    const by = p.by || 'admin';
+    const next = { method, recipientName: d.recipientName != null ? txt(d.recipientName) : d0.recipientName || '', recipientPhone: d.recipientPhone != null ? (normPhone(d.recipientPhone) || txt(d.recipientPhone)) : d0.recipientPhone || '',
+      instructions: d.instructions != null ? txt(d.instructions) : d0.instructions || '', meetAt: d.meetAt || d0.meetAt || 'door',
+      address: method === 'home' ? txt(d.address) : '', zone: method === 'home' ? d.zone : '', landmark: method === 'home' ? txt(d.landmark) : '',
+      boat: method === 'boat' ? Object.assign({}, d.boat, { history: (d0.boat || {}).history }) : null, cargo: method === 'cargo' ? Object.assign({}, d.cargo) : null, airport: method === 'airport' ? Object.assign({}, d.airport) : null };
+    if (method === 'cargo' && !next.cargo.consignee) next.cargo.consignee = next.recipientName;
+    const end = deliveryEndpoint(next);
+    o.delivery = Object.assign({}, d0, next, { address: method === 'home' ? next.address : end.address, zone: end.zone, landmark: method === 'home' ? next.landmark : end.landmark });
+    (o.packages || []).forEach(k => {
+      k.dropoff = Object.assign({}, end, { recipient: { name: next.recipientName, phone: next.recipientPhone } });
+      if (method === 'home') { delete k.dropoff.lat; delete k.dropoff.lng; }
+    });
+    const before = o.totals.total;
+    const q = MDM.pricing.quote({ service: o.service, packages: o.packages, extraCollections: o.extraCollections }, settings());
+    o.fees = Object.assign({}, o.fees, { cargo: q.fees.cargo, airport: q.fees.airport });
+    if (!(o.pricing && o.pricing.status === 'confirmed')) o.packages = q.packages.map((k, i) => Object.assign({}, o.packages[i], { price: k.price }));
+    recalc(o);
+    const methodLabel = v => MDM.deliveryMethodLabel(v);
+    o.changes = (o.changes || []).concat([{ at: now(), by, field: 'delivery.method', from, to: method }]);
+    if (o.totals.total !== before) priceHistory(o, before, o.totals.total, 'Delivery method changed to ' + methodLabel(method).toLowerCase(), by);
+    // The stops still to do move to the new end; with nothing done yet the route is planned again.
+    if (o.route && o.route.stops && o.route.stops.length) {
+      const done = o.route.stops.filter(x => x.status === 'done');
+      if (!done.length) { o.route = { stops: buildStops(o), polyline: [] }; o.route.polyline = MDM.geo.routeThrough(o.route.stops); }
+      else {
+        o.route.stops.forEach(x => {
+          if (x.type !== 'dropoff' || ['pending', 'arrived', 'failed'].indexOf(x.status) < 0) return;
+          const pt = pointFor(end, end.zone || 'male', end.address || x.label);
+          Object.assign(x, { address: end.address || '', zone: end.zone || 'male', landmark: end.landmark || '', lat: pt.lat, lng: pt.lng, contact: { name: next.recipientName, phone: next.recipientPhone } });
+          if (x.status === 'arrived') { x.status = 'pending'; x.arrivedAt = null; }
+        });
+        const open = o.route.stops.filter(x => x.status !== 'done' && x.status !== 'skipped');
+        o.route.polyline = MDM.geo.routeThrough(open.length >= 2 ? open : o.route.stops.filter(x => x.status !== 'skipped'));
+      }
+    }
+    const priced = o.totals.total !== before && o.pricing && o.pricing.status === 'confirmed';
+    pushEvent(o, makeEvent('method_changed', 'Delivery changed to ' + methodLabel(method).toLowerCase() + (priced ? ', price ' + fmt(before) + ' to ' + fmt(o.totals.total) : '') + (p.remarks ? ' (' + txt(p.remarks) + ')' : ''), by, 'public'));
+    if (o.driverId && ['assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery'].indexOf(o.status) >= 0) notifyStaff(o, 'driver', 'Delivery changed', 'now ' + methodLabel(method).toLowerCase() + ': ' + end.address);
+    invoiceFollows(o, before, by);
+    return save(o);
+  }
+
   // ---- Priority requests (requirements §11, §12) ------------------------------------------------------------------------
   function requestPriority(orderId, p) {
     const o = orderOrThrow(orderId);
@@ -918,7 +1031,15 @@
     else if (o.status === 'failed' && !o.batchId) setStatus(o, 'assigned', 'assigned', label, opts.by);
     // Out for delivery with someone else (client, 01/11/2026): the new driver takes it out again from "collected".
     else if (o.status === 'out_for_delivery' && reassign) setStatus(o, 'collected', 'assigned', label + '. It goes out again with them', opts.by, 'public', { driverId });
+    // On the way to collect or already there (client, 05/11/2026: reassign at every stage): the new driver goes to the collection; the
+    // old driver's "arrived" no longer holds.
+    else if (['on_the_way', 'arrived'].indexOf(o.status) >= 0 && reassign) {
+      o.route.stops.forEach(x => { if (x.status === 'arrived') { x.status = 'pending'; x.arrivedAt = null; } });
+      if (o.status === 'arrived') setStatus(o, 'on_the_way', 'assigned', label, opts.by, 'public', { driverId });
+      else pushEvent(o, makeEvent('assigned', label, opts.by, 'public', { driverId }));
+    }
     else pushEvent(o, makeEvent('assigned', label, opts.by, 'public', { driverId }));
+    if (prev !== driverId && ['on_the_way', 'collected'].indexOf(o.status) >= 0) notifyStaff(o, 'driver', 'New job', 'the office gave it to you, ' + (o.status === 'on_the_way' ? 'collect it' : 'deliver it'));
     const saved = save(o);
     if (prev && prev !== driverId) releaseDriverIfIdle(prev, o.id);
     return saved;
@@ -949,6 +1070,28 @@
     setStatus(o, 'out_for_delivery', 'out_for_delivery', 'Out for delivery with ' + driverName(o.driverId), opts.by);
     if (o.driverId) update('drivers', o.driverId, { status: 'on_route' });
     return save(o);
+  }
+  // Handed over to the office (client, 05/11/2026: a driver who collected a package and brought it to the office had to report it as a
+  // failed delivery). The package waits at the office, still collected, without a driver (o.atOffice says since when and from whom);
+  // the office gives it to a driver for the delivery.
+  function handToOffice(orderId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId);
+    if (['collected', 'out_for_delivery'].indexOf(o.status) < 0) throw new StoreError('transition', ['delivered', 'cancelled', 'returned'].indexOf(o.status) >= 0 ? 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase() : 'Only a collected package can be handed over to the office');
+    if (!o.driverId) throw new StoreError('transition', 'This package is already at the office');
+    const by = p.by || ('driver:' + o.driverId);
+    const prev = o.driverId, who = driverName(prev), note = String(p.remarks || '').trim();
+    ((o.route && o.route.stops) || []).forEach(x => { if (x.type !== 'pickup' && x.status === 'arrived') { x.status = 'pending'; x.arrivedAt = null; } });
+    o.driverId = null;
+    o.atOffice = { at: now(), by, driverId: prev, remarks: note };
+    const label = 'At our office, the delivery follows';
+    if (o.status === 'out_for_delivery') setStatus(o, 'collected', 'at_office', label, by, 'public', { driverId: prev });
+    else pushEvent(o, makeEvent('at_office', label, by, 'public', { driverId: prev }));
+    if (note) pushEvent(o, makeEvent('note', 'Driver remark: ' + note, by, 'internal'));
+    notifyStaff(o, 'operations', 'At the office', who + ' handed it over to the office' + (note ? ' (' + note + ')' : '') + ': give it to a driver for the delivery');
+    const saved = save(o);
+    releaseDriverIfIdle(prev, o.id);
+    return saved;
   }
   function settleShop(o) {
     if (o.service !== 'shop' && !(o.extraCollections || []).some(c => c.kind === 'shop')) return;
@@ -1209,32 +1352,56 @@
     const s = settings();
     const col = Object.assign({}, b.collection || {});
     const batch = insert('batches', { accountId: acc.id, name: acc.name, serviceLevel: b.serviceLevel || 'normal', collection: col, collectionPointId: col.pointId || null, preferredTime: col.preferredTime || '', notes: b.notes || '', status: 'confirmed', orderIds: [], source: b.source || 'portal', by: b.by || ('business:' + acc.id) });
-    const ids = [];
-    (b.rows || []).forEach((r, i) => {
-      const tier = r.tier || (acc.tiers && acc.tiers[0]) || 'small';
-      const tierInfo = MDM.pricing.businessTiers(s).find(t => t.value === tier) || {};
-      const size = r.size || tierInfo.size || 'bag';
-      const delivery = { method: r.method || 'home', address: r.address || '', zone: r.zone || 'male', landmark: r.landmark || '', recipientName: r.name || '', recipientPhone: r.phone || '', instructions: r.instructions || '', meetAt: 'door', boat: r.boat || null, cargo: r.cargo || null, airport: r.airport || null };
-      const end = deliveryEndpoint(delivery);
-      const pkg = { id: MDM.id('pkg'), size, tier, tierRate: MDM.pricing.businessRate(acc, tier, s), description: r.description || '', underOneFt: size === 'bag', fragile: !!r.fragile, needsVehicle: false,
-        pickup: { address: col.address, zone: col.zone, landmark: col.landmark || '', contact: { name: col.contactName, phone: col.contactPhone } },
-        dropoff: end };
-      const q = MDM.pricing.quote({ service: 'business', packages: [pkg] }, s);
-      const cod = Math.round(Number(r.cod) || 0);
-      const order = insert('orders', {
-        source: b.source || 'business', requestType: 'bulk', service: 'business', serviceLevel: b.serviceLevel || 'normal', accountId: acc.id, batchId: batch.id, batchIndex: i + 1,
-        customerId: null, customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
-        collection: col, delivery: Object.assign({}, delivery, { address: delivery.method === 'home' ? delivery.address : (r.address || end.address), zone: end.zone }),
-        details: { reference: r.reference || '' }, documents: [], packages: q.packages, fees: q.fees, totals: q.totals,
-        estimate: { min: q.totals.total, max: q.totals.total }, pricing: { status: 'confirmed', confirmedAt: now(), confirmedBy: 'system', remarks: 'Business rate: ' + (tierInfo.label || tier), history: [] },
-        schedule: { type: 'asap' }, payment: { method: 'invoice', status: 'invoiced' }, cod: cod > 0 ? { amount: cod, status: 'pending', collectedAmount: null } : null, charges: [],
-        priority: { level: 'normal', status: 'none', requests: [] }, cancellation: { status: 'none' }, changes: [], statusHistory: [{ at: now(), from: null, to: 'confirmed', by: b.by || ('business:' + acc.id) }],
-        status: 'confirmed', driverId: null, route: { stops: [], polyline: [] }, events: [], notes: [] });
-      ids.push(order.id);
-    });
+    const ids = (b.rows || []).map((r, i) => batchOrder(acc, batch, r, i + 1, b.source || 'business', b.by || ('business:' + acc.id), s).id);
     const saved = update('batches', batch.id, { orderIds: ids });
     readCol('orders').filter(o => ids.indexOf(o.id) >= 0).forEach(o => { const x = clone(o); pushEvent(x, makeEvent('created', 'Order submitted (bulk ' + saved.code + ', package ' + x.batchIndex + ' of ' + ids.length + ')', b.by || 'business', 'public')); save(x); });
     audit('batch_created', 'Bulk order ' + saved.code + ' with ' + ids.length + ' packages', b.by || ('business:' + acc.id), { batchId: saved.id });
+    return clone(saved);
+  }
+  // One package of a bulk order: its own order, waiting for the collection from the business, priced at the account's agreed rate.
+  function batchOrder(acc, batch, r, index, source, by, s) {
+    const col = batch.collection || {};
+    const tier = r.tier || (acc.tiers && acc.tiers[0]) || 'small';
+    const tierInfo = MDM.pricing.businessTiers(s).find(t => t.value === tier) || {};
+    const size = r.size || tierInfo.size || 'bag';
+    const delivery = { method: r.method || 'home', address: r.address || '', zone: r.zone || 'male', landmark: r.landmark || '', recipientName: r.name || '', recipientPhone: r.phone || '', instructions: r.instructions || '', meetAt: 'door', boat: r.boat || null, cargo: r.cargo || null, airport: r.airport || null };
+    const end = deliveryEndpoint(delivery);
+    const pkg = { id: MDM.id('pkg'), size, tier, tierRate: MDM.pricing.businessRate(acc, tier, s), description: r.description || '', underOneFt: size === 'bag', fragile: !!r.fragile, needsVehicle: false,
+      pickup: { address: col.address, zone: col.zone, landmark: col.landmark || '', contact: { name: col.contactName, phone: col.contactPhone } },
+      dropoff: end };
+    const q = MDM.pricing.quote({ service: 'business', packages: [pkg] }, s);
+    const cod = Math.round(Number(r.cod) || 0);
+    return insert('orders', {
+      source, requestType: 'bulk', service: 'business', serviceLevel: batch.serviceLevel || 'normal', accountId: acc.id, batchId: batch.id, batchIndex: index,
+      customerId: null, customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
+      collection: col, delivery: Object.assign({}, delivery, { address: delivery.method === 'home' ? delivery.address : (r.address || end.address), zone: end.zone }),
+      details: { reference: r.reference || '' }, documents: [], packages: q.packages, fees: q.fees, totals: q.totals,
+      estimate: { min: q.totals.total, max: q.totals.total }, pricing: { status: 'confirmed', confirmedAt: now(), confirmedBy: 'system', remarks: 'Business rate: ' + (tierInfo.label || tier), history: [] },
+      schedule: { type: 'asap' }, payment: { method: 'invoice', status: 'invoiced' }, cod: cod > 0 ? { amount: cod, status: 'pending', collectedAmount: null } : null, charges: [],
+      priority: { level: 'normal', status: 'none', requests: [] }, cancellation: { status: 'none' }, changes: [], statusHistory: [{ at: now(), from: null, to: 'confirmed', by }],
+      status: 'confirmed', driverId: null, collectorId: batch.collectorId || null, route: { stops: [], polyline: [] }, events: [], notes: [] });
+  }
+  // addToBatch(batchId, rows, { by }): another package for a bulk order already made (client, 05/11/2026: "keep an add another
+  // package"). It waits for the collection like the others: with the bulk order's collector when it has one, else the office collects it.
+  function addToBatch(batchId, rows, p) {
+    p = p || {};
+    const batch = readCol('batches').find(x => x.id === batchId); if (!batch) throw new StoreError('not_found', 'Batch not found');
+    const acc = readCol('business_accounts').find(a => a.id === batch.accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
+    if (acc.status !== 'approved') throw new StoreError('validation', 'This business account is not active');
+    rows = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+    if (!rows.length) throw new StoreError('validation', 'Add at least one package');
+    rows.forEach(r => {
+      if (!String(r.name || '').trim()) throw new StoreError('validation', 'Enter the receiver');
+      if (!String(r.address || '').trim()) throw new StoreError('validation', (r.method === 'cargo' ? 'Enter the destination island' : 'Enter the delivery address'));
+    });
+    const s = settings(), by = p.by || ('business:' + acc.id);
+    const kids = readCol('orders').filter(o => o.batchId === batchId);
+    const first = kids.reduce((n, o) => Math.max(n, o.batchIndex || 0), 0);
+    const added = rows.map((r, i) => batchOrder(acc, batch, r, first + i + 1, p.source || (by.indexOf('business:') === 0 ? 'business' : 'phone'), by, s));
+    const ids = (batch.orderIds || []).concat(added.map(o => o.id));
+    const saved = update('batches', batchId, { orderIds: ids, status: 'confirmed' });
+    added.forEach(o => { const x = clone(o); pushEvent(x, makeEvent('created', 'Order submitted (bulk ' + saved.code + ', package ' + x.batchIndex + ' of ' + ids.length + ', added later)', by, 'public')); save(x); });
+    audit('batch_added', saved.code + ': ' + (added.length === 1 ? 'one more package' : added.length + ' more packages'), by, { batchId });
     return clone(saved);
   }
   // A driver collects a bulk order (client, 02/11/2026): the office names the collector; the bulk order and its packages still to
@@ -1509,6 +1676,26 @@
     return o ? clone(o) : null;
   }
 
+
+  // ---- Sales and expenses (client, 05/11/2026: "for gross sales calculations, possible to filter out?") ---------------------------
+  // salesOf(order) → { sales, expenses }, in MVR by kind. Sales are what the customer pays for our service (delivery charge with the
+  // price adjustments, shopping fee, airport fee, Maldivian Cargo fee, e-store goods) and the charges billed on to them; expenses are
+  // what was paid out for the order (naalu, vehicle, packing, Maldivian Cargo charges, other charges) and the cost of the items bought.
+  MDM.SALES_KINDS = [{ value: 'delivery', label: 'Delivery charge' }, { value: 'shopping', label: 'Shopping fee' }, { value: 'airport', label: 'Airport fee' },
+    { value: 'cargo_fee', label: 'Maldivian Cargo fee' }, { value: 'billed', label: 'Charges billed to customers' }, { value: 'store', label: 'E-store goods' }];
+  MDM.EXPENSE_KINDS = [{ value: 'naalu', label: 'Naalu' }, { value: 'vehicle', label: 'Vehicle charges' }, { value: 'packing', label: 'Packing charges' },
+    { value: 'cargo', label: 'Maldivian Cargo charges' }, { value: 'items', label: 'Shopping item cost' }, { value: 'other', label: 'Other charges' }];
+  MDM.salesOf = function (o) {
+    const f = o.fees || {}, t = o.totals || {}, n = v => Math.round(Number(v) || 0);
+    const charges = (o.charges || []).filter(c => !c.void);
+    const billedIds = new Set(charges.filter(c => c.billable && c.adjustmentId).map(c => c.adjustmentId));
+    const adj = (f.adjustments || []).filter(a => !billedIds.has(a.id)).reduce((x, a) => x + n(a.amount), 0);
+    const billed = (f.adjustments || []).filter(a => billedIds.has(a.id)).reduce((x, a) => x + n(a.amount), 0);
+    const sales = { delivery: n(t.packages) + adj, shopping: n(f.shopping), airport: n(f.airport), cargo_fee: n(f.cargo), billed, store: n(t.items) };
+    const expenses = { naalu: 0, vehicle: 0, packing: 0, cargo: 0, items: n(t.budget), other: 0 };
+    charges.forEach(c => { const k = ['naalu', 'vehicle', 'packing', 'cargo'].indexOf(c.type) >= 0 ? c.type : 'other'; expenses[k] += n(c.amount); });
+    return { sales, expenses };
+  };
 
   // ---- Charges on proof of collection / delivery (web app updates §6) ---------------------------------------------------
   // A charge records money paid out for an order (naalu to boat porters, packing, anything else). Billable charges are also added to the
@@ -1851,7 +2038,8 @@
     requestPayment: P(requestPayment), submitPayment: P(submitPayment), verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), recordRefund: P(recordRefund), markSettled: P(markSettled),
     cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
     assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep), addStopPhoto: P(addStopPhoto),
-    driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
+    handToOffice: P(handToOffice), changeDeliveryMethod: P(changeDeliveryMethod),
+    driverRoute: P(driverRoute), createBatch: P(createBatch), addToBatch: P(addToBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
     createStoreOrder: P(createStoreOrder), punchIn: P(punchIn), punchOut: P(punchOut), openShift: P(openShift), requestLeave: P(requestLeave), decideLeave: P(decideLeave),
     upsertCustomer: P(upsertCustomer), createInvoice: P(createInvoice), orderByCode: P(orderByCode),
     addCharge: P(addCharge), setChargeBillable: P(setChargeBillable), voidCharge: P(voidCharge), reimburseCharges: P(reimburseCharges), addVehicleCharge: P(addVehicleCharge),
