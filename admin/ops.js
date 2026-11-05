@@ -1005,7 +1005,9 @@
         { label: 'To', render: n => el('span', null, n.name || '', el('span', { class: 'table__sub' }, (AUDIENCE_ONE[audienceOf(n)] || audienceOf(n)) + (n.to && n.to !== 'operations' ? ' · ' : ''), n.to && n.to !== 'operations' ? el('span', { class: 'mono' }, phone.format(n.to)) : null)) },
         { label: 'Channel', render: n => chans[n.channel] || n.channel },
         { label: 'Message', render: n => el('span', null, el('strong', null, n.title), el('span', { class: 'table__sub wrap-anywhere' }, n.message)) },
-        { label: 'Status', render: n => badge(n.status === 'sent' ? 'ok' : 'warn', n.status === 'sent' ? 'Sent' : n.status) },
+        // Customer emails on the live service (05/11/2026): queued until api/store.js sends them, then sent or failed with the reason.
+        { label: 'Status', render: n => { const st = { sent: ['ok', 'Sent'], queued: ['warn', 'Waiting'], sending: ['warn', 'Sending'], failed: ['danger', 'Not sent'], skipped: ['neutral', 'Skipped'] }[n.status] || ['warn', n.status];
+          return el('span', { title: n.error || '' }, badge(st[0], st[1]), n.status === 'failed' && n.error ? el('span', { class: 'table__sub wrap-anywhere' }, n.error) : null); } },
       ];
       const pages = Math.max(1, Math.ceil(list.length / PAGE));
       body.replaceChildren(
