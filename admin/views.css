@@ -164,3 +164,10 @@ body.page-admin .dialog--wide .dialog__actions { position: sticky; bottom: 0; z-
 /* Printable invoice on phones: stacked cells read right-aligned; a fee line has no rate, so its empty Rate row is not shown. */
 @media screen and (max-width: 720px) { body.page-invoice .table--stack td > span { text-align: right; } body.page-invoice .table--stack td.invoice-cell--empty { display: none; } }
 @media print { body.page-invoice .table--stack td.mono, body.page-invoice .table--stack td.num, body.page-invoice .table--stack td:first-child { white-space: nowrap; } }
+
+/* r10 views: customers database filters, jetties and post editor, customer email toggles (client, 05/11/2026) */
+body.page-admin .customers-filters { margin-bottom: 16px; }
+body.page-admin .places-group + .places-group { padding-top: 16px; border-top: 1px solid var(--border); }
+body.page-admin .places-group__title { font-size: 15px; font-weight: 600; margin: 0; }
+body.page-admin .place-row .grid-2 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+@media (max-width: 640px) { body.page-admin .place-row .grid-2 { grid-template-columns: 1fr; } }

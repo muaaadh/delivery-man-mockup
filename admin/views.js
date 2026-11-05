@@ -561,37 +561,94 @@
   })();
 
   // ==== #/customers ============================================================================================================
+  // The customer database (client, 05/11/2026): general customers and business customers on two tabs, a search over name, phone and
+  // email, and an export of the tab as CSV. ?tab=business&q=… keeps both in the address (setQuery fires no hashchange: render here).
   MDM.admin.views.customers = (function () {
-    let ctx = null, root = null, body = null;
-    async function mount(host) {
-      ctx = context(); root = host;
+    let ctx = null, root = null, body = null, tabs = null, search = null, tab = 'general', q = '', enterNext = false, rows = { general: [], business: [] };
+    const ACCOUNT_STATUS = { approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } };
+    function readQuery(params) { const x = queryOf(params); tab = x.get('tab') === 'business' ? 'business' : 'general'; q = x.get('q') || ''; }
+    async function mount(host, params) {
+      ctx = context(); root = host; readQuery(params);
       body = el('div', null, el('div', { class: 'skeleton', style: 'height: 96px' }));
-      root.replaceChildren(pageHead('Customers'), card(null, body));
-      ctx.sub('customers', () => ctx.schedule(render));
-      ctx.sub('orders', () => ctx.schedule(render));
+      tabs = el('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Customers' }, tabButton('general', 'General customers'), tabButton('business', 'Business customers'));
+      search = el('input', { class: 'input', type: 'search', placeholder: 'Name, phone or email', 'aria-label': 'Search customers', autocomplete: 'off', value: q, 'data-testid': 'customers-search' });
+      let timer = null;
+      search.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { q = search.value.trim(); setQuery({ q: q || null }); ctx.schedule(render); }, 150); });
+      const exp = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'customers-export', on: { click: exportTab } }, icon('download'), 'Export');
+      root.replaceChildren(pageHead('Customers', null, [exp]), tabs, el('div', { class: 'filters customers-filters' }, search), card(null, body));
+      ['customers', 'orders', 'business_accounts'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
       ctx.sub('*', m => { if (m && m.op === 'reset') ctx.schedule(render); });
       await render();
     }
-    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; body = null; }
+    async function update(params) { readQuery(params); if (search && search.value !== q) search.value = q; markTabs(); await render(); }
+    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; body = null; tabs = null; search = null; }
+    function tabButton(key, label) {
+      return el('button', { type: 'button', class: 'tab', role: 'tab', id: 'customers-tab-' + key, 'aria-selected': tab === key ? 'true' : 'false', 'aria-controls': 'customers-panel', 'data-testid': 'customers-tab-' + key,
+        on: { click: () => { if (tab === key) return; tab = key; enterNext = true; setQuery({ tab: key === 'general' ? null : key }); markTabs(); ctx.schedule(render); } } },
+        label, el('span', { class: 'business-tab__count', 'data-tab-count': key }));
+    }
+    function markTabs() { if (tabs) tabs.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.id === 'customers-tab-' + tab ? 'true' : 'false')); }
+    const lastFirst = (a, b) => (b.last || '') < (a.last || '') ? -1 : (b.last || '') > (a.last || '') ? 1 : a.name.localeCompare(b.name);
+    const matches = (r, needle) => {
+      if (!needle) return true;
+      const n = needle.toLowerCase(), digits = needle.replace(/\D/g, '');
+      return [r.name, r.contact, r.email].some(v => String(v || '').toLowerCase().indexOf(n) >= 0) || (digits.length >= 3 && String(r.phone || '').replace(/\D/g, '').indexOf(digits) >= 0);
+    };
     async function render() {
-      const [customers, orders] = await Promise.all([MDM.store.list('customers'), MDM.store.list('orders')]);
+      const [customers, orders, accounts] = await Promise.all([MDM.store.list('customers'), MDM.store.list('orders'), MDM.store.list('business_accounts')]);
       if (!ctx || !ctx.alive) return;
-      if (!customers.length) { body.replaceChildren(empty('No customers yet.', 'They show here after a first order.')); return; }
-      const stats = {};
-      orders.forEach(o => { if (o.status === 'draft') return; const s = stats[o.customerId] || (stats[o.customerId] = { count: 0, last: null, unpaid: 0 }); s.count += 1; if (!s.last || o.createdAt > s.last) s.last = o.createdAt; if (o.payment && (o.payment.status === 'requested' || o.payment.status === 'received')) s.unpaid += o.totals.total; });
-      const rows = customers.map(c => { const s = stats[c.id] || { count: c.orderCount || 0, last: c.lastOrderAt || null, unpaid: 0 }; return { c, count: s.count, last: s.last || c.lastOrderAt || null, unpaid: s.unpaid || 0 }; })
-        .sort((a, b) => (b.last || '') < (a.last || '') ? -1 : (b.last || '') > (a.last || '') ? 1 : a.c.name.localeCompare(b.c.name));
+      const stats = {}, biz = {};
+      orders.forEach(o => {
+        if (o.status === 'draft') return;
+        const s = stats[o.customerId] || (stats[o.customerId] = { count: 0, last: null, unpaid: 0 }); s.count += 1; if (!s.last || o.createdAt > s.last) s.last = o.createdAt; if (o.payment && (o.payment.status === 'requested' || o.payment.status === 'received')) s.unpaid += o.totals.total;
+        if (!o.accountId) return;
+        const b = biz[o.accountId] || (biz[o.accountId] = { count: 0, packages: 0, last: null }); b.count += 1; b.packages += (o.packages || []).length; if (!b.last || o.createdAt > b.last) b.last = o.createdAt;
+      });
+      rows.general = customers.map(c => { const s = stats[c.id] || { count: c.orderCount || 0, last: c.lastOrderAt || null, unpaid: 0 }; return { c, name: c.name || '', phone: c.phone || '', email: c.email || '', count: s.count, last: s.last || c.lastOrderAt || null, unpaid: s.unpaid || 0 }; }).sort(lastFirst);
+      rows.business = accounts.map(a => { const b = biz[a.id] || { count: 0, packages: 0, last: null }; return { a, name: a.name || '', contact: a.contactName || '', phone: a.phone || '', email: a.email || '', zone: a.zone || '', count: b.count, packages: b.packages, last: b.last, status: a.status || '' }; }).sort(lastFirst);
+      ['general', 'business'].forEach(k => { const c = tabs.querySelector('[data-tab-count="' + k + '"]'); if (c) c.textContent = rows[k].length ? String(rows[k].length) : ''; });
+      body.id = 'customers-panel'; body.setAttribute('role', 'tabpanel'); body.setAttribute('aria-labelledby', 'customers-tab-' + tab);
+      const shown = rows[tab].filter(r => matches(r, q));
+      if (!rows[tab].length) fill(body, tab === 'general' ? empty('No customers yet.', 'They show here after a first order.') : empty('No business customers yet.', 'Approve a request or open an account under Business.'));
+      else if (!shown.length) fill(body, empty('No ' + (tab === 'general' ? 'customer' : 'business') + ' matches "' + q + '".', 'Search by name, phone or email.'));
+      else fill(body, tab === 'general' ? generalTable(shown) : businessTable(shown));
+      if (enterNext) { enterNext = false; if (MDM.motion) MDM.motion.enter(body); }
+    }
+    const emailCell = v => v ? el('a', { class: 'wrap-anywhere', href: 'mailto:' + v }, v) : el('span', { class: 'muted' }, 'None');
+    function generalTable(list) {
       const target = c => '#/orders?customer=' + encodeURIComponent(c.id);
       const cols = [
         { label: 'Name', primary: true, render: r => el('a', { href: target(r.c), on: { click: e => { e.preventDefault(); navigate(target(r.c)); } } }, r.c.name || phone.format(r.c.phone)) },
         { label: 'Phone', nowrap: true, render: r => telLink(r.c.phone) },
+        { label: 'Email', render: r => emailCell(r.email) },
         { label: 'Orders', num: true, render: r => String(r.count) },
         { label: 'Last order', nowrap: true, render: r => r.last ? fmtDate(r.last) : 'No orders yet' },
         { label: 'Unpaid', num: true, render: r => r.unpaid ? money(r.unpaid) : '' },
       ];
-      body.replaceChildren(table(cols, rows.map(r => ({ data: r, attrs: { class: 'is-clickable', 'data-testid': 'customers-row', 'data-customer-id': r.c.id, on: { click: e => { if (e.target.closest('a')) return; navigate(target(r.c)); } } } })), { testid: 'customers-table' }));
+      return table(cols, list.map(r => ({ data: r, attrs: { class: 'is-clickable', 'data-testid': 'customers-row', 'data-customer-id': r.c.id, on: { click: e => { if (e.target.closest('a')) return; navigate(target(r.c)); } } } })), { testid: 'customers-table' });
     }
-    return { title: 'Customers', mount, unmount };
+    function businessTable(list) {
+      const target = a => '#/business/' + encodeURIComponent(a.id);
+      const cols = [
+        { label: 'Business', primary: true, render: r => el('a', { href: target(r.a), on: { click: e => { e.preventDefault(); navigate(target(r.a)); } } }, r.name) },
+        { label: 'Contact', nowrap: true, render: r => el('span', null, r.contact, el('span', { class: 'table__sub' }, telLink(r.phone))) },
+        { label: 'Email', render: r => emailCell(r.email) },
+        { label: 'Area', render: r => r.zone ? MDM.geo.zoneLabel(r.zone) : '' },
+        { label: 'Orders', num: true, render: r => el('span', null, String(r.count), el('span', { class: 'table__sub' }, plural(r.packages, 'package'))) },
+        { label: 'Last order', nowrap: true, render: r => r.last ? fmtDate(r.last) : 'No orders yet' },
+        { label: 'Status', primary: true, render: r => badge(ACCOUNT_STATUS, r.status) },
+      ];
+      return table(cols, list.map(r => ({ data: r, attrs: { class: 'is-clickable', 'data-testid': 'customers-biz-row', 'data-account-id': r.a.id, on: { click: e => { if (e.target.closest('a')) return; navigate(target(r.a)); } } } })), { testid: 'customers-biz-table' });
+    }
+    // The tab as it is filtered, every column, for a spreadsheet.
+    function exportTab() {
+      const day = MDM.localDayKey(new Date()), list = rows[tab].filter(r => matches(r, q));
+      const when = v => v ? MDM.localDayKey(v) : '';
+      if (tab === 'general') MDM.admin.fmt.downloadCsv([['Name', 'Phone', 'Email', 'Orders', 'Last order', 'Unpaid MVR']].concat(list.map(r => [r.name, phone.format(r.phone), r.email, r.count, when(r.last), r.unpaid])), 'mdm-customers-' + day + '.csv');
+      else MDM.admin.fmt.downloadCsv([['Business', 'Contact', 'Phone', 'Email', 'Area', 'Orders', 'Packages', 'Last order', 'Status']].concat(list.map(r => [r.name, r.contact, phone.format(r.phone), r.email, r.zone ? MDM.geo.zoneLabel(r.zone) : '', r.count, r.packages, when(r.last), (ACCOUNT_STATUS[r.status] || {}).label || r.status])), 'mdm-business-customers-' + day + '.csv');
+      toast(plural(list.length, tab === 'general' ? 'customer' : 'business customer') + ' exported');
+    }
+    return { title: 'Customers', mount, update, unmount };
   })();
 
   // ==== #/business (tabs Requests | Accounts) and #/business/:accountId ============================================================
@@ -984,10 +1041,10 @@
 
   // ==== #/rates ================================================================================================================
   MDM.admin.views.rates = (function () {
-    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [], slot = null, bankCount = 4, courierList = null, courierRows = [];
+    let ctx = null, root = null, form = null, dirty = false, tierList = null, tierRows = [], accounts = [], slot = null, bankCount = 4, courierList = null, courierRows = [], places = null;
     const BANK_ROWS = 4;
     const SECTIONS = [{ id: 'rates-sizes', label: 'Package rates' }, { id: 'rates-fees', label: 'Fees' }, { id: 'rates-tiers', label: 'Business sizes' }, { id: 'rates-rules', label: 'Rules' },
-      { id: 'rates-size-guide', label: 'Size guide' }, { id: 'rates-ops', label: 'Operations' }, { id: 'rates-couriers', label: 'Couriers' }, { id: 'rates-banks', label: 'Bank accounts' }, { id: 'rates-terms', label: 'Terms and invoicing' }];
+      { id: 'rates-size-guide', label: 'Size guide' }, { id: 'rates-ops', label: 'Operations' }, { id: 'rates-couriers', label: 'Couriers' }, { id: 'rates-places', label: 'Jetties and post' }, { id: 'rates-banks', label: 'Bank accounts' }, { id: 'rates-terms', label: 'Terms and invoicing' }];
     async function mount(host) {
       ctx = context(); root = host; dirty = false;
       slot = el('div', { class: 'settings-main' }, el('div', { class: 'skeleton', style: 'height: 96px' }));
@@ -997,7 +1054,7 @@
       ctx.sub('*', m => { if (m && m.op === 'reset') { dirty = false; ctx.schedule(render); } });
       await render();
     }
-    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; form = null; tierList = null; tierRows = []; courierList = null; courierRows = []; slot = null; }
+    function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; form = null; tierList = null; tierRows = []; courierList = null; courierRows = []; places = null; slot = null; }
     const grid = (s) => {
       const sizes = s.rates.sizes;
       const cell = (size, side) => numInput('sizes.' + size + '.' + side, sizes[size][side], { 'aria-label': MDM.pricing.sizeLabel(size) + ', ' + (side === 'same' ? 'within one island' : 'crossing the bridge'), 'data-testid': 'rates-size-' + size + '-' + side });
@@ -1099,6 +1156,88 @@
       });
       return bad ? { bad } : { couriers: out };
     }
+    // Jetties and post (client, 05/11/2026: the office keeps the postal collection addresses and the jetties up to date). Three lists of
+    // { value, label, zone } and an address per postal carrier, saved as settings.ops.jetties, .pikpost, .postOffices and
+    // .carrierAddresses; MDM.applyPlaces (store.js) puts them on every page. A list left as built in is saved empty, so it keeps
+    // following the built-in one; "Not sure" and the Maldivian Cargo counter are not in the list and always stay.
+    const PLACE_LISTS = [
+      { key: 'jetties', title: 'Jetties and harbours', item: 'jetty', prefix: 'jetty', placeholder: 'Malé North Harbour' },
+      { key: 'pikpost', title: 'Pikpost lockers', item: 'locker', prefix: 'pik', placeholder: 'Velaanaage' },
+      { key: 'postOffices', title: 'Post offices', item: 'post office', prefix: 'post', placeholder: 'Post Office, 7th floor (Malé)' }];
+    const placeKey = p => ({ jetties: 'jetties', pikpost: 'pikpost', postOffices: 'post' }[p]);
+    const slim = list => list.map(x => ({ value: x.value, label: x.label, zone: x.zone || 'male' }));
+    // The built-in jetties: geo.js keeps them to itself, so the list is put back for a moment and the saved one applied again.
+    function builtInPlaces(s) {
+      MDM.geo.setJetties(null);
+      const jetties = slim(MDM.geo.jetties().filter(j => !j.unsure && !j.cargo));
+      MDM.applyPlaces(s);
+      return { jetties, pikpost: slim(MDM.DEFAULT_PIKPOST), postOffices: slim(MDM.DEFAULT_POST_OFFICES) };
+    }
+    function placeRow(list, x) {
+      const id = 'place-' + (++fieldSeq);
+      const zones = MDM.geo.zoneOptions().filter(z => z.value !== 'airport' && z.value !== 'other');
+      const row = { value: x.value || null, name: input('placeName', x.label, { id: id + '-name', 'data-testid': 'place-name', placeholder: list.placeholder, maxlength: '80' }),
+        zone: select('placeZone', zones.some(z => z.value === x.zone) ? x.zone : 'male', zones, { id: id + '-zone', 'data-testid': 'place-zone' }) };
+      row.el = el('div', { class: 'courier-row place-row', 'data-testid': 'places-row', 'data-value': row.value || 'new' },
+        el('div', { class: 'grid-2' }, field(list.item.charAt(0).toUpperCase() + list.item.slice(1), row.name), field('Area', row.zone)),
+        el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'places-remove', on: { click: () => { places.rows[list.key] = places.rows[list.key].filter(r => r !== row); dirty = true; drawPlaces(list.key); } } }, 'Remove', el('span', { class: 'sr-only' }, ' ' + list.item)));
+      return row;
+    }
+    function drawPlaces(key) { places.lists[key].replaceChildren(...places.rows[key].map(r => r.el)); }
+    function addPlace(list) {
+      if (places.rows[list.key].length >= MDM.MAX_PLACES) { toast('Up to ' + MDM.MAX_PLACES + ' in a list', 'warn'); return; }
+      places.rows[list.key].push(placeRow(list, { label: '', zone: 'male' })); dirty = true; drawPlaces(list.key);
+      places.rows[list.key][places.rows[list.key].length - 1].name.focus();
+    }
+    function resetPlaces(list) { places.rows[list.key] = places.builtIn[list.key].map(x => placeRow(list, x)); dirty = true; drawPlaces(list.key); toast(list.title + ': built-in list back, save to keep it'); }
+    function placesBlock(s) {
+      places = { builtIn: builtInPlaces(s), rows: {}, lists: {}, carriers: {} };
+      const current = { jetties: slim(MDM.geo.jetties().filter(j => !j.unsure && !j.cargo)), pikpost: slim(MDM.PIKPOST_LOCATIONS), postOffices: slim(MDM.POST_OFFICES) };
+      const addr = ((s.ops || {}).carrierAddresses) || {};
+      const lists = PLACE_LISTS.map(list => {
+        places.rows[list.key] = current[list.key].map(x => placeRow(list, x));
+        places.lists[list.key] = el('div', { class: 'courier-list', 'data-testid': 'places-' + placeKey(list.key) });
+        return el('div', { class: 'stack-3 places-group' }, el('h3', { class: 'places-group__title' }, list.title),
+          places.lists[list.key],
+          el('div', { class: 'row row--wrap' },
+            el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'places-add-' + placeKey(list.key), on: { click: () => addPlace(list) } }, icon('plus'), 'Add ' + list.item),
+            el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'places-reset-' + placeKey(list.key), on: { click: () => resetPlaces(list) } }, 'Reset to the built-in list')));
+      });
+      // Where the driver collects from each postal carrier; the couriers above keep their own office addresses.
+      const carriers = MDM.CARRIERS.filter(c => c.value !== 'courier').map(c => {
+        places.carriers[c.value] = input('carrier.' + c.value, addr[c.value] || '', { 'data-testid': 'places-carrier-' + c.value, placeholder: MDM.DEFAULT_CARRIER_ADDRESSES[c.value] || '', maxlength: '120' });
+        return field(c.label, places.carriers[c.value], { optional: true });
+      });
+      return lists.concat([el('div', { class: 'stack-3 places-group', 'data-testid': 'places-carriers' }, el('h3', { class: 'places-group__title' }, 'Postal collection addresses'),
+        el('p', { class: 'form-caption' }, 'Empty: the address shown in grey.'), el('div', { class: 'grid-2' }, carriers))]);
+    }
+    // → { ops: { jetties, pikpost, postOffices, carrierAddresses } } or { bad: the first field to fix }.
+    function readPlaces() {
+      let bad = null; const ops = { carrierAddresses: {} };
+      const fixed = new Set(['unsure', 'maldivian_cargo']);
+      PLACE_LISTS.forEach(list => {
+        const used = new Set(), keys = new Set(places.rows[list.key].map(r => r.value).filter(Boolean)), out = [];
+        places.rows[list.key].forEach(r => {
+          const label = r.name.value.trim();
+          MDM.ui.setError(r.name.closest('.field'), null);
+          if (!label) { if (r.value) { MDM.ui.setError(r.name.closest('.field'), 'Enter a name or remove it'); bad = bad || r.name; } return; }
+          if (used.has(label.toLowerCase())) { MDM.ui.setError(r.name.closest('.field'), 'Listed already'); bad = bad || r.name; return; }
+          used.add(label.toLowerCase());
+          let value = r.value;
+          if (!value) {
+            const base = list.prefix + '_' + ((label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'place').slice(0, 24));
+            value = base; let n = 2; while (keys.has(value) || fixed.has(value)) value = base + '_' + (n++);
+            keys.add(value);
+          }
+          out.push({ value, label, zone: r.zone.value || 'male' });
+        });
+        // Still the built-in list: saved empty, so it follows the built-in one.
+        const same = out.length === places.builtIn[list.key].length && out.every((x, i) => { const b = places.builtIn[list.key][i]; return b.value === x.value && b.label === x.label && b.zone === x.zone; });
+        ops[list.key] = same ? [] : out;
+      });
+      Object.keys(places.carriers).forEach(k => { const v = places.carriers[k].value.trim(); ops.carrierAddresses[k] = v === MDM.DEFAULT_CARRIER_ADDRESSES[k] ? '' : v; });
+      return bad ? { bad } : { ops };
+    }
     async function render() {
       const [s, accs] = await Promise.all([MDM.store.settings(), MDM.store.list('business_accounts')]);
       if (!ctx || !ctx.alive) return;
@@ -1145,6 +1284,7 @@
         formSection('rates-couriers', 'Couriers', 'Listed one by one under Postal & courier collection, with Other courier last. DHL and the post are listed already.', [
           courierList,
           el('div', null, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'rates-courier-add', on: { click: addCourier } }, icon('plus'), 'Add courier'))]),
+        formSection('rates-places', 'Jetties and post', 'What customers choose on the request form, and where drivers collect post. Orders keep the address they were placed with.', placesBlock(s)),
         // Four accounts (24/10/2026): BML and MIB, each in MVR and USD. The currency is part of the name ("BML USD") so every page shows it.
         formSection('rates-banks', 'Bank accounts', 'On checkout and invoices, with the currency in the name.', banks.map((b, i) => el('div', { class: 'grid-3', 'data-testid': 'rates-bank' },
           field('Account ' + (i + 1), input('banks.' + i + '.name', b.name, { placeholder: i % 2 ? 'BML USD' : 'BML MVR' })), field('Account name', input('banks.' + i + '.accountName', b.accountName)),
@@ -1154,7 +1294,7 @@
           el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides GST on invoices' }))]),
         el('div', { class: 'form-actions save-bar' }, el('span', { class: 'form-caption' }, 'Applies to new requests and quotes.'), el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'rates-save' }, 'Save rates')));
       slot.replaceChildren(form);
-      drawTiers(); drawCouriers(); ranges.update();
+      drawTiers(); drawCouriers(); PLACE_LISTS.forEach(l => drawPlaces(l.key)); ranges.update();
       dirty = false;
     }
     const intRule = v => /^\d+$/.test(v) ? null : 'Enter a whole number, 0 or more';
@@ -1176,8 +1316,8 @@
       }
       rules.vehicle = v => v === '' ? null : intRule(v);
       const r = MDM.ui.validate(form, rules);
-      const t = readTiers(), k = readCouriers();
-      if (!r.ok || t.bad || k.bad) { if (r.ok && (t.bad || k.bad)) (t.bad || k.bad).focus(); else MDM.ui.focusFirstInvalid(form); toast('Check the highlighted fields', 'warn'); return; }
+      const t = readTiers(), k = readCouriers(), pl = readPlaces();
+      if (!r.ok || t.bad || k.bad || pl.bad) { if (r.ok && (t.bad || k.bad || pl.bad)) (t.bad || k.bad || pl.bad).focus(); else MDM.ui.focusFirstInvalid(form); toast('Check the highlighted fields', 'warn'); return; }
       const v = r.values, n = k => Number(v[k]), list = k => v[k] ? v[k].split(',').map(x => x.trim()).filter(Boolean) : [];
       const cur = await MDM.store.settings();
       const patch = {
@@ -1188,7 +1328,8 @@
         sizeGuide: { bag: v['guide.bag'], box: v['guide.box'], xl: v['guide.xl'] },
         ops: { hours: { open: v['hours.open'], close: v['hours.close'] }, days: v.days, asapText: v.asapText, reviewText: v.reviewText, businessReplyText: v.businessReplyText,
           slotStart: v.slotStart, slotEnd: v.slotEnd, slotMinutes: n('slotMinutes'), speedCityKmh: n('speedCityKmh'), speedHighwayKmh: n('speedHighwayKmh'), peakBufferMin: n('peakBufferMin'),
-          peakWindows: list('peakWindows'), closedWindows: list('closedWindows'), couriers: k.couriers },
+          peakWindows: list('peakWindows'), closedWindows: list('closedWindows'), couriers: k.couriers,
+          jetties: pl.ops.jetties, pikpost: pl.ops.pikpost, postOffices: pl.ops.postOffices, carrierAddresses: pl.ops.carrierAddresses },
         banks: Array.from({ length: bankCount }, (x, i) => i).filter(i => v['banks.' + i + '.name']).map(i => ({ id: (cur.banks && cur.banks[i] && cur.banks[i].id) || ('bank' + (i + 1)), name: v['banks.' + i + '.name'], accountName: v['banks.' + i + '.accountName'], accountNo: v['banks.' + i + '.accountNo'] })),
         terms: v.terms, invoiceDueDays: n('invoiceDueDays'), gstPercent: n('gstPercent'),
       };
@@ -1240,6 +1381,10 @@
         field('Send by', select('notifChannel', notif.channel || 'customer', [{ value: 'customer', label: 'What each customer chose' }, { value: 'sms', label: 'SMS for everyone' }, { value: 'whatsapp', label: 'WhatsApp for everyone' }, { value: 'viber', label: 'Viber for everyone' }, { value: 'email', label: 'Email for everyone' }])),
         el('div', { class: 'stack-2' }, el('span', { class: 'field__label' }, 'Channels connected'), el('div', { class: 'checkbox-row' }, [['sms', 'SMS'], ['whatsapp', 'WhatsApp'], ['viber', 'Viber'], ['email', 'Email']].map(c => checkbox('ch_' + c[0], chans[c[0]] !== false, c[1])))),
         field('Sender name', input('senderName', notif.senderName || 'MrDelivery'), { hint: 'The SMS sender name' }),
+        // Emails to customers (client, 05/11/2026), each update on or off; not set is on (store.js notifyEmail).
+        el('div', { class: 'stack-2', role: 'group', 'aria-labelledby': 'notif-emails-label', 'data-testid': 'notif-emails' }, el('span', { class: 'field__label', id: 'notif-emails-label' }, 'Emails to customers'),
+          el('div', { class: 'checkbox-row' }, (MDM.EMAIL_UPDATES || []).map(u => { const c = checkbox('email_' + u.value, (notif.emails || {})[u.value] !== false, u.label); c.querySelector('input').setAttribute('data-testid', 'notif-email-' + u.value); return c; })),
+          el('p', { class: 'field__hint' }, 'Sent to the email on the order, from noreply@mrdeliveryman.com. Bulk packages send none.')),
         saveBtn('settings-save-notify', 'Save notification settings'));
       const hrForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-hr-form', on: { submit: saveHr, input: () => { dirty = true; } } },
         el('div', { class: 'grid-2' }, field('Shift starts', input('shiftStart', hr.shiftStart || '08:00', { inputmode: 'numeric', placeholder: '08:00' })), field('Shift ends', input('shiftEnd', hr.shiftEnd || '17:00', { inputmode: 'numeric', placeholder: '17:00' }))),
@@ -1310,7 +1455,8 @@
       e.preventDefault();
       const form = e.currentTarget;
       const channels = {}; ['sms', 'whatsapp', 'viber', 'email'].forEach(k => { channels[k] = val(form, 'ch_' + k); });
-      await saveSection({ notifications: { enabled: val(form, 'notifEnabled'), channel: val(form, 'notifChannel'), channels, senderName: val(form, 'senderName') || 'MrDelivery' } }, 'Notification settings saved');
+      const emails = {}; (MDM.EMAIL_UPDATES || []).forEach(u => { emails[u.value] = val(form, 'email_' + u.value); });
+      await saveSection({ notifications: { enabled: val(form, 'notifEnabled'), channel: val(form, 'notifChannel'), channels, emails, senderName: val(form, 'senderName') || 'MrDelivery' } }, 'Notification settings saved');
     }
     async function saveHr(e) {
       e.preventDefault();
