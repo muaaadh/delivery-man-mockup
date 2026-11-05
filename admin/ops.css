@@ -177,3 +177,12 @@ body.page-admin .table td.table__primary .bulk-status__note, body.page-admin .ta
   body.page-admin :is(.dialog, .drawer) :is(.input, .select) { height: 44px; }
 }
 body.page-admin .filters > .range-warning { flex: 1 1 100%; margin-top: 4px; }
+
+/* r10 reports: Sales and expenses kinds (client, 05/11/2026) */
+body.page-admin .report-group__desc { margin: -8px 0 16px; }
+body.page-admin .report-kinds { display: grid; gap: 10px; margin-bottom: 20px; }
+body.page-admin .report-kinds__row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+body.page-admin .report-kinds__label { min-width: 72px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+body.page-admin .report-group tr.is-left-out td { color: var(--text-3); }
+body.page-admin .report-group tr.is-total td { font-weight: 600; }
+body.page-admin .report-group > .kpi-row { margin-bottom: 28px; }

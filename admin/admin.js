@@ -10,7 +10,7 @@
   const TITLE = 'Mr. Delivery Man';
   const ONLINE_MS = 10 * 60 * 1000;          // a driver counts as online when their last position is this recent
   const STALE_MS = 60 * 1000;
-  const ROLE_LABEL = { admin: 'Admin', operator: 'Operator', office: 'Office staff' };
+  const ROLE_LABEL = { admin: 'Admin', operator: 'Operator', office: 'Office staff', cs: 'Customer service' };
   const views = {};
   const mainEl = document.getElementById('main');
   const state = { session: null, current: null, name: null, host: null, id: null, routing: null, queued: false, loginUser: '', countsUnsub: null, countsTimer: null };

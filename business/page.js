@@ -1293,6 +1293,7 @@
     const codTotal = kids.reduce((n, o) => n + (codStatus(o) && codStatus(o) !== 'not_collected' ? o.cod.amount : 0), 0);
     const codPending = kids.reduce((n, o) => n + (codStatus(o) === 'pending' ? o.cod.amount : 0), 0);
     const live = kids.filter(o => o.status !== 'cancelled');
+    const open = !kids.length || kids.some(o => DONE.indexOf(o.status) < 0);
     const counts = {}; kids.forEach(o => { const k = (o.delivery || {}).method || 'home'; counts[k] = (counts[k] || 0) + 1; });
     const parts = [p.st.delivered + ' delivered'];
     if (p.st.out) parts.push(p.st.out + ' out for delivery'); if (p.st.collected) parts.push(p.st.collected + ' at the hub'); if (p.st.cancelled) parts.push(p.st.cancelled + ' cancelled'); if (p.st.failed) parts.push(p.st.failed + ' failed');
@@ -1309,9 +1310,59 @@
             MDM.ui.rateRow('Cash on delivery', money(codTotal), { mono: true, sub: 'Excluding cancelled orders', valueSub: money(codPending) + ' still to collect' }),
             MDM.ui.rateRow('Submitted', fmtDate(b.createdAt), { valueSub: b.source === 'excel' ? 'Excel import' : b.source === 'csv' ? 'Spreadsheet' : 'Typed in the portal' })),
           p.bar,
-          live.length ? el('div', { class: 'row row--wrap' }, el('a', { class: 'btn btn--secondary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-batch-print' }, html(MDM.icon('printer', 16)), 'Print ' + plural(live.length, 'label')),
-            live.length < kids.length ? el('span', { class: 'small muted' }, 'No labels for cancelled packages.') : null) : null)),
+          live.length || open ? el('div', { class: 'row row--wrap' },
+            open ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-bulk-add-package', on: { click: () => addBatchPackage(b) } }, html(MDM.icon('plus', 16)), 'Add a package') : null,
+            live.length ? el('a', { class: 'btn btn--secondary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-batch-print' }, html(MDM.icon('printer', 16)), 'Print ' + plural(live.length, 'label')) : null,
+            live.length && live.length < kids.length ? el('span', { class: 'small muted' }, 'No labels for cancelled packages.') : null) : null)),
       panelCard('Packages', null, kids.length ? ordersTable(kids, batchById, 'biz-batch-table') : empty('No packages', '')));
+  }
+
+  // Another package for a bulk order on its way (client, 05/11/2026: "keep an add another package"): one package card, the same as the
+  // bulk form's (MDM.bizKit.rowFields), in a dialog. It is collected with the rest of the bulk order (store.addToBatch).
+  function addBatchPackage(b) {
+    const acc = state.acc, tiers = tiersOf(acc), c = b.collection || {};
+    const row = K.blankRow(tiers);
+    const ctx = { tiers, allTiers: allTiers(), pickupZone: () => c.zone || 'male' };
+    let tried = false;
+    const grid = el('div', { class: 'bulk-item__grid' });
+    const rate = el('p', { class: 'small muted biz-add-rate', 'data-testid': 'biz-bulk-add-rate' });
+    const fail = failBox();
+    const showErrors = only => {
+      const errs = K.validateRow(row, ctx);
+      grid.querySelectorAll('[data-key]').forEach(x => { const k = x.dataset.key; if (only && only !== k) return; if (!tried && !x.closest('.field').classList.contains('is-invalid')) return; setError(x, errs[k] || null); });
+      return errs;
+    };
+    const rctx = Object.assign({}, ctx, {
+      onInput: (r, key) => { showErrors(key); rate.textContent = rowRateText(row, ctx); },
+      onChange: (r, key) => { if (key === 'method') draw(); else showErrors(key); rate.textContent = rowRateText(row, ctx); },
+    });
+    function draw() { grid.replaceChildren(...K.rowFields(row, rctx, 'biz-add-' + row.id)); rate.textContent = rowRateText(row, ctx); if (tried) showErrors(); }
+    draw();
+    const titleId = 'biz-add-title-' + row.id;
+    const ok = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-bulk-add-save' }, 'Add package');
+    const cancel = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-bulk-add-cancel', on: { click: () => dlg.close() } }, 'Cancel');
+    const form = el('form', { class: 'dialog__form', novalidate: true },
+      el('h2', { class: 'dialog__title', id: titleId }, 'Add a package to ' + b.code),
+      el('p', { class: 'dialog__message' }, 'We collect it with the rest of this bulk order, at your agreed rates.'),
+      rate, grid, fail,
+      el('div', { class: 'dialog__actions' }, cancel, ok));
+    const dlg = el('dialog', { class: 'dialog dialog--wide', 'aria-labelledby': titleId, 'data-testid': 'biz-bulk-add-dialog' }, form);
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); fail.hidden = true; tried = true;
+      const errs = showErrors();
+      if (Object.keys(errs).length) { const first = grid.querySelector('[aria-invalid="true"]'); if (first) first.focus(); return; }
+      MDM.ui.setLoading(ok, true);
+      try {
+        const saved = await MDM.store.addToBatch(b.id, [K.toBatchRow(row)], { by: 'business:' + acc.id });
+        dlg.close();
+        MDM.ui.toast('Package ' + (saved.orderIds || []).length + ' added to ' + b.code, 'ok');
+      } catch (err) { showFail(fail, 'Could not add the package', err.message || 'Please try again.'); }
+      finally { if (ok.isConnected) MDM.ui.setLoading(ok, false); }
+    });
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.appendChild(dlg);
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    const first = grid.querySelector('input, select'); if (first) first.focus();
   }
 
   // ---- Cash on delivery (§5.6) ----------------------------------------------------------------------------------------------------

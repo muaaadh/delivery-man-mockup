@@ -160,6 +160,30 @@
       const img = await MDM.ui.imageToJpeg(file, { maxEdge: 1000, quality: 0.8 });
       return (await MDM.store.insert('files', { kind: 'proof_collection', orderId: null, name: file.name || 'collection.jpg', type: img.type, size: img.size, dataUrl: img.dataUrl, at: new Date().toISOString() })).id;
     }
+    // Another package for this bulk order (client, 05/11/2026: "keep an add another package"): the fields of one line of the import,
+    // priced at the account's agreed rate; it waits for the collection with the others (store.addToBatch).
+    async function addPackage(b, acc, zones, settings) {
+      const tiers = MDM.pricing.accountTiers(acc, settings);
+      if (!tiers.length) { toast(acc.name + ' has no agreed sizes yet', 'warn'); return; }
+      const zoneOpts = zones.filter(z => z.active !== false && z.key !== 'airport' && !z.airport).map(z => ({ value: z.key, label: z.name }));
+      const v = await MDM.ui.dialog({ title: 'Add a package to ' + b.code, message: 'At ' + acc.name + "'s agreed rates: " + tiers.map(t => t.label + ' ' + money(t.rate)).join(', ') + '. It is collected with the rest of the bulk order.', okLabel: 'Add package',
+        fields: [
+          { name: 'name', label: 'Receiver', type: 'text', required: true },
+          { name: 'phone', label: 'Receiver number', type: 'tel', required: true, intl: true },
+          { name: 'method', label: 'Delivery', type: 'segmented', required: true, options: [{ value: 'home', label: 'Home delivery' }, { value: 'cargo', label: 'Maldivian Cargo' }], value: 'home' },
+          { name: 'address', label: 'Delivery address, or the island for Maldivian Cargo', type: 'text', required: true, placeholder: 'H. Blue Lagoon, 3rd floor' },
+          { name: 'zone', label: 'Zone (home delivery)', type: 'select', required: true, options: zoneOpts, value: (zoneOpts[0] || {}).value },
+          { name: 'tier', label: 'Size category', type: 'select', required: true, options: tiers.map(t => ({ value: t.value, label: t.label + ' · ' + money(t.rate) })), value: tiers[0].value },
+          { name: 'description', label: 'Description', type: 'text', placeholder: 'Grade 7 books' },
+          { name: 'reference', label: 'Reference', type: 'text', placeholder: 'KB-2301' },
+          { name: 'cod', label: 'Cash to collect (MVR)', type: 'number', min: 0, step: 1, hint: 'Empty for none' }] });
+      if (!v) return;
+      const row = { name: trim(v.name), phone: phone.normalize(v.phone) || trim(v.phone), address: trim(v.address), zone: v.method === 'cargo' ? 'male' : v.zone, tier: v.tier,
+        description: trim(v.description), reference: trim(v.reference), method: v.method, cod: Math.round(Number(v.cod) || 0) };
+      if (v.method === 'cargo') row.cargo = { counter: (MDM.geo.cargoCounter() || {}).label || 'Maldivian Cargo', island: row.address, consignee: row.name };
+      const saved = await MDM.store.addToBatch(b.id, [row], { by: by() });
+      toast('Package ' + (saved.orderIds || []).length + ' added to ' + b.code);
+    }
     // The driver who collects the bulk order from the business (client, 02/11/2026): it shows on their phone with a checklist.
     async function chooseCollector(b, drivers) {
       const options = drivers.slice().sort((a, x) => a.name.localeCompare(x.name)).map(d => ({ value: d.id, label: d.name + (d.status === 'offline' ? ' · offline' : '') }));
@@ -201,6 +225,7 @@
       const preferred = b.preferredTime || c.preferredTime || '';
       const actions = [
         el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?batch=' + encodeURIComponent(b.id)), target: '_blank', rel: 'noopener', 'data-testid': 'bulk-labels' }, icon('printer'), 'Print labels'),
+        acc && (!kids.length || kids.some(o => DONE.indexOf(o.status) < 0)) ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-add-package', on: { click: () => run(() => addPackage(b, acc, zones, settings)) } }, icon('plus'), 'Add a package') : null,
         kids.some(o => o.status === 'confirmed') ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-collector', on: { click: () => run(() => chooseCollector(b, drivers)) } }, b.collectorId ? 'Change collector' : 'Assign collector') : null,
         b.status === 'confirmed' ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-collected', on: { click: () => run(() => markCollected(b, kids, settings)) } }, 'Mark collected') : null,
         kids.some(o => DONE.indexOf(o.status) < 0 && o.driverId) ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-change-driver', on: { click: () => run(() => changeDriver(kids, drivers)) } }, 'Change driver') : null,
@@ -692,11 +717,27 @@
           smallBtn('Adjust', 'staff-offdays-adjust', () => adjustOffDays(s, b))),
           el('span', { class: 'table__sub offdays__sub' }, b.opening + ' opening, ' + b.earned + ' earned' + (b.adjust ? ', ' + (b.adjust > 0 ? '+' : '') + b.adjust + ' adjusted' : '') + ', ' + b.taken + ' taken')); } },
         { label: 'Status', primary: true, render: s => badge(s.status === 'active' ? 'ok' : s.status === 'on_leave' ? 'info' : 'neutral', { active: 'Active', on_leave: 'On leave', inactive: 'Inactive' }[s.status] || s.status) },
-        { label: 'Actions', actions: true, render: s => actionsRow(smallBtn('Edit', 'staff-edit', () => editStaff(s))) },
+        { label: 'Actions', actions: true, render: s => actionsRow(smallBtn('Edit', 'staff-edit', () => editStaff(s)), canSignIn(s) ? smallBtn('Sign-in', 'team-signin', () => giveSignIn(s)) : null) },
       ];
       return [el('div', { class: 'filters' }, el('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-testid': 'staff-add', on: { click: () => run(() => editStaff(null)) } }, icon('plus'), 'Add employee')),
         card(null, table(cols, c.staff.map(s => ({ data: s, attrs: { 'data-testid': 'staff-row', 'data-staff-id': s.id } })), { testid: 'staff-table' })),
         el('p', { class: 'muted small' }, 'Working on ' + WEEKDAYS[c.hr.weeklyOffDay != null ? Number(c.hr.weeklyOffDay) : 5] + ' earns one off day.')];
+    }
+    // An office sign-in for an employee (client, 05/11/2026: a separate login for customer service). Only on the live service, where
+    // MDM.remote.staffLogin sets the email and password of their sign-in; the demo's office sign-in is the username and "delivery".
+    function canSignIn(s) {
+      const me = MDM.shell.session();
+      return !!(MDM.remote && typeof MDM.remote.staffLogin === 'function') && !!me && me.role === 'admin' && MDM.OFFICE_ROLES.indexOf(s.role) >= 0 && s.status !== 'inactive';
+    }
+    async function giveSignIn(s) {
+      const v = await MDM.ui.dialog({ title: 'Sign-in for ' + s.name, message: label(MDM.ROLES, s.role) + ': they sign in to the office portal with this email and password.', okLabel: 'Save sign-in',
+        fields: [
+          { name: 'email', label: 'Sign-in email', type: 'email', required: true, value: s.email || '' },
+          { name: 'password', label: 'Password', type: 'text', required: true, hint: 'Give it to them; they can change it after signing in', validate: val => String(val || '').length < 8 ? 'Use at least 8 characters' : null }] });
+      if (!v) return;
+      const email = trim(v.email).toLowerCase();
+      await MDM.remote.staffLogin({ staffId: s.id, email, password: v.password });
+      toast('Sign-in ready for ' + s.name + ': ' + email);
     }
     async function adjustOffDays(s, b) {
       const v = await MDM.ui.dialog({ title: 'Off days for ' + s.name, message: offDayText(b) + '.', okLabel: 'Save off days',
@@ -742,7 +783,7 @@
 
   // ==== #/reports ==================================================================================================================
   MDM.admin.views.reports = (function () {
-    let ctx = null, root = null, body = null, range = null;
+    let ctx = null, root = null, body = null, range = null, off = new Set();
     const PRESETS = [{ value: 'today', label: 'Today' }, { value: '7d', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last', label: 'Last month' }];
     function preset(p) {
       const now = new Date(), y = now.getFullYear(), m = now.getMonth();
@@ -755,6 +796,7 @@
       ctx = context(); root = host;
       const q = queryOf(params);
       range = q.get('from') ? { from: q.get('from'), to: q.get('to') || dayKey(new Date()) } : preset('month');
+      off = new Set(String(q.get('off') || '').split(',').filter(Boolean));
       body = el('div', { class: 'stack-6' });
       root.replaceChildren(pageHead('Reports'), el('div', { class: 'report-range' }), body);
       ['orders', 'drivers', 'business_accounts'].forEach(c => ctx.sub(c, () => ctx.schedule(render)));
@@ -787,8 +829,19 @@
         kpi('Failed', failedIn.length, 'At least one attempt', 'r-failed'), kpi('Cancelled', cancelledIn.length, null, 'r-cancelled'),
         kpi('Revenue received', money(revenue), plural(paidIn.length, 'payment') + ' verified', 'r-revenue'), kpi('Invoiced', money(invoiced), 'To businesses', 'r-invoiced'),
         kpi('Pending payments', money(pendingAmt), plural(pending.length, 'order') + ', any date', 'r-pending'));
-      // By driver
-      const drvRows = drivers.map(d => [d.name, deliveredIn.filter(o => o.driverId === d.id).length, failedIn.filter(o => o.driverId === d.id).length, deliveredIn.filter(o => o.driverId === d.id).reduce((n, o) => n + (o.packages || []).length, 0), money(deliveredIn.filter(o => o.driverId === d.id).reduce((n, o) => n + o.totals.total, 0))]);
+      // By driver (client, 05/11/2026: collected, delivered, failed, packages): each step goes to the driver who did it (the event's
+      // 'driver:<id>', else the order's driver), so an order collected by one driver and delivered by another counts for both.
+      const drv = {}; const touchD = id => drv[id] || (drv[id] = { collected: new Set(), delivered: new Set(), failed: new Set() });
+      orders.forEach(o => (o.events || []).forEach(e => {
+        if (!inRange(e.at, range.from, range.to)) return;
+        const k = e.type === 'collected' || e.type === 'collected_partial' ? 'collected' : e.type === 'delivered' ? 'delivered' : e.type === 'failed' ? 'failed' : null;
+        if (!k || (k === 'delivered' && o.status !== 'delivered')) return;
+        const id = driverOfBy(e.by, o); if (id) touchD(id)[k].add(o);
+      }));
+      const pkgs = set => Array.from(set).reduce((n, o) => n + (o.packages || []).length, 0);
+      const drvRows = drivers.filter(d => drv[d.id]).map(d => ({ d, t: drv[d.id] })).sort((a, b) => b.t.delivered.size - a.t.delivered.size || b.t.collected.size - a.t.collected.size || a.d.name.localeCompare(b.d.name))
+        .map(({ d, t }) => [d.name, t.collected.size, t.delivered.size, t.failed.size, pkgs(t.collected), pkgs(t.delivered), money(Array.from(t.delivered).reduce((n, o) => n + o.totals.total, 0))]);
+      const sales = salesGroup(deliveredIn);
       // By business
       const bizRows = accounts.map(a => { const mine = created.filter(o => o.accountId === a.id); const del = deliveredIn.filter(o => o.accountId === a.id); return [a.name, mine.length, mine.reduce((n, o) => n + (o.packages || []).length, 0), del.length, money(del.reduce((n, o) => n + o.totals.total, 0))]; });
       // By request type
@@ -840,8 +893,9 @@
       // Two groups, each a grid of tables: the order tables first, then the money (naalu, charges, cash on delivery).
       const group = (id, title, ...blocks) => el('section', { class: 'report-group', 'aria-labelledby': id }, el('h2', { class: 'report-group__title', id }, title), el('div', { class: 'report-grid' }, blocks));
       body.replaceChildren(kpis,
+        sales,
         group('rep-orders', 'Orders',
-          reportTable('rep-drivers', 'By driver', ['Driver', 'Delivered', 'Failed', 'Packages', 'Value'], drvRows, 'drivers'),
+          reportTable('rep-drivers', 'By driver', ['Driver', 'Collected', 'Delivered', 'Failed', 'Packages collected', 'Packages delivered', 'Value'], drvRows, 'drivers', { wide: true, show: ['Driver', 'Collected', 'Delivered', 'Failed', 'Packages collected', 'Packages delivered', 'Value'] }),
           reportTable('rep-business', 'By business', ['Business', 'Orders', 'Packages', 'Delivered', 'Value'], bizRows, 'business'),
           reportTable('rep-types', 'By request type', ['Type', 'Orders', 'Delivered', 'Cancelled'], Object.values(types).sort((a, b) => b[1] - a[1]), 'types'),
           reportTable('rep-zones', 'By delivery zone', ['Zone', 'Orders', 'Delivered'], Object.values(zones).sort((a, b) => b[1] - a[1]), 'zones'),
@@ -854,6 +908,41 @@
           reportTable('rep-charge-list', 'Packing and other charges', ['Date', 'Order', 'Charge', 'Description', 'Recorded', 'Amount', 'Billed', 'Reimbursement'], chargeList, 'charge-list', { text: [1, 2, 3, 4, 6, 7], wide: true }),
           reportTable('rep-cod', 'Cash on delivery by business', ['Business', 'Collected', 'Handed to the office', 'Paid to the business', 'Outstanding now', 'Still to collect'], codRows, 'cod', { wide: true })));
     }
+    // Sales and expenses (client, 05/11/2026: "for gross sales calculations, possible to filter out?"): the orders delivered in the
+    // period, split by MDM.salesOf into the kinds of sales and of expenses. Each kind is a chip; a kind switched off is left out of the
+    // totals, the day and order lists (and of the URL, ?off=airport,naalu, so a reload keeps the choice).
+    function salesGroup(list) {
+      const kinds = MDM.SALES_KINDS.map(k => Object.assign({ side: 'sales' }, k)).concat(MDM.EXPENSE_KINDS.map(k => Object.assign({ side: 'expenses' }, k)));
+      const key = k => k.side + ':' + k.value;
+      const on = k => !off.has(key(k));
+      const lines = list.map(o => ({ o, at: F.deliveredAt(o), v: MDM.salesOf(o) }));
+      const sum = (k, l) => (l || lines).reduce((n, x) => n + (x.v[k.side][k.value] || 0), 0);
+      const sideTotal = (side, l) => kinds.filter(k => k.side === side && on(k)).reduce((n, k) => n + sum(k, l), 0);
+      const gross = sideTotal('sales'), spent = sideTotal('expenses');
+      const toggle = k => { if (off.has(key(k))) off.delete(key(k)); else off.add(key(k)); MDM.admin.setQuery({ off: Array.from(off).join(',') }); ctx.schedule(render); };
+      const chip = k => el('button', { type: 'button', class: 'chip', 'aria-pressed': on(k) ? 'true' : 'false', 'data-testid': 'report-kind-' + k.value, 'data-side': k.side, on: { click: () => toggle(k) } }, k.label);
+      const chips = el('div', { class: 'report-kinds', 'data-testid': 'report-kinds' },
+        el('div', { class: 'report-kinds__row', role: 'group', 'aria-label': 'Sales to count' }, el('span', { class: 'report-kinds__label' }, 'Sales'), kinds.filter(k => k.side === 'sales').map(chip)),
+        el('div', { class: 'report-kinds__row', role: 'group', 'aria-label': 'Expenses to count' }, el('span', { class: 'report-kinds__label' }, 'Expenses'), kinds.filter(k => k.side === 'expenses').map(chip)));
+      const kindRows = side => kinds.filter(k => k.side === side).map(k => [k.label, lines.filter(x => x.v[side][k.value]).length, money(sum(k)), on(k) ? 'Counted' : 'Left out'])
+        .concat([['Total counted', lines.filter(x => kinds.some(k => k.side === side && on(k) && x.v[side][k.value])).length, money(sideTotal(side)), '']]);
+      const kindClass = r => (r[3] === 'Left out' ? 'is-left-out' : r[0] === 'Total counted' ? 'is-total' : null);
+      const days = {};
+      lines.forEach(x => { const d = dayKey(x.at); const t = days[d] || (days[d] = [d, 0, 0]); t[1] += sideTotal('sales', [x]); t[2] += sideTotal('expenses', [x]); });
+      const dayRows = Object.keys(days).sort().reverse().map(d => [F.fmtDay(d), money(days[d][1]), money(days[d][2]), money(days[d][1] - days[d][2])]);
+      const orderRows = lines.slice().sort((a, b) => (a.at < b.at ? 1 : -1)).map(x => { const a = sideTotal('sales', [x]), b = sideTotal('expenses', [x]); return [F.fmtDay(dayKey(x.at)), x.o.code, F.typeLabel(x.o), money(a), money(b), money(a - b)]; });
+      return el('section', { class: 'report-group', 'aria-labelledby': 'rep-sales-h', 'data-testid': 'report-sales-group' },
+        el('h2', { class: 'report-group__title', id: 'rep-sales-h' }, 'Sales and expenses'),
+        el('p', { class: 'muted small report-group__desc' }, plural(list.length, 'order') + ' delivered in this period. Switch a kind off to leave it out of the totals.'),
+        chips,
+        el('div', { class: 'kpi-row kpi-row--fluid', 'data-testid': 'report-sales-kpis' },
+          kpi('Gross sales', money(gross), 'Sales counted', 'r-sales'), kpi('Expenses', money(spent), 'Paid out and bought', 'r-expenses'), kpi('Net', money(gross - spent), 'Sales minus expenses', 'r-net')),
+        el('div', { class: 'report-grid' },
+          reportTable('rep-sales-kinds', 'Sales', ['Sales', 'Orders', 'Amount', 'In the totals'], kindRows('sales'), 'sales', { text: [3], rowClass: kindClass }),
+          reportTable('rep-expense-kinds', 'Expenses', ['Expense', 'Orders', 'Amount', 'In the totals'], kindRows('expenses'), 'expenses', { text: [3], rowClass: kindClass }),
+          reportTable('rep-sales-days', 'By day', ['Date', 'Sales', 'Expenses', 'Net'], dayRows, 'sales-days'),
+          reportTable('rep-sales-orders', 'By order', ['Date', 'Order', 'Type', 'Sales', 'Expenses', 'Net'], orderRows, 'sales-orders', { text: [1, 2] })));
+    }
     function reportTable(id, title, head, rows, key, opts) {
       const text = (opts && opts.text) || [];
       const exp = el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'report-export-' + key, on: { click: () => { F.downloadCsv([head].concat(rows), 'mdm-report-' + key + '-' + range.from + '-' + range.to + '.csv'); toast(title + ' exported'); } } }, icon('download'), 'CSV');
@@ -861,7 +950,7 @@
       const shown = (opts && opts.show) || head;
       const cols = head.map((h, i) => ({ label: shown[i] || h, num: i > 0 && text.indexOf(i) < 0, primary: i === 0, render: r => String(r[i]) }));
       return el('section', { class: 'section' + (opts && opts.wide ? ' report-wide' : ''), 'aria-labelledby': id }, sectionHead(id, title, null, exp),
-        card(null, rows.length ? table(cols, rows.map(r => ({ data: r, attrs: { 'data-testid': 'report-row-' + key } })), { testid: 'report-' + key, compact: true }) : empty('Nothing in this period.')));
+        card(null, rows.length ? table(cols, rows.map(r => ({ data: r, attrs: { 'data-testid': 'report-row-' + key, class: opts && opts.rowClass ? opts.rowClass(r) : null } })), { testid: 'report-' + key, compact: true }) : empty('Nothing in this period.')));
     }
     function exportOrders(list) {
       F.downloadCsv([['Order', 'Created', 'Type', 'Customer', 'Business', 'Status', 'Payment', 'Total MVR', 'Driver']].concat(list.map(o => [o.code, o.createdAt.slice(0, 16).replace('T', ' '), F.typeLabel(o), o.customer.name, o.accountId || '', MDM.STATUS[o.status].label, (MDM.PAYMENT[(o.payment || {}).status] || {}).label || '', o.totals.total, o.driverId || ''])), 'mdm-orders-' + range.from + '-' + range.to + '.csv');
