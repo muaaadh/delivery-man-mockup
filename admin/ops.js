@@ -268,9 +268,9 @@
         el('div', { class: 'alert__body' }, el('strong', null, plural(returns.length, 'cancelled package') + ' to bring back: '), returns.map(o => o.code + (o.driverId ? ' with ' + F.driverName(o.driverId, drivers) : '')).join(', ') + '.')) : null;
       root.replaceChildren(
         pageHead(b.code + ' · ' + b.name, plural(st.packages, 'package') + ' · ' + money(st.amount) + ' invoiced' + (cod.n ? ' · ' + money(cod.amount) + ' cash' : '') + ' · from ' + (point ? point.label : (c.address || 'the business')) + (preferred ? ' at ' + preferred : ''), actions, { href: '#/bulk', label: 'Bulk orders' }),
-        el('div', { class: 'kpi-row kpi-row--fluid kpi-row--bulk' }, kpi('Packages', st.total, null, 'bulk-total'), kpi('Collected', kids.filter(o => o.status !== 'confirmed').length, 'At the hub or later', 'bulk-collected'),
-          kpi('Out for delivery', st.out, null, 'bulk-out'), kpi('Delivered', st.delivered, null, 'bulk-delivered'),
-          kpi('Cancelled or failed', st.cancelled + st.failed, [st.cancelled + ' cancelled', st.failed + ' failed', returns.length ? returns.length + ' to return' : ''].filter(Boolean).join(' · '), 'bulk-cancelled'),
+        el('div', { class: 'kpi-row kpi-row--fluid kpi-row--bulk' }, kpi('Packages', st.packages, st.packages > st.total ? 'For ' + plural(st.total, 'receiver') : null, 'bulk-total'), kpi('Collected', pkgCount(kids.filter(o => o.status !== 'confirmed')), 'At the hub or later', 'bulk-collected'),
+          kpi('Out for delivery', pkgCount(kids.filter(o => o.status === 'out_for_delivery')), null, 'bulk-out'), kpi('Delivered', pkgCount(kids.filter(o => o.status === 'delivered')), null, 'bulk-delivered'),
+          kpi('Cancelled or failed', pkgCount(kids.filter(o => o.status === 'cancelled' || o.status === 'failed')), [pkgCount(kids.filter(o => o.status === 'cancelled')) + ' cancelled', pkgCount(kids.filter(o => o.status === 'failed')) + ' failed', returns.length ? returns.length + ' to return' : ''].filter(Boolean).join(' · '), 'bulk-cancelled'),
           kpi('Cash on delivery', money(cod.amount), money(cod.collected) + ' collected', 'bulk-cod')),
         ...(returnAlert ? [returnAlert] : []),
         el('div', { class: 'admin-grid admin-grid--wide' }, el('section', { 'aria-labelledby': 'bulk-sum' }, sectionHead('bulk-sum', 'Collection'), card(null, el('div', { class: 'card__body' }, summary))),

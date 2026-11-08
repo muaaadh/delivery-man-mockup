@@ -1354,7 +1354,7 @@
   const pkgCount = list => list.reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0);
   function sameReceiver(rows) {
     const out = [], seen = {};
-    const key = r => [r.name, String(r.phone || '').replace(/\D/g, ''), r.method || 'home', r.address, r.zone, r.boat && r.boat.name, r.boat && r.boat.departureDate, r.cargo && r.cargo.island, r.airport && r.airport.point]
+    const key = r => [r.name, normPhone(r.phone) || String(r.phone || '').replace(/\D/g, ''), r.method || 'home', r.address, r.zone, r.boat && r.boat.name, r.boat && r.boat.departureDate, r.cargo && r.cargo.island, r.airport && r.airport.point]
       .map(v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ')).join('|');
     rows.filter(Boolean).forEach(r => {
       const k = key(r), g = seen[k];
