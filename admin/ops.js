@@ -78,6 +78,14 @@
   const codOf = o => o.cod && o.cod.amount > 0 ? o.cod : null;
   const codBadge = st => html(MDM.codBadge(st));
   const tierName = (v, settings) => (MDM.pricing.businessTiers(settings).find(t => t.value === v) || {}).label || v || '';
+  // A receiver of a bulk order may have several packages (client, 09/11/2026): pkgCount(orders) counts them, sizesText(o, settings)
+  // names them ('2 × Small, Medium').
+  const pkgCount = list => list.reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0);
+  function sizesText(o, settings) {
+    const names = {};
+    (o.packages || []).forEach(p => { const k = p.tier ? tierName(p.tier, settings) : MDM.pricing.sizeLabel(p.size); names[k] = (names[k] || 0) + 1; });
+    return Object.keys(names).map(k => (names[k] > 1 ? names[k] + ' × ' : '') + k).join(', ');
+  }
   // The driver a charge or cash belongs to: 'driver:drv_x' on the record, else the order's driver.
   const driverOfBy = (who, o) => (who && String(who).indexOf('driver:') === 0 ? String(who).slice(7) : '') || (o && o.driverId) || '';
   // "Speedboat Thulusdhoo Express" and the departure / jetty / island line for a boat, the counter for cargo, the counter for the airport.
@@ -142,7 +150,7 @@
     async function markCollected(b, kids, settings) {
       const waiting = kids.filter(o => o.status === 'confirmed');
       if (!waiting.length) { await MDM.store.batchCollected(b.id, { by: by() }); toast(b.code + ' collected, packages at the hub'); return; }
-      const line = o => { const p = (o.packages || [])[0] || {}, d = o.delivery || {}; return (o.batchIndex || '') + '. ' + (d.recipientName || o.code) + ' · ' + (p.tier ? tierName(p.tier, settings) : MDM.pricing.sizeLabel(p.size)); };
+      const line = o => { const d = o.delivery || {}; return (o.batchIndex || '') + '. ' + (d.recipientName || o.code) + ' · ' + sizesText(o, settings); };
       const where = o => { const d = o.delivery || {}; return [o.code, d.method && d.method !== 'home' ? MDM.deliveryMethodLabel(d.method) : '', d.address].filter(Boolean).join(' · '); };
       const fields = waiting.map(o => ({ name: 'got_' + o.id, label: line(o), type: 'checkbox', value: true, hint: where(o) }));
       fields.push({ name: 'note', label: 'Note on what was not received', type: 'text', required: false, placeholder: 'Not packed yet, sending tomorrow' },
@@ -150,39 +158,15 @@
       const v = await MDM.ui.dialog({ title: 'Mark ' + b.code + ' collected', message: 'Untick any package we did not receive. It stays awaiting collection and the business is told.', fields, okLabel: 'Mark collected',
         validate: vals => (waiting.some(o => vals['got_' + o.id]) ? null : { ['got_' + waiting[0].id]: 'Tick the packages we received' }) });
       if (!v) return;
-      const got = waiting.filter(o => v['got_' + o.id]).map(o => o.id), missing = waiting.length - got.length;
+      const gotOrders = waiting.filter(o => v['got_' + o.id]), got = gotOrders.map(o => o.id), missing = pkgCount(waiting) - pkgCount(gotOrders);
       const photoId = await batchPhoto(v.photo);
       await MDM.store.batchCollected(b.id, { by: by(), orderIds: got, note: trim(v.note), photoId });
-      toast(missing ? plural(got.length, 'package') + ' collected, ' + missing + ' not received' : b.code + ' collected, packages at the hub', missing ? 'warn' : 'ok');
+      toast(missing ? plural(pkgCount(gotOrders), 'package') + ' collected, ' + missing + ' not received' : b.code + ' collected, packages at the hub', missing ? 'warn' : 'ok');
     }
     async function batchPhoto(file) {
       if (!file) return null;
       const img = await MDM.ui.imageToJpeg(file, { maxEdge: 1000, quality: 0.8 });
       return (await MDM.store.insert('files', { kind: 'proof_collection', orderId: null, name: file.name || 'collection.jpg', type: img.type, size: img.size, dataUrl: img.dataUrl, at: new Date().toISOString() })).id;
-    }
-    // Another package for this bulk order (client, 05/11/2026: "keep an add another package"): the fields of one line of the import,
-    // priced at the account's agreed rate; it waits for the collection with the others (store.addToBatch).
-    async function addPackage(b, acc, zones, settings) {
-      const tiers = MDM.pricing.accountTiers(acc, settings);
-      if (!tiers.length) { toast(acc.name + ' has no agreed sizes yet', 'warn'); return; }
-      const zoneOpts = zones.filter(z => z.active !== false && z.key !== 'airport' && !z.airport).map(z => ({ value: z.key, label: z.name }));
-      const v = await MDM.ui.dialog({ title: 'Add a package to ' + b.code, message: 'At ' + acc.name + "'s agreed rates: " + tiers.map(t => t.label + ' ' + money(t.rate)).join(', ') + '. It is collected with the rest of the bulk order.', okLabel: 'Add package',
-        fields: [
-          { name: 'name', label: 'Receiver', type: 'text', required: true },
-          { name: 'phone', label: 'Receiver number', type: 'tel', required: true, intl: true },
-          { name: 'method', label: 'Delivery', type: 'segmented', required: true, options: [{ value: 'home', label: 'Home delivery' }, { value: 'cargo', label: 'Maldivian Cargo' }], value: 'home' },
-          { name: 'address', label: 'Delivery address, or the island for Maldivian Cargo', type: 'text', required: true, placeholder: 'H. Blue Lagoon, 3rd floor' },
-          { name: 'zone', label: 'Zone (home delivery)', type: 'select', required: true, options: zoneOpts, value: (zoneOpts[0] || {}).value },
-          { name: 'tier', label: 'Size category', type: 'select', required: true, options: tiers.map(t => ({ value: t.value, label: t.label + ' · ' + money(t.rate) })), value: tiers[0].value },
-          { name: 'description', label: 'Description', type: 'text', placeholder: 'Grade 7 books' },
-          { name: 'reference', label: 'Reference', type: 'text', placeholder: 'KB-2301' },
-          { name: 'cod', label: 'Cash to collect (MVR)', type: 'number', min: 0, step: 1, hint: 'Empty for none' }] });
-      if (!v) return;
-      const row = { name: trim(v.name), phone: phone.normalize(v.phone) || trim(v.phone), address: trim(v.address), zone: v.method === 'cargo' ? 'male' : v.zone, tier: v.tier,
-        description: trim(v.description), reference: trim(v.reference), method: v.method, cod: Math.round(Number(v.cod) || 0) };
-      if (v.method === 'cargo') row.cargo = { counter: (MDM.geo.cargoCounter() || {}).label || 'Maldivian Cargo', island: row.address, consignee: row.name };
-      const saved = await MDM.store.addToBatch(b.id, [row], { by: by() });
-      toast('Package ' + (saved.orderIds || []).length + ' added to ' + b.code);
     }
     // The driver who collects the bulk order from the business (client, 02/11/2026): it shows on their phone with a checklist.
     async function chooseCollector(b, drivers) {
@@ -200,13 +184,13 @@
       const free = list.filter(o => DONE.indexOf(o.status) < 0 && o.status !== 'requested' && !o.driverId), taken = list.filter(o => DONE.indexOf(o.status) < 0 && o.driverId);
       const options = drivers.slice().sort((a, x) => inZone(x) - inZone(a) || a.name.localeCompare(x.name)).map(d => ({ value: d.id, label: d.name + (inZone(d) ? ' · ' + (z.short || z.name) : '') }));
       const fields = [{ name: 'driverId', label: 'Driver', type: 'select', options, value: (options[0] || {}).value, required: true }];
-      if (taken.length) fields.push({ name: 'all', label: 'Also the ' + plural(taken.length, 'package') + ' already with a driver', type: 'checkbox', value: !free.length });
-      const v = await MDM.ui.dialog({ title: 'Driver for ' + zoneName, message: plural(free.length, 'package') + ' of this zone without a driver.', okLabel: 'Assign', fields,
+      if (taken.length) fields.push({ name: 'all', label: 'Also the ' + plural(pkgCount(taken), 'package') + ' already with a driver', type: 'checkbox', value: !free.length });
+      const v = await MDM.ui.dialog({ title: 'Driver for ' + zoneName, message: plural(pkgCount(free), 'package') + ' of this zone without a driver.', okLabel: 'Assign', fields,
         validate: x => free.length || x.all ? null : 'Every package of this zone already has a driver' });
       if (!v) return;
       const moving = free.concat(v.all ? taken.filter(o => o.driverId !== v.driverId) : []);
       for (const o of moving) await moveTo(o, v.driverId);
-      toast(plural(moving.length, 'package') + ' of ' + zoneName + ' now with ' + F.driverName(v.driverId, drivers), 'ok');
+      toast(plural(pkgCount(moving), 'package') + ' of ' + zoneName + ' now with ' + F.driverName(v.driverId, drivers), 'ok');
     }
     async function renderDetail() {
       const [b, orders, drivers, zones, settings] = await Promise.all([MDM.store.get('batches', id), MDM.store.list('orders', { order: 'code' }), MDM.store.list('drivers'), MDM.store.list('zones', { order: 'createdAt' }), MDM.store.settings()]);
@@ -225,12 +209,11 @@
       const preferred = b.preferredTime || c.preferredTime || '';
       const actions = [
         el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?batch=' + encodeURIComponent(b.id)), target: '_blank', rel: 'noopener', 'data-testid': 'bulk-labels' }, icon('printer'), 'Print labels'),
-        acc && (!kids.length || kids.some(o => DONE.indexOf(o.status) < 0)) ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-add-package', on: { click: () => run(() => addPackage(b, acc, zones, settings)) } }, icon('plus'), 'Add a package') : null,
         kids.some(o => o.status === 'confirmed') ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-collector', on: { click: () => run(() => chooseCollector(b, drivers)) } }, b.collectorId ? 'Change collector' : 'Assign collector') : null,
         b.status === 'confirmed' ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-collected', on: { click: () => run(() => markCollected(b, kids, settings)) } }, 'Mark collected') : null,
         kids.some(o => DONE.indexOf(o.status) < 0 && o.driverId) ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-change-driver', on: { click: () => run(() => changeDriver(kids, drivers)) } }, 'Change driver') : null,
         unassigned.length ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-zone', on: { click: () => run(async () => { const r = await MDM.store.assignByZone(b.id, { by: by() }); toast(plural(r.assigned, 'package') + ' assigned by zone' + (r.unmatched ? ', ' + r.unmatched + ' with no zone driver' : ''), r.unmatched ? 'warn' : 'ok'); }) } }, 'Assign by zone') : null,
-        toDispatch.length ? el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'bulk-dispatch', on: { click: () => run(async () => { for (const o of toDispatch) await MDM.store.dispatch(o.id, { by: by() }); toast(plural(toDispatch.length, 'package') + ' out for delivery'); }) } }, 'Dispatch ' + plural(toDispatch.length, 'package')) : null,
+        toDispatch.length ? el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'bulk-dispatch', on: { click: () => run(async () => { for (const o of toDispatch) await MDM.store.dispatch(o.id, { by: by() }); toast(plural(pkgCount(toDispatch), 'package') + ' out for delivery'); }) } }, 'Dispatch ' + plural(pkgCount(toDispatch), 'package')) : null,
       ];
       const s = BATCH_STATUS[st.status] || ['neutral', st.status];
       const summary = el('div', { class: 'rate-table' },
@@ -270,13 +253,13 @@
             (o.details || {}).reference ? el('span', { class: 'table__sub mono' }, 'Ref ' + o.details.reference) : null) },
           { label: 'Delivery', render: o => { const d = deliveryText(o.delivery); const m = (o.delivery || {}).method || 'home'; return el('span', { class: 'bulk-delivery', 'data-method': m, 'data-testid': 'bulk-delivery' }, el('span', { class: m === 'home' ? 'table__address' : null }, d.title), el('span', { class: 'table__sub' }, d.sub + (d.changed ? ' · boat changed ' + (d.changed === 1 ? 'once' : d.changed + ' times') : '')),
             m === 'boat' && DONE.indexOf(o.status) < 0 ? el('span', { class: 'bulk-delivery__action' }, smallBtn('Change boat', 'bulk-row-boat', () => editBoat(o))) : null); } },
-          { label: 'Size and rate', render: o => { const p = (o.packages || [])[0] || {}; const rate = p.tierRate != null ? p.tierRate : (p.price || {}).lineTotal; return el('span', { class: 'bulk-tier', 'data-testid': 'bulk-tier', 'data-tier': p.tier || '' }, el('span', { class: 'nowrap' }, (p.tier ? tierName(p.tier, settings) : MDM.pricing.sizeLabel(p.size)) + ' · ' + money(rate)), el('span', { class: 'table__sub' }, [MDM.pricing.sizeLabel(p.size), p.description].filter(Boolean).join(' · '))); } },
+          { label: 'Size and rate', render: o => { const pk = o.packages || [], p = pk[0] || {}; const rate = pk.reduce((n, x) => n + (x.tierRate != null ? x.tierRate : (x.price || {}).lineTotal || 0), 0); return el('span', { class: 'bulk-tier', 'data-testid': 'bulk-tier', 'data-tier': p.tier || '' }, el('span', { class: 'nowrap' }, sizesText(o, settings) + ' · ' + money(rate)), el('span', { class: 'table__sub' }, [pk.length > 1 ? null : MDM.pricing.sizeLabel(p.size)].concat(pk.map(x => x.description).filter((v, j, a) => v && a.indexOf(v) === j)).filter(Boolean).join(' · '))); } },
           { label: 'Cash', nowrap: true, render: o => { const cd = codOf(o); if (!cd) return el('span', { class: 'subtle' }, 'No cash'); return el('span', { 'data-testid': 'bulk-cod', 'data-cod': cd.status }, el('span', { class: 'mono' }, money(cd.amount)), el('span', { class: 'table__sub' }, codBadge(cd.status)), cd.collectedAmount != null && cd.collectedAmount !== cd.amount && cd.status !== 'not_collected' ? el('span', { class: 'table__sub' }, 'collected ' + money(cd.collectedAmount)) : null); } },
           { label: 'Status', primary: true, render: o => statusCell(o, drivers) },
           { label: 'Actions', actions: true, render: o => el('div', { class: 'table__actions-row bulk-actions' }, rowActions(o, drivers, zones)) },
         ];
         return el('section', { class: 'bulk-zone', 'aria-labelledby': 'bz-' + zk, 'data-zone': zk },
-          sectionHead('bz-' + zk, (z ? z.name : MDM.geo.zoneLabel(zk)) + ' · ' + plural(byZone[zk].length, 'package'), zd.length ? zd.join(', ') : 'No zone driver yet',
+          sectionHead('bz-' + zk, (z ? z.name : MDM.geo.zoneLabel(zk)) + ' · ' + plural(pkgCount(byZone[zk]), 'package'), zd.length ? zd.join(', ') : 'No zone driver yet',
             byZone[zk].some(o => DONE.indexOf(o.status) < 0 && o.status !== 'requested') ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'bulk-zone-assign', 'data-zone': zk,
               on: { click: () => run(() => assignZone(z ? z.name : MDM.geo.zoneLabel(zk), byZone[zk], drivers, zones, zk)) } }, 'Driver for this zone') : null),
           card(null, table(cols, byZone[zk].map(o => ({ data: o, attrs: { 'data-testid': 'bulk-package', 'data-order-id': o.id, 'data-code': o.code, 'data-status': o.status } })), { testid: 'bulk-packages-' + zk })));
@@ -284,7 +267,7 @@
       const returnAlert = returns.length ? el('div', { class: 'alert alert--warn', role: 'status', 'data-testid': 'bulk-returns' }, icon('alert-triangle'),
         el('div', { class: 'alert__body' }, el('strong', null, plural(returns.length, 'cancelled package') + ' to bring back: '), returns.map(o => o.code + (o.driverId ? ' with ' + F.driverName(o.driverId, drivers) : '')).join(', ') + '.')) : null;
       root.replaceChildren(
-        pageHead(b.code + ' · ' + b.name, plural(st.total, 'package') + ' · ' + money(st.amount) + ' invoiced' + (cod.n ? ' · ' + money(cod.amount) + ' cash' : '') + ' · from ' + (point ? point.label : (c.address || 'the business')) + (preferred ? ' at ' + preferred : ''), actions, { href: '#/bulk', label: 'Bulk orders' }),
+        pageHead(b.code + ' · ' + b.name, plural(st.packages, 'package') + ' · ' + money(st.amount) + ' invoiced' + (cod.n ? ' · ' + money(cod.amount) + ' cash' : '') + ' · from ' + (point ? point.label : (c.address || 'the business')) + (preferred ? ' at ' + preferred : ''), actions, { href: '#/bulk', label: 'Bulk orders' }),
         el('div', { class: 'kpi-row kpi-row--fluid kpi-row--bulk' }, kpi('Packages', st.total, null, 'bulk-total'), kpi('Collected', kids.filter(o => o.status !== 'confirmed').length, 'At the hub or later', 'bulk-collected'),
           kpi('Out for delivery', st.out, null, 'bulk-out'), kpi('Delivered', st.delivered, null, 'bulk-delivered'),
           kpi('Cancelled or failed', st.cancelled + st.failed, [st.cancelled + ' cancelled', st.failed + ' failed', returns.length ? returns.length + ' to return' : ''].filter(Boolean).join(' · '), 'bulk-cancelled'),
@@ -293,7 +276,7 @@
         el('div', { class: 'admin-grid admin-grid--wide' }, el('section', { 'aria-labelledby': 'bulk-sum' }, sectionHead('bulk-sum', 'Collection'), card(null, el('div', { class: 'card__body' }, summary))),
           el('div', { class: 'stack-6' },
             el('section', { 'aria-labelledby': 'bulk-prog' }, sectionHead('bulk-prog', 'Progress'), card(null, el('div', { class: 'card__body stack-4' }, progress(st.delivered, st.total, st.out + ' out now'),
-              el('p', { class: 'muted small' }, unassigned.length ? plural(unassigned.length, 'package') + ' need a driver.' : 'Every package has a driver.')))),
+              el('p', { class: 'muted small' }, unassigned.length ? plural(pkgCount(unassigned), 'package') + ' need a driver.' : 'Every package has a driver.')))),
             el('section', { 'aria-labelledby': 'bulk-tot' }, sectionHead('bulk-tot', 'Totals'), card(null, el('div', { class: 'card__body' }, totals))))),
         ...zoneCards);
     }
@@ -371,7 +354,7 @@
       const open = kids.filter(o => DONE.indexOf(o.status) < 0 && o.driverId);
       const holders = Array.from(new Set(open.map(o => o.driverId)));
       if (!holders.length) { toast('No package of this bulk order is with a driver now', 'warn'); return; }
-      const count = id => open.filter(o => o.driverId === id).length;
+      const count = id => pkgCount(open.filter(o => o.driverId === id));
       const v = await MDM.ui.dialog({ title: 'Change driver', message: 'Every package of this bulk order still with the first driver goes to the second.', okLabel: 'Change driver',
         fields: [{ name: 'from', label: 'From', type: 'select', options: holders.map(id => ({ value: id, label: F.driverName(id, drivers) + ' · ' + plural(count(id), 'package') })), value: holders[0] },
           { name: 'to', label: 'To', type: 'select', options: drivers.slice().sort((a, b) => a.name.localeCompare(b.name)).map(d => ({ value: d.id, label: d.name })), required: true }],
@@ -379,7 +362,7 @@
       if (!v) return;
       const moving = open.filter(o => o.driverId === v.from);
       for (const o of moving) await moveTo(o, v.to);
-      toast(plural(moving.length, 'package') + ' now with ' + F.driverName(v.to, drivers), 'ok');
+      toast(plural(pkgCount(moving), 'package') + ' now with ' + F.driverName(v.to, drivers), 'ok');
     }
     // CSV / spreadsheet rows: name, phone, address, zone, size category, description, reference, delivery method, cash to collect.
     // A header line is skipped; cells may be quoted ("Amin Avenue, Block B") or tab separated when pasted from a spreadsheet.
@@ -447,7 +430,7 @@
       const points = acc.collectionPoints || [];
       const def = points.find(p => p.isDefault) || points[0] || null;
       const sample = COLUMNS + '\nAishath Nadha, 7720001, "Amin Avenue, Block B", Hulhumalé Phase 1, ' + (tiers[0] ? tiers[0].label : 'Small') + ', Grade 7 books, KB-2301, home, 320';
-      const v = await MDM.ui.dialog({ title: 'New bulk order for ' + acc.name, message: 'One line per package, at the agreed rates: ' + tiers.map(t => t.label + ' ' + money(t.rate)).join(', ') + '.', okLabel: 'Create bulk order',
+      const v = await MDM.ui.dialog({ title: 'New bulk order for ' + acc.name, message: 'One line per package, at the agreed rates (lines for the same receiver are one delivery): ' + tiers.map(t => t.label + ' ' + money(t.rate)).join(', ') + '.', okLabel: 'Create bulk order',
         fields: [
           { name: 'pointId', label: 'Collection point', type: 'select', options: points.map(p => ({ value: p.id, label: p.label + ' · ' + p.address })).concat([{ value: '', label: 'Another address' }]), value: def ? def.id : '' },
           { name: 'address', label: 'Collection address', type: 'text', hint: 'Only for "Another address"', validate: (val, all) => all.pointId === '' && !val ? 'Enter the collection address' : null },

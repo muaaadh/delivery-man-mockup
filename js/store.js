@@ -1348,63 +1348,64 @@
   }
 
   // ---- Bulk business orders (requirements §10) --------------------------------------------------------------------------
-  // A batch is one collection from the business and one child order per package, so every package stays trackable on its own.
+  // A batch is one collection from the business and one child order per receiver, so every delivery stays trackable on its own. A
+  // receiver's packages are one order (client, 09/11/2026: a receiver with more bags had to be entered again as a new receiver): the
+  // row's other packages (row.more), and the lines of a spreadsheet for the same receiver (sameReceiver).
+  const pkgCount = list => list.reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0);
+  function sameReceiver(rows) {
+    const out = [], seen = {};
+    const key = r => [r.name, String(r.phone || '').replace(/\D/g, ''), r.method || 'home', r.address, r.zone, r.boat && r.boat.name, r.boat && r.boat.departureDate, r.cargo && r.cargo.island, r.airport && r.airport.point]
+      .map(v => String(v == null ? '' : v).trim().toLowerCase().replace(/\s+/g, ' ')).join('|');
+    rows.filter(Boolean).forEach(r => {
+      const k = key(r), g = seen[k];
+      if (!g) { out.push(seen[k] = Object.assign({}, r, { more: Array.isArray(r.more) ? r.more.slice() : [] })); return; }
+      g.more.push({ tier: r.tier, description: r.description || '' }, ...(Array.isArray(r.more) ? r.more : []));
+      g.cod = Math.round(Number(g.cod) || 0) + Math.round(Number(r.cod) || 0);
+      ['reference', 'instructions'].forEach(f => { const v = String(r[f] || '').trim(); if (v && String(g[f] || '').split(', ').indexOf(v) < 0) g[f] = g[f] ? g[f] + ', ' + v : v; });
+    });
+    return out;
+  }
   function createBatch(b) {
     const acc = readCol('business_accounts').find(a => a.id === b.accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
     const s = settings();
     const col = Object.assign({}, b.collection || {});
     const batch = insert('batches', { accountId: acc.id, name: acc.name, serviceLevel: b.serviceLevel || 'normal', collection: col, collectionPointId: col.pointId || null, preferredTime: col.preferredTime || '', notes: b.notes || '', status: 'confirmed', orderIds: [], source: b.source || 'portal', by: b.by || ('business:' + acc.id) });
-    const ids = (b.rows || []).map((r, i) => batchOrder(acc, batch, r, i + 1, b.source || 'business', b.by || ('business:' + acc.id), s).id);
+    const ids = sameReceiver(b.rows || []).map((r, i) => batchOrder(acc, batch, r, i + 1, b.source || 'business', b.by || ('business:' + acc.id), s).id);
     const saved = update('batches', batch.id, { orderIds: ids });
-    readCol('orders').filter(o => ids.indexOf(o.id) >= 0).forEach(o => { const x = clone(o); pushEvent(x, makeEvent('created', 'Order submitted (bulk ' + saved.code + ', package ' + x.batchIndex + ' of ' + ids.length + ')', b.by || 'business', 'public')); save(x); });
-    audit('batch_created', 'Bulk order ' + saved.code + ' with ' + ids.length + ' packages', b.by || ('business:' + acc.id), { batchId: saved.id });
+    let pkgs = 0;
+    readCol('orders').filter(o => ids.indexOf(o.id) >= 0).forEach(o => {
+      const x = clone(o), n = (x.packages || []).length; pkgs += n;
+      pushEvent(x, makeEvent('created', 'Order submitted (bulk ' + saved.code + ', ' + (n > 1 ? n + ' packages for receiver ' : 'package ') + x.batchIndex + ' of ' + ids.length + ')', b.by || 'business', 'public')); save(x);
+    });
+    audit('batch_created', 'Bulk order ' + saved.code + ' with ' + pkgs + ' packages' + (pkgs > ids.length ? ' for ' + ids.length + ' receivers' : ''), b.by || ('business:' + acc.id), { batchId: saved.id });
     return clone(saved);
   }
-  // One package of a bulk order: its own order, waiting for the collection from the business, priced at the account's agreed rate.
+  // One receiver of a bulk order: its own order with a package each, waiting for the collection from the business, priced at the
+  // account's agreed rates.
   function batchOrder(acc, batch, r, index, source, by, s) {
     const col = batch.collection || {};
+    const tiers = MDM.pricing.businessTiers(s);
     const tier = r.tier || (acc.tiers && acc.tiers[0]) || 'small';
-    const tierInfo = MDM.pricing.businessTiers(s).find(t => t.value === tier) || {};
-    const size = r.size || tierInfo.size || 'bag';
     const delivery = { method: r.method || 'home', address: r.address || '', zone: r.zone || 'male', landmark: r.landmark || '', recipientName: r.name || '', recipientPhone: r.phone || '', instructions: r.instructions || '', meetAt: 'door', boat: r.boat || null, cargo: r.cargo || null, airport: r.airport || null };
     const end = deliveryEndpoint(delivery);
-    const pkg = { id: MDM.id('pkg'), size, tier, tierRate: MDM.pricing.businessRate(acc, tier, s), description: r.description || '', underOneFt: size === 'bag', fragile: !!r.fragile, needsVehicle: false,
-      pickup: { address: col.address, zone: col.zone, landmark: col.landmark || '', contact: { name: col.contactName, phone: col.contactPhone } },
-      dropoff: end };
-    const q = MDM.pricing.quote({ service: 'business', packages: [pkg] }, s);
+    const list = [{ tier, size: r.size, description: r.description, fragile: r.fragile }].concat((Array.isArray(r.more) ? r.more : []).slice(0, 49).map(m => ({ tier: (m && m.tier) || tier, description: m && m.description })));
+    const pkgs = list.map(p => {
+      const size = p.size || (tiers.find(t => t.value === p.tier) || {}).size || 'bag';
+      return { id: MDM.id('pkg'), size, tier: p.tier, tierRate: MDM.pricing.businessRate(acc, p.tier, s), description: String(p.description || '').trim(), underOneFt: size === 'bag', fragile: !!p.fragile, needsVehicle: false,
+        pickup: { address: col.address, zone: col.zone, landmark: col.landmark || '', contact: { name: col.contactName, phone: col.contactPhone } }, dropoff: end };
+    });
+    const q = MDM.pricing.quote({ service: 'business', packages: pkgs }, s);
+    const rateNames = pkgs.map(p => (tiers.find(t => t.value === p.tier) || {}).label || p.tier).filter((v, i, a) => a.indexOf(v) === i);
     const cod = Math.round(Number(r.cod) || 0);
     return insert('orders', {
       source, requestType: 'bulk', service: 'business', serviceLevel: batch.serviceLevel || 'normal', accountId: acc.id, batchId: batch.id, batchIndex: index,
       customerId: null, customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
       collection: col, delivery: Object.assign({}, delivery, { address: delivery.method === 'home' ? delivery.address : (r.address || end.address), zone: end.zone }),
       details: { reference: r.reference || '' }, documents: [], packages: q.packages, fees: q.fees, totals: q.totals,
-      estimate: { min: q.totals.total, max: q.totals.total }, pricing: { status: 'confirmed', confirmedAt: now(), confirmedBy: 'system', remarks: 'Business rate: ' + (tierInfo.label || tier), history: [] },
+      estimate: { min: q.totals.total, max: q.totals.total }, pricing: { status: 'confirmed', confirmedAt: now(), confirmedBy: 'system', remarks: 'Business rate' + (rateNames.length > 1 ? 's' : '') + ': ' + rateNames.join(', '), history: [] },
       schedule: { type: 'asap' }, payment: { method: 'invoice', status: 'invoiced' }, cod: cod > 0 ? { amount: cod, status: 'pending', collectedAmount: null } : null, charges: [],
       priority: { level: 'normal', status: 'none', requests: [] }, cancellation: { status: 'none' }, changes: [], statusHistory: [{ at: now(), from: null, to: 'confirmed', by }],
       status: 'confirmed', driverId: null, collectorId: batch.collectorId || null, route: { stops: [], polyline: [] }, events: [], notes: [], trackToken: trackSecret() });
-  }
-  // addToBatch(batchId, rows, { by }): another package for a bulk order already made (client, 05/11/2026: "keep an add another
-  // package"). It waits for the collection like the others: with the bulk order's collector when it has one, else the office collects it.
-  function addToBatch(batchId, rows, p) {
-    p = p || {};
-    const batch = readCol('batches').find(x => x.id === batchId); if (!batch) throw new StoreError('not_found', 'Batch not found');
-    const acc = readCol('business_accounts').find(a => a.id === batch.accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
-    if (acc.status !== 'approved') throw new StoreError('validation', 'This business account is not active');
-    rows = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
-    if (!rows.length) throw new StoreError('validation', 'Add at least one package');
-    rows.forEach(r => {
-      if (!String(r.name || '').trim()) throw new StoreError('validation', 'Enter the receiver');
-      if (!String(r.address || '').trim()) throw new StoreError('validation', (r.method === 'cargo' ? 'Enter the destination island' : 'Enter the delivery address'));
-    });
-    const s = settings(), by = p.by || ('business:' + acc.id);
-    const kids = readCol('orders').filter(o => o.batchId === batchId);
-    const first = kids.reduce((n, o) => Math.max(n, o.batchIndex || 0), 0);
-    const added = rows.map((r, i) => batchOrder(acc, batch, r, first + i + 1, p.source || (by.indexOf('business:') === 0 ? 'business' : 'phone'), by, s));
-    const ids = (batch.orderIds || []).concat(added.map(o => o.id));
-    const saved = update('batches', batchId, { orderIds: ids, status: 'confirmed' });
-    added.forEach(o => { const x = clone(o); pushEvent(x, makeEvent('created', 'Order submitted (bulk ' + saved.code + ', package ' + x.batchIndex + ' of ' + ids.length + ', added later)', by, 'public')); save(x); });
-    audit('batch_added', saved.code + ': ' + (added.length === 1 ? 'one more package' : added.length + ' more packages'), by, { batchId });
-    return clone(saved);
   }
   // A driver collects a bulk order (client, 02/11/2026): the office names the collector; the bulk order and its packages still to
   // collect show on that driver's phone, where they tick each package off with a photo. The packages stay without a delivery driver
@@ -1420,7 +1421,7 @@
     waiting.forEach(o => { const x = clone(o); x.collectorId = driverId || null; save(x); });
     const saved = update('batches', batchId, { collectorId: driverId || null, collectorAssignedAt: driverId ? now() : null });
     if (d) insert('notifications', { orderId: waiting[0].id, code: batch.code, to: d.phone, name: d.name, audience: 'driver', channel: 'app', event: 'staff_driver', title: 'Bulk collection',
-      message: batch.code + ': collect ' + waiting.length + ' package' + (waiting.length > 1 ? 's' : '') + ' from ' + batch.name + ((batch.collection || {}).address ? ', ' + batch.collection.address : ''), status: 'sent', at: now() });
+      message: batch.code + ': collect ' + pkgCount(waiting) + ' package' + (pkgCount(waiting) > 1 ? 's' : '') + ' from ' + batch.name + ((batch.collection || {}).address ? ', ' + batch.collection.address : ''), status: 'sent', at: now() });
     audit('batch_collector', batch.code + ': ' + (d ? 'collected by ' + d.name : 'no collector'), by, { batchId });
     return saved;
   }
@@ -1447,8 +1448,8 @@
       missed.forEach(o => { const x = clone(o); pushEvent(x, makeEvent('not_received', 'Not received at collection' + (note ? ': ' + note : ''), p.by, 'public')); save(x); });
       const acc = readCol('business_accounts').find(a => a.id === batch.accountId);
       if (acc) insert('notifications', { orderId: missed[0].id, code: batch.code, to: acc.phone, name: acc.name, audience: 'business', channel: 'app', event: 'staff_business', title: 'Not received at collection',
-        message: batch.code + ': ' + missed.length + ' of ' + waiting.length + ' packages not received (' + missed.map(o => o.code).join(', ') + ')' + (note ? '. ' + note : ''), status: 'sent', at: now() });
-      audit('batch_partly_collected', batch.code + ': ' + got.length + ' collected, ' + missed.length + ' not received', p.by, { batchId });
+        message: batch.code + ': ' + pkgCount(missed) + ' of ' + pkgCount(waiting) + ' packages not received (' + missed.map(o => o.code).join(', ') + ')' + (note ? '. ' + note : ''), status: 'sent', at: now() });
+      audit('batch_partly_collected', batch.code + ': ' + pkgCount(got) + ' collected, ' + pkgCount(missed) + ' not received', p.by, { batchId });
     }
     const stamp = { collectedAt: now(), collectedBy: p.by || 'admin', collectionPhotoId: p.photoId || batch.collectionPhotoId || null };
     return update('batches', batchId, missed.length ? stamp : Object.assign(stamp, { status: 'collected' }));
@@ -1479,7 +1480,8 @@
     else if (kids.some(o => o.status === 'delivered')) status = 'partly_delivered';
     else if (kids.some(o => o.status === 'collected')) status = 'collected';
     const paid = kids.length && kids.every(o => o.payment && o.payment.status === 'paid');
-    return { status: paid && status === 'delivered' ? 'paid' : status, total: n, delivered: by('delivered'), out: by('out_for_delivery'), collected: by('collected'), failed: by('failed'), cancelled: by('cancelled'), amount: kids.filter(o => o.status !== 'cancelled').reduce((t, o) => t + (o.totals ? o.totals.total : 0), 0) };
+    // total counts the receivers (one order each), packages every package (a receiver may have several, 09/11/2026).
+    return { status: paid && status === 'delivered' ? 'paid' : status, total: n, packages: kids.reduce((t, o) => t + Math.max(1, (o.packages || []).length), 0), delivered: by('delivered'), out: by('out_for_delivery'), collected: by('collected'), failed: by('failed'), cancelled: by('cancelled'), amount: kids.filter(o => o.status !== 'cancelled').reduce((t, o) => t + (o.totals ? o.totals.total : 0), 0) };
   }
 
   // ---- E-store (How it works §7) ----------------------------------------------------------------------------------------
@@ -2048,7 +2050,7 @@
     cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
     assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep), addStopPhoto: P(addStopPhoto),
     handToOffice: P(handToOffice), changeDeliveryMethod: P(changeDeliveryMethod),
-    driverRoute: P(driverRoute), createBatch: P(createBatch), addToBatch: P(addToBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
+    driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
     createStoreOrder: P(createStoreOrder), punchIn: P(punchIn), punchOut: P(punchOut), openShift: P(openShift), requestLeave: P(requestLeave), decideLeave: P(decideLeave),
     upsertCustomer: P(upsertCustomer), createInvoice: P(createInvoice), orderByCode: P(orderByCode),
     addCharge: P(addCharge), setChargeBillable: P(setChargeBillable), voidCharge: P(voidCharge), reimburseCharges: P(reimburseCharges), addVehicleCharge: P(addVehicleCharge),

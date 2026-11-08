@@ -227,6 +227,3 @@ body.page-business .biz-photo .dropzone__drag { display: block; margin-top: 2px;
   body.page-business .biz-point .list__main { flex: 1 1 100%; }
   body.page-business .biz-point .list__aside { justify-content: flex-start; }
 }
-
-/* r10: "Add a package" to a bulk order (client, 05/11/2026) */
-.biz-add-rate { margin: 4px 0 16px; }

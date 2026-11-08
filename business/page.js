@@ -109,10 +109,10 @@
   function tierText(o) {
     const pk = o.packages || [];
     if (!pk.length) return '';
-    const p0 = pk[0], t = p0.tier ? tierInfo(p0.tier) : null;
-    const name = t ? t.label : MDM.pricing.sizeLabel(p0.size);
+    const names = {};
+    pk.forEach(p => { const t = p.tier ? tierInfo(p.tier) : null, k = t ? t.label : MDM.pricing.sizeLabel(p.size); names[k] = (names[k] || 0) + 1; });
     const sum = pk.reduce((n, p) => n + ((p.price && p.price.lineTotal) || 0), 0);
-    return (pk.length > 1 ? pk.length + ' × ' : '') + name + ' · ' + money(sum);
+    return Object.keys(names).map(k => (pk.length > 1 ? names[k] + ' × ' : '') + k).join(', ') + ' · ' + money(sum);
   }
   // [main, detail] lines for an order's delivery method.
   function methodLines(o) {
@@ -491,7 +491,7 @@
   }
   function batchRow(b) {
     const p = batchProgress(b);
-    const parts = [plural(p.st.total, 'package'), p.st.delivered + ' delivered'];
+    const parts = [plural(p.st.packages, 'package'), p.st.delivered + ' delivered'];
     if (p.st.out) parts.push(p.st.out + ' out');
     if (p.st.collected) parts.push(p.st.collected + ' at the hub');
     if (p.st.failed) parts.push(p.st.failed + ' failed');
@@ -794,20 +794,21 @@
   function rowRateText(row, ctx) {
     const q = K.quoteRow(row, state.acc, state.settings, ctx.pickupZone());
     if (!q) return 'Choose a size';
-    return money(q.rate) + (q.fees ? ' + ' + q.feeLines.map(f => feeName(f) + ' ' + money(f.amount)).join(' + ') : '');
+    return (q.count > 1 ? q.count + ' packages, ' : '') + money(q.rate) + (q.fees ? ' + ' + q.feeLines.map(f => feeName(f) + ' ' + money(f.amount)).join(' + ') : '');
   }
   // rowsSummary(rows, ctx) → summary lines: packages, total at the agreed rates, delivery methods, cash to collect.
   function rowsSummary(rows, ctx, testid) {
     let total = 0, cod = 0, unpriced = 0; const methods = {};
+    const pkgs = rows.reduce((n, r) => n + 1 + (r.more || []).length, 0);
     rows.forEach(r => { const q = K.quoteRow(r, state.acc, state.settings, ctx.pickupZone()); if (q) total += q.total; else unpriced++; cod += K.parseMoney(r.cod) || 0; methods[r.method] = (methods[r.method] || 0) + 1; });
     return el('div', { class: 'summary', 'data-testid': testid },
-      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, plural(rows.length, 'package'), rows.length ? el('small', null, Object.keys(methods).map(m => MDM.deliveryMethodLabel(m) + ' ' + methods[m]).join(' · ')) : null), el('span', { class: 'summary__amount', 'data-testid': testid + '-total' }, money(total))),
+      el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, plural(pkgs, 'package'), rows.length ? el('small', null, (pkgs > rows.length ? plural(rows.length, 'receiver') + ' · ' : '') + Object.keys(methods).map(m => MDM.deliveryMethodLabel(m) + ' ' + methods[m]).join(' · ')) : null), el('span', { class: 'summary__amount', 'data-testid': testid + '-total' }, money(total))),
       unpriced ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': testid + '-unpriced' }, el('span', { class: 'summary__desc' }, plural(unpriced, 'package') + ' without a size, not in the total')) : null,
       el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Cash to collect', el('small', null, 'Paid to you after delivery')), el('span', { class: 'summary__amount', 'data-testid': testid + '-cod' }, money(cod))),
       el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Your agreed rates, plus cargo or airport fees. Invoiced weekly.')));
   }
   function bulkDone(b, back) {
-    const n = (b.orderIds || []).length;
+    const n = MDM.store._batchStatus(b).packages || (b.orderIds || []).length;
     const c = b.collection || {};
     return doneCard('biz-bulk-done', 'Bulk order submitted',
       [el('span', { class: 'mono--code' }, b.code), ' · ' + plural(n, 'package') + ' · pickup from ' + (c.label || c.address) + (c.preferredTime ? ' around ' + c.preferredTime : '') + '.'],
@@ -848,15 +849,16 @@
     function itemNode(r, i) {
       const rctx = Object.assign({}, ctx, {
         onInput: (row, key) => { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); showRowErrors(row, node, key); updateRowHead(row); drawSummary(); },
-        onChange: (row, key) => { if (key === 'method') { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); const fresh = itemNode(row, bulk.rows.indexOf(row)); node.replaceWith(fresh); const sel = fresh.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); showRowErrors(row, node, key); } updateRowHead(row); drawSummary(); },
+        onChange: (row, key) => { if (key === 'method') { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); const fresh = itemNode(row, bulk.rows.indexOf(row)); node.replaceWith(fresh); const sel = fresh.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else { const node = rowsEl.querySelector('[data-item="' + row.id + '"]'); showRowErrors(row, node, key === 'more' ? null : key); } updateRowHead(row); drawSummary(); },
+        more: true,
       });
       const fields = K.rowFields(r, rctx, 'bulk-' + r.id);
       const node = el('div', { class: 'bulk-item', 'data-item': r.id, 'data-testid': 'biz-bulk-row' },
         el('div', { class: 'bulk-item__head' },
-          el('h3', { class: 'bulk-item__title' }, 'Package ' + (i + 1)),
+          el('h3', { class: 'bulk-item__title' }, 'Receiver ' + (i + 1)),
           el('span', { class: 'bulk-item__rate small muted', 'data-rate': '' }, rowRateText(r, ctx)),
           el('span', { 'data-state': '' }),
-          el('button', { type: 'button', class: 'btn btn--ghost btn--sm bulk-item__remove', 'aria-label': 'Remove package ' + (i + 1), 'data-testid': 'biz-bulk-remove', on: { click: () => { bulk.rows.splice(bulk.rows.indexOf(r), 1); if (!bulk.rows.length) bulk.rows.push(K.blankRow(tiers)); drawRows(); } } }, html(MDM.icon('trash', 16)), 'Remove')),
+          el('button', { type: 'button', class: 'btn btn--ghost btn--sm bulk-item__remove', 'aria-label': 'Remove receiver ' + (i + 1), 'data-testid': 'biz-bulk-remove', on: { click: () => { bulk.rows.splice(bulk.rows.indexOf(r), 1); if (!bulk.rows.length) bulk.rows.push(K.blankRow(tiers)); drawRows(); } } }, html(MDM.icon('trash', 16)), 'Remove')),
         el('div', { class: 'bulk-item__grid' }, fields));
       if (bulk.tried) setTimeout(() => showRowErrors(r, node), 0);
       return node;
@@ -864,7 +866,7 @@
     function drawRows() { rowsEl.replaceChildren(...bulk.rows.map(itemNode)); drawSummary(); }
     function drawSummary() { summaryHost.replaceChildren(rowsSummary(bulk.rows.filter(K.filled), ctx, 'biz-bulk-summary')); }
     const level = segmented('level', [{ value: 'normal', label: 'Normal' }, { value: 'express', label: 'Express' }], 'normal', 'biz-bulk-level');
-    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-bulk-add', on: { click: () => { bulk.rows.push(K.blankRow(tiers)); drawRows(); const last = rowsEl.querySelector('.bulk-item:last-child input'); if (last) last.focus(); } } }, html(MDM.icon('plus', 16)), 'Add package');
+    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-bulk-add', on: { click: () => { bulk.rows.push(K.blankRow(tiers)); drawRows(); const last = rowsEl.querySelector('.bulk-item:last-child input'); if (last) last.focus(); } } }, html(MDM.icon('plus', 16)), 'Add a receiver');
     form.append(
       el('div', { class: 'biz-split__main stack-6' },
         el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Pickup')),
@@ -887,11 +889,11 @@
         if (!K.filled(r)) { node.querySelectorAll('[data-key]').forEach(c => setError(c, null)); node.querySelector('[data-state]').replaceChildren(); return; }
         showRowErrors(r, node);
         const n = Object.keys(errorsOf(r)).length;
-        if (n) problems.push('Package ' + (i + 1) + ': ' + Object.keys(errorsOf(r)).map(k => K.fieldLabel(k, r.method).toLowerCase()).join(', '));
+        if (n) problems.push('Receiver ' + (i + 1) + ': ' + Object.keys(errorsOf(r)).map(k => K.fieldLabel(k, r.method).toLowerCase()).join(', '));
       });
-      if (!rows.length) problems.push('Add at least one package');
+      if (!rows.length) problems.push('Add at least one receiver');
       if (!cOk || problems.length) {
-        if (problems.length) showFail(failure, 'Fix these packages', problems.slice(0, 6).join('. ') + (problems.length > 6 ? '. And ' + (problems.length - 6) + ' more.' : '.'));
+        if (problems.length) showFail(failure, 'Fix these receivers', problems.slice(0, 6).join('. ') + (problems.length > 6 ? '. And ' + (problems.length - 6) + ' more.' : '.'));
         const first = form.querySelector('[aria-invalid="true"]');
         if (first) { MDM.ui.scrollIntoViewIfNeeded(first); first.focus(); }
         return;
@@ -1242,7 +1244,7 @@
         return el('tr', { 'data-testid': 'biz-row-' + o.code },
           el('td', { class: 'table__primary' }, el('div', null, el('a', { class: 'mono--code nowrap', href: trackHref(o) }, o.code), el('span', { class: 'table__sub nowrap' }, fmtDate(o.createdAt)), b ? el('span', { class: 'table__sub nowrap' }, b.code + ' #' + o.batchIndex) : null)),
           el('td', { 'data-label': 'Receiver' }, el('div', null, r.name, el('span', { class: 'table__sub nowrap' }, MDM.ui.phone.format(r.phone)))),
-          el('td', { 'data-label': 'Package' }, el('div', null, el('span', { class: 'nowrap', 'data-tier': pkg.tier || '' }, tierText(o)), pkg.description ? el('span', { class: 'table__sub' }, pkg.description) : null,
+          el('td', { 'data-label': 'Package' }, el('div', null, el('span', { class: 'nowrap', 'data-tier': pkg.tier || '' }, tierText(o)), (d => d ? el('span', { class: 'table__sub' }, d) : null)((o.packages || []).map(p => p.description).filter((v, i, a) => v && a.indexOf(v) === i).join(', ')),
             (o.details || {}).reference ? el('span', { class: 'table__sub' }, 'Ref ' + o.details.reference) : null,
             o.fees && (o.fees.cargo || o.fees.airport) ? el('span', { class: 'table__sub' }, 'Total ' + money(o.totals.total) + ' with the ' + (o.fees.cargo ? 'Maldivian Cargo' : 'airport') + ' fee') : null)),
           el('td', { 'data-label': 'Delivery' }, el('div', null, el('span', { 'data-method': (o.delivery || {}).method || 'home' }, m[0]), el('span', { class: 'table__sub biz-delivery-sub' }, m[1]),
@@ -1293,7 +1295,7 @@
     const codTotal = kids.reduce((n, o) => n + (codStatus(o) && codStatus(o) !== 'not_collected' ? o.cod.amount : 0), 0);
     const codPending = kids.reduce((n, o) => n + (codStatus(o) === 'pending' ? o.cod.amount : 0), 0);
     const live = kids.filter(o => o.status !== 'cancelled');
-    const open = !kids.length || kids.some(o => DONE.indexOf(o.status) < 0);
+    const labels = live.reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0);
     const counts = {}; kids.forEach(o => { const k = (o.delivery || {}).method || 'home'; counts[k] = (counts[k] || 0) + 1; });
     const parts = [p.st.delivered + ' delivered'];
     if (p.st.out) parts.push(p.st.out + ' out for delivery'); if (p.st.collected) parts.push(p.st.collected + ' at the hub'); if (p.st.cancelled) parts.push(p.st.cancelled + ' cancelled'); if (p.st.failed) parts.push(p.st.failed + ' failed');
@@ -1305,64 +1307,14 @@
           el('div', { class: 'rate-table' },
             MDM.ui.rateRow('Pickup', pt ? pt.label : (c.label || 'One-off address'), { sub: [c.address, MDM.geo.zoneShort(c.zone), c.contactName ? c.contactName + ' ' + MDM.ui.phone.format(c.contactPhone) : ''].filter(Boolean).join(' · ') }),
             MDM.ui.rateRow('Preferred time', b.preferredTime || c.preferredTime || 'Any time'),
-            MDM.ui.rateRow('Packages', plural(p.st.total, 'package'), { sub: parts.join(' · '), valueSub: Object.keys(counts).map(k => MDM.deliveryMethodLabel(k) + ' ' + counts[k]).join(' · ') }),
+            MDM.ui.rateRow('Packages', plural(p.st.packages, 'package') + (p.st.packages > p.st.total ? ' for ' + plural(p.st.total, 'receiver') : ''), { sub: parts.join(' · '), valueSub: Object.keys(counts).map(k => MDM.deliveryMethodLabel(k) + ' ' + counts[k]).join(' · ') }),
             MDM.ui.rateRow('Amount', money(p.st.amount), { mono: true, sub: live.length < kids.length ? 'Excluding cancelled orders' : null }),
             MDM.ui.rateRow('Cash on delivery', money(codTotal), { mono: true, sub: 'Excluding cancelled orders', valueSub: money(codPending) + ' still to collect' }),
             MDM.ui.rateRow('Submitted', fmtDate(b.createdAt), { valueSub: b.source === 'excel' ? 'Excel import' : b.source === 'csv' ? 'Spreadsheet' : 'Typed in the portal' })),
           p.bar,
-          live.length || open ? el('div', { class: 'row row--wrap' },
-            open ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-bulk-add-package', on: { click: () => addBatchPackage(b) } }, html(MDM.icon('plus', 16)), 'Add a package') : null,
-            live.length ? el('a', { class: 'btn btn--secondary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-batch-print' }, html(MDM.icon('printer', 16)), 'Print ' + plural(live.length, 'label')) : null,
-            live.length && live.length < kids.length ? el('span', { class: 'small muted' }, 'No labels for cancelled packages.') : null) : null)),
+          live.length ? el('div', { class: 'row row--wrap' }, el('a', { class: 'btn btn--secondary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-batch-print' }, html(MDM.icon('printer', 16)), 'Print ' + plural(labels, 'label')),
+            live.length < kids.length ? el('span', { class: 'small muted' }, 'No labels for cancelled packages.') : null) : null)),
       panelCard('Packages', null, kids.length ? ordersTable(kids, batchById, 'biz-batch-table') : empty('No packages', '')));
-  }
-
-  // Another package for a bulk order on its way (client, 05/11/2026: "keep an add another package"): one package card, the same as the
-  // bulk form's (MDM.bizKit.rowFields), in a dialog. It is collected with the rest of the bulk order (store.addToBatch).
-  function addBatchPackage(b) {
-    const acc = state.acc, tiers = tiersOf(acc), c = b.collection || {};
-    const row = K.blankRow(tiers);
-    const ctx = { tiers, allTiers: allTiers(), pickupZone: () => c.zone || 'male' };
-    let tried = false;
-    const grid = el('div', { class: 'bulk-item__grid' });
-    const rate = el('p', { class: 'small muted biz-add-rate', 'data-testid': 'biz-bulk-add-rate' });
-    const fail = failBox();
-    const showErrors = only => {
-      const errs = K.validateRow(row, ctx);
-      grid.querySelectorAll('[data-key]').forEach(x => { const k = x.dataset.key; if (only && only !== k) return; if (!tried && !x.closest('.field').classList.contains('is-invalid')) return; setError(x, errs[k] || null); });
-      return errs;
-    };
-    const rctx = Object.assign({}, ctx, {
-      onInput: (r, key) => { showErrors(key); rate.textContent = rowRateText(row, ctx); },
-      onChange: (r, key) => { if (key === 'method') draw(); else showErrors(key); rate.textContent = rowRateText(row, ctx); },
-    });
-    function draw() { grid.replaceChildren(...K.rowFields(row, rctx, 'biz-add-' + row.id)); rate.textContent = rowRateText(row, ctx); if (tried) showErrors(); }
-    draw();
-    const titleId = 'biz-add-title-' + row.id;
-    const ok = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'biz-bulk-add-save' }, 'Add package');
-    const cancel = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-bulk-add-cancel', on: { click: () => dlg.close() } }, 'Cancel');
-    const form = el('form', { class: 'dialog__form', novalidate: true },
-      el('h2', { class: 'dialog__title', id: titleId }, 'Add a package to ' + b.code),
-      el('p', { class: 'dialog__message' }, 'We collect it with the rest of this bulk order, at your agreed rates.'),
-      rate, grid, fail,
-      el('div', { class: 'dialog__actions' }, cancel, ok));
-    const dlg = el('dialog', { class: 'dialog dialog--wide', 'aria-labelledby': titleId, 'data-testid': 'biz-bulk-add-dialog' }, form);
-    form.addEventListener('submit', async e => {
-      e.preventDefault(); fail.hidden = true; tried = true;
-      const errs = showErrors();
-      if (Object.keys(errs).length) { const first = grid.querySelector('[aria-invalid="true"]'); if (first) first.focus(); return; }
-      MDM.ui.setLoading(ok, true);
-      try {
-        const saved = await MDM.store.addToBatch(b.id, [K.toBatchRow(row)], { by: 'business:' + acc.id });
-        dlg.close();
-        MDM.ui.toast('Package ' + (saved.orderIds || []).length + ' added to ' + b.code, 'ok');
-      } catch (err) { showFail(fail, 'Could not add the package', err.message || 'Please try again.'); }
-      finally { if (ok.isConnected) MDM.ui.setLoading(ok, false); }
-    });
-    dlg.addEventListener('close', () => dlg.remove());
-    document.body.appendChild(dlg);
-    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
-    const first = grid.querySelector('input, select'); if (first) first.focus();
   }
 
   // ---- Cash on delivery (§5.6) ----------------------------------------------------------------------------------------------------
@@ -1559,8 +1511,10 @@
     const sel = state.selected;
     [...sel].forEach(id => { if (!open.some(o => o.id === id)) sel.delete(id); });
     const printBtn = el('a', { class: 'btn btn--primary', 'data-testid': 'biz-labels-print' });
+    // One label per package: a receiver of a bulk order may have several (09/11/2026).
+    const labelCount = list => list.reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0);
     const sync = () => {
-      const n = sel.size;
+      const n = labelCount(open.filter(o => sel.has(o.id)));
       printBtn.textContent = n ? 'Print ' + plural(n, 'label') : 'Select orders';
       if (n) { printBtn.href = labelsHref('orders=' + [...sel].map(encodeURIComponent).join(',')); printBtn.removeAttribute('aria-disabled'); }
       else { printBtn.removeAttribute('href'); printBtn.setAttribute('aria-disabled', 'true'); }
@@ -1570,9 +1524,9 @@
     return el('div', { class: 'stack-6' },
       d.batches.length ? el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'By bulk order')),
         el('div', { class: 'list' }, d.batches.map(b => {
-          const n = d.orders.filter(o => o.batchId === b.id && o.status !== 'cancelled').length, x = (b.orderIds || []).length - n;
+          const kids = d.orders.filter(o => o.batchId === b.id), live = kids.filter(o => o.status !== 'cancelled'), n = labelCount(live), x = kids.length - live.length;
           return el('div', { class: 'list__item' },
-            el('div', { class: 'list__main' }, el('div', { class: 'list__title mono--code' }, b.code), el('div', { class: 'list__meta' }, fmtDate(b.createdAt) + ' · ' + plural((b.orderIds || []).length, 'package') + (x ? ', ' + x + ' cancelled' : '') + (b.notes ? ' · ' + b.notes : ''))),
+            el('div', { class: 'list__main' }, el('div', { class: 'list__title mono--code' }, b.code), el('div', { class: 'list__meta' }, fmtDate(b.createdAt) + ' · ' + plural(labelCount(kids), 'package') + (x ? ', ' + x + ' cancelled' : '') + (b.notes ? ' · ' + b.notes : ''))),
             n ? el('a', { class: 'btn btn--secondary btn--sm', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-labels-batch-' + b.code }, html(MDM.icon('printer', 16)), 'Print ' + plural(n, 'label')) : el('span', { class: 'small muted' }, 'All cancelled'));
         }))) : null,
       el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Open orders'), printBtn),

@@ -56,6 +56,7 @@
 
   // Field labels for a row. `address` is the delivery address for home, the address on the island for boats.
   function fieldLabel(key, method) {
+    if (String(key).indexOf('more.') === 0) return 'Another package size';
     if (key === 'address') return method === 'boat' ? 'Address on the island' : 'Delivery address';
     if (key === 'departureTime') return method === 'airport' ? 'Speedboat departure' : 'Departure time';
     return ({ name: 'Receiver name', phone: 'Contact number', method: 'Delivery method', zone: 'Area', landmark: 'Landmark', tier: 'Package size', island: 'Destination island',
@@ -188,8 +189,11 @@
   // ---- Row model ----------------------------------------------------------------------------------------------------------------
   function blankRow(tiers) {
     return { id: MDM.id('row'), name: '', phone: '', method: 'home', address: '', zone: '', landmark: '', island: '', vesselType: 'speedboat', boatName: '', departureDate: MDM.ui.dayKey(),
-      departureTime: '', jetty: 'male_jetties', airportPoint: 'resort_counters', counter: '', resort: '', speedboat: '', tier: (tiers[0] || {}).value || '', cod: '', instructions: '', reference: '', description: '', raw: {} };
+      departureTime: '', jetty: 'male_jetties', airportPoint: 'resort_counters', counter: '', resort: '', speedboat: '', tier: (tiers[0] || {}).value || '', cod: '', instructions: '', reference: '', description: '', more: [], raw: {} };
   }
+  // More packages for the same receiver (client, 09/11/2026: "for the same receiver, add additional bags"): each at one of the
+  // agreed sizes, with what is in it. They are one order with a label per package.
+  const blankMore = row => ({ id: MDM.id('pkx'), tier: row.tier || '', description: '' });
   // A row counts once it has any receiver or order detail; a row with only a size, a method or an amount is template residue.
   const filled = r => ['name', 'phone', 'address', 'island', 'landmark', 'reference', 'description', 'instructions', 'boatName', 'resort', 'counter'].some(k => String(r[k] || '').trim());
 
@@ -238,6 +242,7 @@
     if (r.raw && r.raw.tier && !r.tier) e.tier = 'Not one of your agreed sizes: ' + r.raw.tier + '. Use ' + sizes;
     else if (!r.tier) e.tier = 'Choose the package size';
     else if (!tiers.some(t => t.value === r.tier)) e.tier = 'Not one of your agreed sizes. Use ' + sizes;
+    (r.more || []).forEach(m => { if (!tiers.some(t => t.value === m.tier)) e['more.' + m.id] = 'Choose the package size'; });
     if (method === 'boat' || method === 'cargo') { if (!String(r.island || '').trim()) e.island = 'Enter the destination island'; }
     if (method === 'boat') {
       // The address on the island is required (client, 01/11/2026): the receiver is found by it when the boat arrives.
@@ -273,16 +278,19 @@
   function toBatchRow(r) {
     const d = delivery(r);
     return { name: d.recipientName, phone: d.recipientPhone, address: d.address, zone: d.zone || 'male', landmark: d.landmark, tier: r.tier, description: String(r.description || '').trim(), fragile: false,
-      instructions: d.instructions, reference: String(r.reference || '').trim(), cod: parseMoney(r.cod) || 0, method: r.method, boat: d.boat, cargo: d.cargo, airport: d.airport };
+      instructions: d.instructions, reference: String(r.reference || '').trim(), cod: parseMoney(r.cod) || 0, method: r.method, boat: d.boat, cargo: d.cargo, airport: d.airport,
+      more: (r.more || []).map(m => ({ tier: m.tier, description: String(m.description || '').trim() })) };
   }
-  // quoteRow(row, acc, settings, pickupZone) → { rate, fees, total, feeLines } priced exactly as store.createBatch prices it.
+  // quoteRow(row, acc, settings, pickupZone) → { rate (every package), count, fees, total, feeLines } priced exactly as store.createBatch
+  // prices it, or null while a package has no size (or one this account has no agreed rate for).
   function quoteRow(r, acc, settings, pickupZone) {
-    const tierInfo = MDM.pricing.accountTiers(acc, settings).find(t => t.value === r.tier);
-    if (!tierInfo) return null;   // no size yet, or a size this account has no agreed rate for
-    const rate = MDM.pricing.businessRate(acc, r.tier, settings);
+    const tiers = MDM.pricing.accountTiers(acc, settings);
+    const list = [{ tier: r.tier }].concat(r.more || []);
+    if (list.some(p => !tiers.some(t => t.value === p.tier))) return null;
     const end = MDM.deliveryEndpoint(delivery(Object.assign({}, r, { zone: r.zone || 'male' })));
-    const q = MDM.pricing.quote({ service: 'business', packages: [{ id: 'q', size: tierInfo.size, tier: r.tier, tierRate: rate, underOneFt: tierInfo.size === 'bag', pickup: { zone: pickupZone || 'male' }, dropoff: end }] }, settings);
-    return { rate, fees: q.totals.fees, total: q.totals.total, feeLines: q.feeLines };
+    const pk = list.map((p, i) => { const t = tiers.find(x => x.value === p.tier); return { id: 'q' + i, size: t.size, tier: p.tier, tierRate: MDM.pricing.businessRate(acc, p.tier, settings), underOneFt: t.size === 'bag', pickup: { zone: pickupZone || 'male' }, dropoff: end }; });
+    const q = MDM.pricing.quote({ service: 'business', packages: pk }, settings);
+    return { rate: pk.reduce((n, p) => n + p.tierRate, 0), count: pk.length, fees: q.totals.fees, total: q.totals.total, feeLines: q.feeLines };
   }
 
   // ---- Spreadsheet reading --------------------------------------------------------------------------------------------------------
@@ -435,13 +443,45 @@
   const rowKeys = row => ['name', 'phone', 'method'].concat(METHOD_FIELDS[row.method] || METHOD_FIELDS.home, ['tier', 'cod', 'instructions', 'reference', 'description']);
   const OPTIONAL = ['landmark', 'instructions', 'reference', 'description', 'cod', 'counter', 'speedboat'];
   // rowFields(row, ctx, idPrefix) → the labelled fields of one package card, in rowKeys order (a method change rebuilds them).
+  // ctx.more adds "Add another package" for the same receiver (the bulk order's cards).
   function rowFields(row, ctx, idPrefix) {
-    return rowKeys(row).map(k => {
+    const out = rowKeys(row).map(k => {
       const c = rowControl(row, k, ctx);
       c.removeAttribute('aria-label');
       c.id = idPrefix + '-' + k;
       return MDM.ui.field({ name: k, label: fieldLabel(k, row.method), control: c, optional: OPTIONAL.indexOf(k) >= 0 || (k === 'departureTime' && row.method === 'airport'), class: WIDE[k] ? 'bulk-item__wide' : null });
     });
+    if (ctx.more) out.push(moreBlock(row, ctx, idPrefix));
+    return out;
+  }
+  // The receiver's other packages: a size and the contents each, "Add another package" below. A change tells ctx.onChange(row, key):
+  // 'more.<id>' for a size, 'more' when a package is added or removed; typing the contents tells ctx.onInput(row, 'moreContents').
+  function moreBlock(row, ctx, idPrefix) {
+    const el = MDM.ui.el;
+    row.more = row.more || [];
+    const list = el('div', { class: 'bulk-more__list' });
+    const add = el('button', { type: 'button', class: 'btn btn--secondary btn--sm bulk-more__add', 'data-testid': 'bulk-more-add',
+      on: { click: () => { row.more.push(blankMore(row)); draw(); changed('more'); const s = list.querySelector('.bulk-more__line:last-child select'); if (s) s.focus(); } } },
+      MDM.ui.html(MDM.icon('plus', 16)), 'Add another package');
+    const changed = key => { if (ctx.onChange) ctx.onChange(row, key); };
+    function draw() {
+      list.replaceChildren(...row.more.map((m, i) => {
+        const n = i + 2, id = idPrefix + '-more-' + m.id;
+        const size = el('select', { class: 'select', id, 'data-row': row.id, 'data-key': 'more.' + m.id, 'data-testid': 'bulk-more-size' }, tierOptions(ctx.tiers).map(o => el('option', { value: o.value }, o.label)));
+        size.value = m.tier || '';
+        if (size.value !== m.tier) m.tier = size.value;
+        size.addEventListener('change', () => { m.tier = size.value; changed('more.' + m.id); });
+        const contents = el('input', { class: 'input', type: 'text', id: id + '-contents', value: m.description || '', 'data-testid': 'bulk-more-contents' });
+        contents.addEventListener('input', () => { m.description = contents.value; if (ctx.onInput) ctx.onInput(row, 'moreContents'); });
+        const remove = el('button', { type: 'button', class: 'btn btn--ghost btn--icon bulk-more__remove', 'aria-label': 'Remove package ' + n, 'data-testid': 'bulk-more-remove',
+          on: { click: () => { row.more.splice(row.more.indexOf(m), 1); draw(); changed('more'); add.focus(); } } }, MDM.ui.html(MDM.icon('trash', 16)));
+        return el('div', { class: 'bulk-more__line', 'data-testid': 'bulk-more-line' },
+          MDM.ui.field({ name: 'more.' + m.id, label: 'Package ' + n + ' size', control: size }),
+          MDM.ui.field({ name: 'moreContents', label: 'Contents', control: contents, optional: true }), remove);
+      }));
+    }
+    draw();
+    return el('div', { class: 'bulk-more', 'data-testid': 'bulk-more' }, list, add);
   }
 
   MDM.bizKit = {

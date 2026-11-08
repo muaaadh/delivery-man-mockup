@@ -200,7 +200,7 @@
       el('h2', { class: 'h3' }, 'Your details'),
       el('div', { class: 'grid-2' },
         f('name', 'Name', el('input', { class: 'input', autocomplete: 'name', value: me.name || c.name || '', 'data-testid': 'store-name' })),
-        f('phone', 'Mobile number', el('input', { class: 'input', type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', value: me.phone || '', 'data-testid': 'store-phone' }), { hint: 'For the order code and updates' })),
+        f('phone', 'Mobile number', el('input', { class: 'input', type: 'tel', inputmode: 'tel', autocomplete: 'tel', placeholder: '7XX XXXX', value: me.phone || '', 'data-testid': 'store-phone' }), { hint: 'For the order code and updates. From abroad: + and the country code' })),
       el('h2', { class: 'h3 store-form__h' }, 'Delivery'),
       f('address', 'Address', el('input', { class: 'input', autocomplete: 'street-address', placeholder: 'House or building, floor, road', value: saved.address || '', 'data-testid': 'store-address' })),
       el('div', { class: 'grid-2' }, f('zone', 'Island or zone', zoneSel), f('landmark', 'Landmark', el('input', { class: 'input', placeholder: 'Near the mosque' }), { optional: true })),
@@ -212,7 +212,7 @@
     const drawSum = () => sumSlot.replaceChildren(checkoutSummary(zoneSel.value));
     zoneSel.addEventListener('change', drawSum); drawSum();
     const rules = {
-      name: v => v ? null : 'Enter your name', phone: v => !v ? 'Enter your mobile number' : (MDM.ui.phone.valid(v) ? null : 'Enter a 7-digit Maldives mobile number'),
+      name: v => v ? null : 'Enter your name', phone: v => !v ? 'Enter your mobile number' : (MDM.ui.phone.valid(v, { intl: true }) ? null : 'Enter a 7-digit Maldives number, or + and the country code'),
       address: v => v ? null : 'Enter the delivery address', zone: v => v ? null : 'Choose your zone',
     };
     form.addEventListener('submit', async e => {

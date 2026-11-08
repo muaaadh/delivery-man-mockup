@@ -315,6 +315,7 @@
     if (owner) {
       stops.forEach(s => { [s.photoId, s.proofPhotoId].concat(s.proofPhotoIds || []).forEach(id => { if (id) ids.add(id); }); });
       (o.packages || []).forEach(p => { if (p.photoId) ids.add(p.photoId); });
+      ((o.details || {}).items || []).forEach(it => { if (it && it.photoId) ids.add(it.photoId); });
       (o.documents || []).forEach(d => { if (d.fileId) ids.add(d.fileId); });
       (o.charges || []).forEach(c => { if (c.photoId && !c.void) ids.add(c.photoId); });
     }
@@ -934,12 +935,15 @@
   }
 
   // ---- Documents and proof photos (requirements §8, §13) -----------------------------------------------------------------------
+  // On the live service a file is a signed link (https), not a data URL: its type says whether it is a picture. A link elsewhere opens
+  // in a new tab (a browser downloads only from its own site).
   function thumbItem(f, title, meta, testid) {
-    const isImg = f && f.dataUrl && /^data:image\//.test(f.dataUrl);
+    const isImg = f && f.dataUrl && (/^image\//.test(f.type || '') || /^data:image\//.test(f.dataUrl));
+    const away = f && f.dataUrl && !/^(data|blob):/.test(f.dataUrl) ? { target: '_blank', rel: 'noopener' } : {};
     return el('div', { class: 'list__item', 'data-testid': testid },
-      isImg ? el('a', { href: f.dataUrl, download: f.name || 'photo', 'aria-label': 'Download ' + title }, el('img', { class: 'thumb', src: f.dataUrl, alt: title })) : el('span', { class: 'thumb track-file', 'aria-hidden': 'true' }, 'PDF'),
+      isImg ? el('a', Object.assign({ href: f.dataUrl, download: f.name || 'photo', 'aria-label': 'Open ' + title }, away), el('img', { class: 'thumb', src: f.dataUrl, alt: title, 'data-testid': testid + '-img' })) : el('span', { class: 'thumb track-file', 'aria-hidden': 'true' }, 'PDF'),
       el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, title), meta ? el('div', { class: 'list__meta' }, meta) : null),
-      f && f.dataUrl ? el('a', { class: 'btn btn--ghost btn--sm', href: f.dataUrl, download: f.name || 'file' }, 'Download', el('span', { class: 'sr-only' }, ' ' + title)) : null);
+      f && f.dataUrl ? el('a', Object.assign({ class: 'btn btn--ghost btn--sm', href: f.dataUrl, download: f.name || 'file' }, away), 'Download', el('span', { class: 'sr-only' }, ' ' + title)) : null);
   }
   function buildProofs(o, stops, files) {
     const items = [];
@@ -963,6 +967,7 @@
       seenPhotos.add(p.photoId);
       const f = files[p.photoId]; if (f) items.push(thumbItem(f, 'Your package photo', MDM.pricing.sizeLabel(p.size) + (p.description ? ' · ' + p.description : ''), 'track-package-photo'));
     });
+    ((o.details || {}).items || []).forEach(it => { const f = it && it.photoId ? files[it.photoId] : null; if (f) items.push(thumbItem(f, 'Sample photo', it.name, 'track-item-photo')); });
     (o.documents || []).forEach(d => { const f = files[d.fileId]; items.push(thumbItem(f, d.name || 'Document', DOC_KIND[d.kind] || 'Document', 'track-document')); });
     // The Maldivian Cargo bill behind the charges on the price (a business's receiver never sees its prices).
     if (!state.receiver) (o.charges || []).filter(c => c.type === 'cargo' && c.photoId && c.billable && !c.void).forEach(c => {

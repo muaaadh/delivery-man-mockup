@@ -78,12 +78,12 @@
       setTimeout(() => code.focus(), 0);
       return { form, desc: 'Code sent to ' + MDM.ui.phone.format(state.phone) + '.' };
     }
-    const phone = el('input', { class: 'input', id: 'phone', type: 'tel', inputmode: 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', value: state.phone, 'data-testid': 'login-phone' });
+    const phone = el('input', { class: 'input', id: 'phone', type: 'tel', inputmode: kind === 'customer' ? 'tel' : 'numeric', autocomplete: 'tel', placeholder: '7XX XXXX', value: state.phone, 'data-testid': 'login-phone' });
     const notMember = el('div', { class: 'alert alert--warn', hidden: true }, el('div', {}, 'No business account on this number. ', el('a', { href: MDM.href('business/#apply') }, 'Apply for one')));
     const form = el('form', { class: 'login-form', novalidate: true, on: { submit: e => {
       e.preventDefault();
       notMember.hidden = true;
-      if (!MDM.ui.phone.valid(phone.value)) { setError(phone, 'Enter a 7-digit Maldives mobile number'); phone.focus(); return; }
+      if (!MDM.ui.phone.valid(phone.value, { intl: kind === 'customer' })) { setError(phone, kind === 'customer' ? 'Enter a 7-digit Maldives number, or + and the country code' : 'Enter a 7-digit Maldives mobile number'); phone.focus(); return; }
       if (kind === 'business' && !accounts.some(a => MDM.ui.phone.normalize(a.phone) === MDM.ui.phone.normalize(phone.value) && a.status === 'approved')) { notMember.hidden = false; return; }
       state.phone = phone.value; state.step = 2; render();
     } } },
@@ -91,7 +91,7 @@
       notMember,
       actions(el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'login-continue' }, 'Send code'),
         kind === 'business' ? el('a', { class: 'login-link', href: MDM.href('business/#apply') }, 'Open a business account') : el('a', { class: 'login-link', href: MDM.href('request/') }, 'New here? Request a delivery')));
-    if (state.phone && kind === 'customer') setTimeout(() => { if (MDM.ui.phone.valid(state.phone)) form.requestSubmit(); }, 0);
+    if (state.phone && kind === 'customer') setTimeout(() => { if (MDM.ui.phone.valid(state.phone, { intl: true })) form.requestSubmit(); }, 0);
     return { form, desc: kind === 'business' ? null : 'We text a code to your mobile. No password.' };
   }
 

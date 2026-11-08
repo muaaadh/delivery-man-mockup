@@ -43,7 +43,7 @@
   const STAGE_OPTIONS = [{ value: 'collection', label: 'At collection' }, { value: 'delivery', label: 'At delivery' }, { value: 'office', label: 'Office' }];
   const PAID_BY = [{ value: 'driver', label: 'Driver' }, { value: 'office', label: 'Office' }];
   const AUDIENCE = { driver: 'To the driver', operations: 'To operations', business: 'To the business' };
-  const FILE_KIND = { package: 'Package photo', proof_collection: 'Proof of collection', proof: 'Proof of delivery', failed: 'Failed attempt', slip: 'Transfer slip', receipt: 'Shop receipt', document: 'Document', cargo_bill: 'Maldivian Cargo bill' };
+  const FILE_KIND = { item_photo: 'Sample photo', package: 'Package photo', proof_collection: 'Proof of collection', proof: 'Proof of delivery', failed: 'Failed attempt', slip: 'Transfer slip', receipt: 'Shop receipt', document: 'Document', cargo_bill: 'Maldivian Cargo bill' };
   // What a customer upload is for (request form documents): shown before the file name.
   const DOC_KIND = { invoice: 'Invoice', quotation: 'Quotation', payment_slip: 'Payment slip', collection_doc: 'Collection document', document: 'Document' };
   const state = {
@@ -401,7 +401,7 @@
     if (k === 'ownerContact' || k === 'passengerPhone') return phone.format(v);
     return String(v);
   }
-  function detailsSection(o) {
+  function detailsSection(o, ctx) {
     const d = o.details || {};
     // Shop & deliver keeps the shop, the item list and the budget as structured details (web app updates §1); everything else is a plain value.
     const SPECIAL = ['shop', 'items', 'budget'];
@@ -419,6 +419,8 @@
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, (n + 1) + '. ' + (i.name || 'Item')),
           i.details ? el('div', { class: 'list__meta' }, i.details) : null,
           i.instructions ? el('div', { class: 'list__meta' }, 'Note: ' + i.instructions) : null),
+        // The sample photo the customer added (client, 06/11/2026).
+        i.photoId ? thumbButton(((ctx && ctx.files) || []).find(f => f.id === i.photoId), 'Sample photo: ' + (i.name || 'item')) : null,
         el('div', { class: 'list__aside mono' }, '× ' + (i.qty || 1)))))) : null;
     const storeItems = o.items && o.items.length ? el('div', { class: 'list' }, o.items.map(i => el('div', { class: 'list__item' }, el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, i.qty + ' × ' + i.name)), el('div', { class: 'list__aside mono' }, money(i.total))))) : null;
     if (!rows.filter(Boolean).length && !shopItems && !storeItems) return null;
@@ -655,7 +657,8 @@
   // download link so the office can still open them.
   function filesSection(o, ctx) {
     const doc = id => (o.documents || []).find(d => d.fileId === id) || {};
-    const textOf = f => { const d = doc(f.id); return f.kind === 'document' ? [DOC_KIND[d.kind], d.name || f.name].filter(Boolean).join(': ') : (FILE_KIND[f.kind] || f.name); };
+    const item = id => (((o.details || {}).items) || []).find(i => i && i.photoId === id);
+    const textOf = f => { const d = doc(f.id); if (f.kind === 'item_photo' && item(f.id)) return 'Sample photo: ' + item(f.id).name; return f.kind === 'document' ? [DOC_KIND[d.kind], d.name || f.name].filter(Boolean).join(': ') : (FILE_KIND[f.kind] || f.name); };
     const images = ctx.files.filter(f => /^image\//.test(f.type || ''));
     const others = ctx.files.filter(f => !/^image\//.test(f.type || '') && f.dataUrl);
     if (!images.length && !others.length) return null;
@@ -1597,7 +1600,7 @@
     const ctx = { drivers, account, batch, notifications, zones, onDuty, files, fileById: {} };
     files.forEach(f => { ctx.fileById[f.id] = f; });
     const footer = footerFor(o, ctx);
-    const body = [alertsSection(o, ctx), summarySection(o, ctx), detailsSection(o), addressesSection(o), methodSection(o), packagesSection(o, ctx), filesSection(o, ctx), routeSection(o, ctx),
+    const body = [alertsSection(o, ctx), summarySection(o, ctx), detailsSection(o, ctx), addressesSection(o), methodSection(o), packagesSection(o, ctx), filesSection(o, ctx), routeSection(o, ctx),
       pricingSection(o), chargesSection(o, ctx), codSection(o, ctx), paymentSection(o, ctx), prioritySection(o), cancellationSection(o, ctx), historySection(o), changesSection(o), notificationsSection(ctx), notesSection(o), activitySection(o)].filter(Boolean);
     const panel = drawer.el(), bodyEl = drawer.bodyEl();
     const active = document.activeElement;

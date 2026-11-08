@@ -130,7 +130,7 @@
         el('div', { class: 'label__idtext' },
           el('div', { class: 'label__code' }, o.code),
           batch && n === 1 ? el('div', { class: 'label__pkg' }, 'Package ' + o.batchIndex + ' of ' + (batch.orderIds || []).length + ' · ' + batch.code)
-            : el('div', { class: 'label__pkg' }, 'Package ' + i + ' of ' + n + (batch ? ' · ' + batch.code : '')),
+            : el('div', { class: 'label__pkg' }, 'Package ' + i + ' of ' + n + (batch ? ' · ' + batch.code + ' #' + o.batchIndex : '')),
           el('div', { class: 'label__date' }, MDM.ui.fmtDate(o.createdAt, { year: true }))),
         el('div', { class: 'label__qr' }, qr ? html(qr) : el('div', { class: 'label__qr-fallback' }, o.code))),
       el('section', { class: 'label__to' },

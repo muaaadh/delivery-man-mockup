@@ -53,7 +53,7 @@
   let checks = {};   // step → [{ wrap, check() → message|null, focus() }]
 
   // ---- Draft -----------------------------------------------------------------------------------------------------------------
-  function blankItem() { return { name: '', details: '', qty: '1', instructions: '' }; }
+  function blankItem() { return { name: '', details: '', qty: '1', instructions: '', photoId: '' }; }
   function blankPhoto() { return { photoId: null, photoName: '' }; }
   const blankCounts = () => ({ bag: 1, box: 0, xl: 0 });
   // id: the order's extraCollections id, made here so each package counted at the stop can point at it (package.collectionId).
@@ -158,7 +158,7 @@
   const stepLabel = n => (n === 2 ? (isShop() ? 'Shop and items' : 'Collection') : STEP_LABEL[n]);
   // A signed-in customer who has signed up (name, number and "what we carry" on the account) skips step 5: the account fills it in.
   // "Edit" on the review opens it again for this request. The office always sees step 5.
-  const profileReady = () => !!(me && profile && trim(profile.name) && profile.termsAcceptedAt && phone.valid(profile.phone));
+  const profileReady = () => !!(me && profile && trim(profile.name) && profile.termsAcceptedAt && phone.valid(profile.phone, { intl: true }));
   const skipDetails = () => !OFFICE && profileReady() && !draft.editDetails && (draft.customer.notify !== 'email' || !!trim(draft.customer.email));
   const visibleSteps = () => (skipDetails() ? [1, 2, 3, 4, 6] : [1, 2, 3, 4, 5, 6]);
   const nextStep = n => visibleSteps().find(k => k > n) || n;
@@ -408,7 +408,7 @@
     reg(n, wrap, () => {
       const v = trim(getPath(path));
       if (o.required && !v) return o.requiredMessage || 'Fill in ' + label.toLowerCase();
-      if (v && type === 'tel' && !phone.valid(v, { intl: !!o.intl, landline: !!o.landline })) return 'Enter a valid ' + (o.intl ? 'phone' : 'Maldivian mobile') + ' number';
+      if (v && type === 'tel' && !phone.valid(v, { intl: !!o.intl, landline: !!o.landline })) return o.intl ? 'Enter a 7-digit Maldives number, or + and the country code' : 'Enter a valid Maldivian mobile number';
       if (v && type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return 'Enter a valid email address';
       if (v && type === 'number' && (isNaN(Number(v)) || Number(v) < (o.min != null ? o.min : 0))) return 'Enter a number' + (o.min ? ' of at least ' + o.min : '');
       return o.validate ? o.validate(v) : null;
@@ -963,6 +963,35 @@
     return out;
   }
   const blankItem_ = it => !it || (!trim(it.name) && !trim(it.details) && !trim(it.instructions));
+  // A sample photo of an item (client, 06/11/2026): the driver sees what to buy. Optional, under the item's fields.
+  function itemPhoto(it, i) {
+    const what = () => trim(it.name) || 'item ' + (i + 1);
+    const input = el('input', { class: 'sr-only', type: 'file', accept: 'image/*', tabindex: '-1', 'aria-label': 'Sample photo of item ' + (i + 1), 'data-testid': 'request-item-photo' });
+    const box = el('div', { class: 'request-item__photo-box' });
+    const err = el('div', { class: 'field__error', hidden: true });
+    async function paint() {
+      const f = it.photoId ? await MDM.store.get('files', it.photoId) : null;
+      if (it.photoId) box.replaceChildren(f && f.dataUrl ? el('img', { class: 'request-item__thumb', src: f.dataUrl, alt: 'Sample photo of ' + what(), 'data-testid': 'request-item-photo-thumb' }) : null,
+        el('span', { class: 'small muted' }, 'Sample photo'),
+        el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'request-item-photo-remove', on: { click: () => { MDM.store.remove('files', it.photoId).catch(() => {}); it.photoId = ''; saveDraft(); paint(); } } },
+          'Remove', el('span', { class: 'sr-only' }, ' the photo of ' + what())));
+      else box.replaceChildren(el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'request-item-photo-pick', on: { click: () => input.click() } },
+        html(MDM.icon('camera', 16)), 'Add a sample photo', el('span', { class: 'sr-only' }, ' of ' + what())));
+    }
+    input.addEventListener('change', async () => {
+      const f = input.files && input.files[0]; input.value = '';
+      if (!f) return;
+      err.hidden = true;
+      try {
+        if (/pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '')) throw new Error('Choose a photo (JPG or PNG).');
+        const row = await storeFile(f, 'item_photo');
+        if (it.photoId) MDM.store.remove('files', it.photoId).catch(() => {});
+        it.photoId = row.id; saveDraft(); paint();
+      } catch (e) { err.textContent = e.message; err.hidden = false; }
+    });
+    paint();
+    return el('div', { class: 'request-item__photo' }, box, input, err);
+  }
   function itemsEditor(n) {
     const rows = draft.items.map((it, i) => {
       const p = 'items.' + i + '.';
@@ -974,8 +1003,9 @@
         F(n, p + 'details', 'Details', { noOptional: true, placeholder: 'Brand, size or colour', testid: 'request-item-details', fieldClass: 'request-item__details' }),
         F(n, p + 'qty', 'Quantity', { type: 'number', required: true, min: 1, testid: 'request-item-qty', attrs: { min: '1', max: '999', step: '1' }, validate: v => (Number.isInteger(Number(v)) && Number(v) <= 999 ? null : 'Enter a whole number up to 999'), fieldClass: 'request-item__qty' }),
         F(n, p + 'instructions', 'Special instructions', { noOptional: true, placeholder: 'Anything to check', testid: 'request-item-instructions', fieldClass: 'request-item__notes' }),
+        itemPhoto(it, i),
         el('div', { class: 'request-item__remove' }, el('button', { type: 'button', class: 'btn btn--ghost btn--icon', 'aria-label': 'Remove item ' + (i + 1), 'data-testid': 'request-item-remove', disabled: draft.items.length < 2,
-          on: { click: () => { draft.items.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="request-item-add"]'); if (b) b.focus({ preventScroll: true }); } } }, html(MDM.icon('trash', 16)))));
+          on: { click: () => { if (it.photoId) MDM.store.remove('files', it.photoId).catch(() => {}); draft.items.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="request-item-add"]'); if (b) b.focus({ preventScroll: true }); } } }, html(MDM.icon('trash', 16)))));
     });
     const addBtn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'request-item-add', disabled: draft.items.length >= MAX_ITEMS,
       on: { click: () => { draft.items.push(blankItem()); saveDraft(); renderStep(n); updateSummary(); const all = dom.steps[n].querySelectorAll('[data-testid="request-item-name"]'); if (all.length) all[all.length - 1].focus(); } } }, html(MDM.icon('plus', 16)), 'Add an item');
@@ -1172,7 +1202,7 @@
     return [head(n, OFFICE ? 'Customer details' : 'Your details'),
       !OFFICE && profileReady() ? MDM.ui.notice('info', 'Signed in as ' + profile.name + '. Changes apply to this request only.', { testid: 'request-signed-in' }) : null,
       grid(F(n, 'customer.name', OFFICE ? 'Name' : 'Your name', { required: true, attrs: { autocomplete: OFFICE ? 'off' : 'name' }, onChange: sync }),
-        F(n, 'customer.phone', 'Mobile number', { type: 'tel', required: true, attrs: OFFICE ? { autocomplete: 'off' } : null, onChange: () => { sync(); if (OFFICE) lookupSoon(); } })),
+        F(n, 'customer.phone', 'Mobile number', { type: 'tel', required: true, intl: true, hint: 'A number from abroad: + and the country code', attrs: OFFICE ? { autocomplete: 'off' } : null, onChange: () => { sync(); if (OFFICE) lookupSoon(); } })),
       seg(n, 'customer.notify', OFFICE ? 'Notify by' : 'Send updates by', NOTIFY, { onChange: () => { saveDraft(); rerender(n); } }),
       F(n, 'customer.email', 'Email', { type: 'email', required: draft.customer.notify === 'email', attrs: { autocomplete: OFFICE ? 'off' : 'email' } }),
       needsTerms() ? el('div', { class: 'request-terms', 'data-testid': 'request-terms-box' }, el('p', { class: 'request-terms__text' }, settings.terms || ''),
@@ -1242,7 +1272,7 @@
     if (isShop()) {
       const s = draft.shop;
       return [reviewRow('Shop', trim(s.name) || (OFFICE ? 'Any shop, our team chooses' : 'Any shop, we choose')), reviewRow('Area', MDM.geo.zoneLabel(s.zone || 'male')), trim(s.phone) ? reviewRow('Phone', phone.format(s.phone)) : null,
-        reviewRow('Items', el('ol', { class: 'request-review__items', 'data-testid': 'request-review-items' }, draft.items.filter(it => trim(it.name)).map(it => el('li', null, (Math.max(1, Math.round(Number(it.qty) || 1))) + ' × ' + trim(it.name) + (trim(it.details) ? ', ' + trim(it.details) : '') + (trim(it.instructions) ? ' (' + trim(it.instructions) + ')' : ''))))),
+        reviewRow('Items', el('ol', { class: 'request-review__items', 'data-testid': 'request-review-items' }, draft.items.filter(it => trim(it.name)).map(it => el('li', null, (Math.max(1, Math.round(Number(it.qty) || 1))) + ' × ' + trim(it.name) + (trim(it.details) ? ', ' + trim(it.details) : '') + (trim(it.instructions) ? ' (' + trim(it.instructions) + ')' : '') + (it.photoId ? ', with a sample photo' : ''))))),
         reviewRow('Price', 'Agreed on a call before we buy')];
     }
     const saved = !isNewAddress('collection') ? savedById(c.savedId) : null;
@@ -1382,7 +1412,7 @@
     if (isShop()) {
       const s = draft.shop;
       // No budget or "if unavailable" choice any more (round 4): the shop, the list and the price are agreed on a call before buying.
-      return { shop: { name: trim(s.name), zone: s.zone || 'male', phone: normPhone(s.phone) }, items: draft.items.filter(it => trim(it.name)).map(it => ({ name: trim(it.name), details: trim(it.details), qty: Math.max(1, Math.round(Number(it.qty) || 1)), instructions: trim(it.instructions) })) };
+      return { shop: { name: trim(s.name), zone: s.zone || 'male', phone: normPhone(s.phone) }, items: draft.items.filter(it => trim(it.name)).map(it => Object.assign({ name: trim(it.name), details: trim(it.details), qty: Math.max(1, Math.round(Number(it.qty) || 1)), instructions: trim(it.instructions) }, it.photoId ? { photoId: it.photoId } : {})) };
     }
     const keep = { postal: ['carrier'].concat(postalKeys()),
       shop_collect: ['shopName', 'shopAddress', 'shopZone', 'proof', 'orderNo'], office: ['task', 'organisation', 'reference', 'details', 'returnDocs'], home: [],
@@ -1441,19 +1471,20 @@
       if (draft.method === 'home' && draft.delivery.self) Object.assign(delivery, { recipientName: customer.name, recipientPhone: customer.phone });
       const documents = draft.docs.filter(x => relevantDoc(x.kind));
       const packages = buildPackages(false);
+      const details = detailsFor();
       // The office records how the order came in and who entered it; everything else is the customer's order as they would send it.
       const order = await MDM.store.createOrder({
         source: OFFICE ? draft.source : 'web', requestType: isShop() ? 'shop_buy' : t, service: service(), serviceLevel: draft.level, customerId: saved.id, customer,
-        collection, delivery, details: detailsFor(), documents, packages, extraCollections: extraData(), termsAcceptedAt,
+        collection, delivery, details, documents, packages, extraCollections: extraData(), termsAcceptedAt,
         extraVehicle: !!draft.extraVehicle && MDM.extraVehicleEligible(packages),
         schedule: draft.level === 'advance' ? Object.assign({ type: 'advance' }, draft.schedule) : { type: 'asap' },
         payment: { method: 'transfer', status: 'pending', upfrontRequired: upfrontForced() || draft.pay === 'upfront' },
         by: OFFICE ? officeBy() : 'customer',
       });
-      const fileIds = documents.map(x => x.fileId).concat(packages.map(p => p.photoId).filter(Boolean));
+      const fileIds = documents.map(x => x.fileId).concat(packages.map(p => p.photoId), (details.items || []).map(it => it.photoId)).filter(Boolean);
       for (const id of Array.from(new Set(fileIds))) { await MDM.store.update('files', id, { orderId: order.id }).catch(() => {}); }
       // Uploads left behind by a type or size the customer switched away from are not part of the order: drop them.
-      const unused = draft.docs.map(x => x.fileId).concat(SIZES.map(sz => draft.photos[sz].photoId)).filter(id => id && fileIds.indexOf(id) < 0);
+      const unused = draft.docs.map(x => x.fileId).concat(SIZES.map(sz => draft.photos[sz].photoId), draft.items.map(it => it.photoId)).filter(id => id && fileIds.indexOf(id) < 0);
       for (const id of Array.from(new Set(unused))) { await MDM.store.remove('files', id).catch(() => {}); }
       if (!OFFICE && (draft.remember || me)) { try { localStorage.setItem(ME_KEY, JSON.stringify({ name: customer.name, phone: customer.phone, email: customer.email, notify: customer.notify, signedInAt: (me && me.signedInAt) || new Date().toISOString() })); } catch (err) { /* storage blocked */ } }
       clearDraft();
@@ -1511,7 +1542,7 @@
   async function lookupCustomer(raw, o) {
     o = o || {};
     const my = ++lookupSeq;
-    const norm = phone.valid(raw) ? phone.normalize(raw) : null;
+    const norm = phone.valid(raw, { intl: true }) ? phone.normalize(raw) : null;
     const found = norm ? ((await MDM.store.list('customers', { where: { phone: norm } }))[0] || null) : null;
     if (my !== lookupSeq) return;
     const before = profile;

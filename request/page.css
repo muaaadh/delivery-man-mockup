@@ -106,7 +106,7 @@ body.page-request .request-flags .field + .field { margin-top: 0; }
 body.page-request .request-items-field > * + * { margin-top: 10px; }
 body.page-request .request-items { display: flex; flex-direction: column; gap: 10px; }
 body.page-request .request-items__head { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) 92px minmax(0, 1.5fr) 40px; gap: 10px; font-size: 13px; font-weight: 500; color: var(--text-2); }
-body.page-request .request-item { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) 92px minmax(0, 1.5fr) 40px; grid-template-areas: "name details qty notes remove"; gap: 10px; align-items: start; }
+body.page-request .request-item { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.2fr) 92px minmax(0, 1.5fr) 40px; grid-template-areas: "name details qty notes remove" "photo photo photo photo ."; gap: 10px; align-items: start; }
 body.page-request .request-item .field + .field { margin-top: 0; }
 body.page-request .request-item__num { display: none; }
 body.page-request .request-item__name { grid-area: name; }
@@ -115,18 +115,23 @@ body.page-request .request-item__qty { grid-area: qty; }
 body.page-request .request-item__notes { grid-area: notes; }
 body.page-request .request-item__remove { grid-area: remove; }
 body.page-request .request-item__remove .btn { color: var(--text-2); }
+/* A sample photo of the item (client, 06/11/2026) */
+body.page-request .request-item__photo { grid-area: photo; margin-top: -4px; }
+body.page-request .request-item__photo-box { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+body.page-request .request-item__photo-box > .btn--ghost:first-child { margin-left: -12px; }
+body.page-request .request-item__thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
 body.page-request .request-items__add .btn { margin-top: 2px; }
 @media (min-width: 721px) {
   body.page-request .request-item .field > label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 }
 @media (max-width: 720px) {
   body.page-request .request-items__head { display: none; }
-  body.page-request .request-item { grid-template-columns: minmax(0, 1fr) 96px 44px; grid-template-areas: "num num remove" "name name name" "details details details" "notes notes qty"; padding: 6px 16px 16px; border-radius: var(--radius-lg); background: var(--surface); row-gap: 12px; }
+  body.page-request .request-item { grid-template-columns: minmax(0, 1fr) 96px 44px; grid-template-areas: "num num remove" "name name name" "details details details" "notes notes qty" "photo photo photo"; padding: 6px 16px 16px; border-radius: var(--radius-lg); background: var(--surface); row-gap: 12px; }
   body.page-request .request-item__num { display: flex; align-items: center; grid-area: num; font-size: 14px; font-weight: 600; }
   body.page-request .request-item__remove .btn { width: 44px; height: 44px; }
 }
 @media (max-width: 400px) {
-  body.page-request .request-item { grid-template-columns: minmax(0, 1fr) 44px; grid-template-areas: "num remove" "name name" "details details" "qty qty" "notes notes"; }
+  body.page-request .request-item { grid-template-columns: minmax(0, 1fr) 44px; grid-template-areas: "num remove" "name name" "details details" "qty qty" "notes notes" "photo photo"; }
   body.page-request .request-item__qty .input { max-width: 120px; }
 }
 

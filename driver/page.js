@@ -69,6 +69,13 @@
   // ---- Order and stop text ----------------------------------------------------------------------------------------------------
   const optLabel = (list, v) => ((list || []).find(x => x.value === v) || {}).label || v || '';
   const sizeName = s => MDM.pricing.sizeLabel(s);
+  // A bulk order's receiver may have several packages (client, 09/11/2026): '2 × Small, Medium', and how many to tick off.
+  function sizesText(o) {
+    const names = {};
+    (o.packages || []).forEach(p => { const k = optLabel(MDM.pricing.businessTiers(state.settings), p.tier) || sizeName(p.size); names[k] = (names[k] || 0) + 1; });
+    return Object.keys(names).map(k => (names[k] > 1 ? names[k] + ' × ' : '') + k).join(', ');
+  }
+  const pkgCount = list => list.reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0);
   const money = n => MDM.pricing.format(n);
   const phoneText = p => p ? MDM.ui.phone.format(p) : '';
   // "Name · +960 772 0006" for a definition list, with the number kept on one line.
@@ -318,8 +325,10 @@
     const items = [];
     (o.documents || []).forEach(d => items.push({ id: d.fileId, label: d.name || 'Document' }));
     (o.packages || []).forEach((p, i) => { if (p.photoId && p.photoSource !== 'driver') items.push({ id: p.photoId, label: 'Package photo' + ((o.packages || []).length > 1 ? ' ' + (i + 1) : '') }); });
+    // A sample photo of an item to buy (client, 06/11/2026): what it looks like.
+    ((o.details || {}).items || []).forEach(it => { if (it && it.photoId) items.push({ id: it.photoId, label: 'Photo: ' + (it.name || 'item'), kind: 'item' }); });
     if (!items.length) return null;
-    return el('div', { class: 'job__files' }, items.map(it => el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'driver-file', on: { click: () => viewFile(it.id, it.label) } }, icon('file', 16), it.label)));
+    return el('div', { class: 'job__files' }, items.map(it => el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'driver-file', on: { click: () => viewFile(it.id, it.label) } }, icon(it.kind === 'item' ? 'camera' : 'file', 16), it.label)));
   }
   function packagesBlock(o) {
     return el('div', { class: 'job__pkgs' },
@@ -502,7 +511,7 @@
     const b = c.batch, col = b.collection || {};
     return el('article', { class: 'card job job--collection', 'data-testid': 'driver-collection', 'data-batch-id': b.id, 'data-code': b.code },
       el('div', { class: 'card__body job__top' },
-        el('div', { class: 'job__head' }, el('h3', { class: 'mono mono--code job__code' }, b.code), el('span', { class: 'job__count' }, plural(c.kids.length, 'package'))),
+        el('div', { class: 'job__head' }, el('h3', { class: 'mono mono--code job__code' }, b.code), el('span', { class: 'job__count' }, plural(pkgCount(c.kids), 'package'))),
         el('div', { class: 'job__meta' }, [b.name, b.preferredTime ? 'at ' + b.preferredTime : ''].filter(Boolean).join(' · '))),
       el('div', { class: 'card__body job__body' },
         el('div', { class: 'job__stop' },
@@ -512,9 +521,9 @@
           contactRow(col.contactName || '', col.contactPhone || '', 'driver-collection-contact')),
         el('div', { class: 'job__pkgs' },
           el('div', { class: 'job__label' }, 'Packages'),
-          el('ul', { class: 'job__pkglist' }, c.kids.map(o => { const p = (o.packages || [])[0] || {}; return el('li', null, el('span', { class: 'job__pkgsize' }, String(o.batchIndex || '')), el('span', { class: 'job__pkgtext' }, [(o.delivery || {}).recipientName, optLabel(MDM.pricing.businessTiers(state.settings), p.tier) || sizeName(p.size)].filter(Boolean).join(' · '))); })))),
+          el('ul', { class: 'job__pkglist' }, c.kids.map(o => el('li', null, el('span', { class: 'job__pkgsize' }, String(o.batchIndex || '')), el('span', { class: 'job__pkgtext' }, [(o.delivery || {}).recipientName, sizesText(o)].filter(Boolean).join(' · '))))))),
       el('div', { class: 'card__body job__actions' },
-        el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary--go', 'data-testid': 'driver-collection-collect', on: { click: e => onBatchCollect(e.currentTarget, c) } }, 'Collect ' + plural(c.kids.length, 'package'))));
+        el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary--go', 'data-testid': 'driver-collection-collect', on: { click: e => onBatchCollect(e.currentTarget, c) } }, 'Collect ' + plural(pkgCount(c.kids), 'package'))));
   }
   // When a finished job was finished: the return to the sender for a business cancellation, otherwise the last update.
   const doneAt = o => (o.status === 'cancelled' && o.cancellation && o.cancellation.returnedAt) || o.updatedAt || '';
@@ -1179,20 +1188,20 @@
   // anything missing; the ticked ones go to the hub, the others stay to collect and the business is told.
   async function onBatchCollect(btn, c) {
     const b = c.batch;
-    const fields = c.kids.map(o => { const d = o.delivery || {}, p = (o.packages || [])[0] || {};
-      return { name: 'got_' + o.id, label: (o.batchIndex || '') + '. ' + (d.recipientName || o.code) + ' · ' + (optLabel(MDM.pricing.businessTiers(state.settings), p.tier) || sizeName(p.size)), type: 'checkbox', value: false,
-        hint: [o.code, (o.details || {}).reference ? 'ref ' + o.details.reference : '', p.description].filter(Boolean).join(' · ') }; });
+    const fields = c.kids.map(o => { const d = o.delivery || {}, what = (o.packages || []).map(p => p.description).filter((x, i, a) => x && a.indexOf(x) === i).join(', ');
+      return { name: 'got_' + o.id, label: (o.batchIndex || '') + '. ' + (d.recipientName || o.code) + ' · ' + sizesText(o), type: 'checkbox', value: false,
+        hint: [o.code, (o.details || {}).reference ? 'ref ' + o.details.reference : '', what].filter(Boolean).join(' · ') }; });
     fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: true, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', requiredMessage: 'Take a photo of the packages you collected' },
       { name: 'note', label: 'Missing packages', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Not packed yet', fold: 'A package is missing' });
     const v = await MDM.ui.dialog({ title: 'Collect ' + b.code, message: 'Tick each package you have. ' + b.name + '.', fields, okLabel: 'Confirm collection',
       validate: vals => (c.kids.some(o => vals['got_' + o.id]) ? null : { ['got_' + c.kids[0].id]: 'Tick the packages you have' }) });
     if (!v) return;
     btn.disabled = true;
-    const got = c.kids.filter(o => v['got_' + o.id]).map(o => o.id), missing = c.kids.length - got.length;
+    const gotOrders = c.kids.filter(o => v['got_' + o.id]), got = gotOrders.map(o => o.id), missing = pkgCount(c.kids) - pkgCount(gotOrders);
     try {
       const photoId = await storePhoto(v.photo, 'proof_collection', null);
       await MDM.store.batchCollected(b.id, { orderIds: got, note: v.note || '', photoId, by: by() });
-      MDM.ui.toast(missing ? plural(got.length, 'package') + ' collected, ' + missing + ' missing: the office and the business are told' : b.code + ' collected: bring it to the hub', missing ? 'warn' : 'ok');
+      MDM.ui.toast(missing ? plural(pkgCount(gotOrders), 'package') + ' collected, ' + missing + ' missing: the office and the business are told' : b.code + ' collected: bring it to the hub', missing ? 'warn' : 'ok');
       requestRender();
     } catch (e) { btn.disabled = false; fail(e, 'Could not save the collection'); }
   }
