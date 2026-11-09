@@ -42,7 +42,7 @@
   const app = document.querySelector('[data-slot="app"]');
   const state = {
     acc: null, tab: 'overview', settings: {}, received: null, signin: { step: 1, phone: '' },
-    filters: { q: '', status: 'all', range: '30', batch: '' }, cod: { status: 'all', range: 'all' }, done: { order: null, batch: null, excel: null }, selected: new Set(),
+    filters: { q: '', status: 'all', range: '30', batch: '' }, cod: { status: 'all', range: 'all' }, done: { order: null, orders: null, batch: null, excel: null }, selected: new Set(),
   };
 
   // ---- Session -----------------------------------------------------------------------------------------------------------
@@ -638,42 +638,100 @@
       deliverDate: v.deliverDate && v.deliverDate < v.collectDate ? 'Delivery cannot be before collection' : null };
   }
   // ---- New order: one package card, filled the way the bulk order is (client, 01/11/2026), then how many, fragile and when -------
-  const single = { row: null };
+  // "Add another order" (client, 09/11/2026: a second receiver on the business order, like "Add a stop" on a customer order) adds the
+  // next receiver as an order of its own: the cards share the pickup and the service, each has its receiver, size, packages, cash to
+  // collect and extra vehicle. Book delivery books them one by one; an order booked before a failure leaves the form, so trying again
+  // does not book it twice. The cards are kept while the business looks at other tabs.
+  const MAX_ORDERS = 10;   // the live service takes up to 20 orders an hour from a business
+  const single = { cards: [] };
+  const newCard = (tiers, prev) => ({ row: Object.assign(K.blankRow(tiers), prev ? { tier: prev.tier, method: prev.method } : {}), qty: '1', fragile: false, ev: false });
   async function tabNew() {
     const acc = state.acc, s = await MDM.store.settings();
     state.settings = s || {};
+    if (state.done.orders) return newOrdersDone(state.done.orders);
     if (state.done.order) return newOrderDone(state.done.order);
     const tiers = tiersOf(acc);
-    if (!single.row || !tiers.some(t => t.value === single.row.tier)) single.row = K.blankRow(tiers);
-    const row = single.row;
+    single.cards.forEach(c => { if (!tiers.some(t => t.value === c.row.tier)) c.row.tier = (tiers[0] || {}).value || ''; });
+    if (!single.cards.length) single.cards = [newCard(tiers)];
     const form = el('form', { class: 'biz-form biz-split', novalidate: true, 'data-testid': 'biz-new-form' });
     const priceBox = el('div', { class: 'summary biz-price', 'data-testid': 'biz-new-price' });
     const failure = failBox();
     const submit = el('button', { type: 'submit', class: 'btn btn--primary btn--lg btn--block', 'data-testid': 'biz-new-submit' }, 'Book delivery');
-    const collection = collectionBlock(acc, { onChange: () => { drawRate(); updatePrice(); } });
+    const cards = [];
+    const collection = collectionBlock(acc, { onChange: () => { cards.forEach(drawRate); updatePrice(); } });
     const ctx = { tiers, allTiers: allTiers(), pickupZone: () => collection.zone() };
     const cardHost = el('div', { class: 'bulk-items' });
-    const qty = input({ type: 'number', inputmode: 'numeric', min: '1', max: '20', step: '1', value: '1', 'data-testid': 'biz-qty' });
-    const vehicle = el('label', { class: 'checkbox', hidden: true, 'data-testid': 'biz-vehicle' }, el('input', { type: 'checkbox', name: 'extraVehicle' }),
-      el('span', null, 'Send an extra vehicle'), el('span', { class: 'checkbox__hint' }, 'We confirm the charge before pickup.'));
+    // One card: its packages, fragile and extra vehicle sit below it, as before; with several each card has its own.
+    const singleSlot = el('div', { class: 'stack-4' });
+    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'biz-new-add-order', on: { click: () => {
+      if (cards.length >= MAX_ORDERS) return;
+      const c = addCard(newCard(tiers, cards[cards.length - 1].row));
+      updatePrice();
+      const first = c.node.querySelector('[data-key="name"]');
+      if (first) { MDM.ui.scrollIntoViewIfNeeded(first); first.focus(); }
+    } } }, html(MDM.icon('plus', 16)), 'Add another order');
+    const addRow = el('div', { class: 'row row--wrap' }, addBtn, el('span', { class: 'small muted' }, 'Another receiver, as an order of its own'));
     let tried = false;
-    function showErrors(only) {
-      const errs = K.validateRow(row, ctx);
-      cardHost.querySelectorAll('[data-key]').forEach(c => { const k = c.dataset.key; if (only && only !== k) return; setError(c, errs[k] || null); });
+    function addCard(saved) {
+      const c = { s: saved, row: saved.row, grid: el('div', { class: 'bulk-item__grid' }) };
+      c.qty = input({ type: 'number', inputmode: 'numeric', min: '1', max: '20', step: '1', value: saved.qty || '1', 'data-testid': 'biz-qty' });
+      c.qty.addEventListener('input', () => setError(c.qty, null));
+      c.fragile = el('input', { type: 'checkbox', name: 'fragile', checked: !!saved.fragile });
+      c.ev = el('input', { type: 'checkbox', name: 'extraVehicle', checked: !!saved.ev });
+      c.vehicle = el('label', { class: 'checkbox', hidden: true, 'data-testid': 'biz-vehicle' }, c.ev,
+        el('span', null, 'Send an extra vehicle'), el('span', { class: 'checkbox__hint' }, 'We confirm the charge before pickup.'));
+      c.more = el('div', { class: 'stack-4 biz-card-more' },
+        el('div', { class: 'grid-2' }, field('qty', 'Packages', c.qty, { hint: 'Same size, same receiver' }),
+          el('label', { class: 'checkbox biz-fragile' }, c.fragile, el('span', null, 'Fragile'))),
+        c.vehicle);
+      c.title = el('h3', { class: 'bulk-item__title' }, 'Package');
+      c.rate = el('span', { class: 'bulk-item__rate small muted', 'data-rate': '' });
+      c.remove = el('button', { type: 'button', class: 'btn btn--ghost btn--sm bulk-item__remove', hidden: true, 'data-testid': 'biz-new-remove-order', on: { click: () => removeCard(c, true) } },
+        html(MDM.icon('trash', 16)), 'Remove');
+      c.node = el('div', { class: 'bulk-item', 'data-item': c.row.id, 'data-testid': 'biz-new-card' }, el('div', { class: 'bulk-item__head' }, c.title, c.rate, c.remove), c.grid);
+      cards.push(c);
+      cardHost.appendChild(c.node);
+      numberCards();
+      drawCard(c);
+      return c;
+    }
+    function removeCard(c, focus) {
+      const i = cards.indexOf(c);
+      if (i < 0 || cards.length < 2) return;
+      cards.splice(i, 1); c.node.remove();
+      numberCards(); updatePrice();
+      const next = focus && cards[Math.min(i, cards.length - 1)];
+      const f = next && next.node.querySelector('input, select');
+      if (f) f.focus();
+    }
+    // One card is "Package", as before; with more each is "Order 1, 2…" and can be removed.
+    function numberCards() {
+      const one = cards.length === 1;
+      cards.forEach((c, i) => {
+        c.title.textContent = one ? 'Package' : 'Order ' + (i + 1);
+        c.remove.hidden = one; c.remove.setAttribute('aria-label', 'Remove order ' + (i + 1));
+        if (one) singleSlot.appendChild(c.more); else if (c.more.parentNode !== c.node) c.node.appendChild(c.more);
+      });
+      singleSlot.hidden = !one;
+      addBtn.hidden = cards.length >= MAX_ORDERS;
+      single.cards = cards.map(c => c.s);
+    }
+    function showErrors(c, only) {
+      const errs = K.validateRow(c.row, ctx);
+      c.grid.querySelectorAll('[data-key]').forEach(x => { const k = x.dataset.key; if (only && only !== k) return; setError(x, errs[k] || null); });
       return !Object.keys(errs).length;
     }
-    function drawRate() { const r = cardHost.querySelector('[data-rate]'); if (r) r.textContent = rowRateText(row, ctx); }
-    function drawCard() {
+    function drawRate(c) { c.rate.textContent = rowRateText(c.row, ctx); }
+    function drawCard(c) {
       const rctx = Object.assign({}, ctx, {
-        onInput: (r, key) => { if (tried) showErrors(key); drawRate(); },
-        onChange: (r, key) => { if (key === 'method') { drawCard(); const sel = cardHost.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else if (tried) showErrors(key); drawRate(); },
+        onInput: (r, key) => { if (tried) showErrors(c, key); drawRate(c); },
+        onChange: (r, key) => { if (key === 'method') { drawCard(c); const sel = c.grid.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else if (tried) showErrors(c, key); drawRate(c); },
       });
-      const fields = K.rowFields(row, rctx, 'new-' + row.id);
-      fields.forEach(f => { const c = f.querySelector('[data-key]'); if (c) c.setAttribute('data-testid', 'biz-new-' + c.dataset.key); });
-      cardHost.replaceChildren(el('div', { class: 'bulk-item', 'data-item': row.id, 'data-testid': 'biz-new-card' },
-        el('div', { class: 'bulk-item__head' }, el('h3', { class: 'bulk-item__title' }, 'Package'), el('span', { class: 'bulk-item__rate small muted', 'data-rate': '' }, rowRateText(row, ctx))),
-        el('div', { class: 'bulk-item__grid' }, fields)));
-      if (tried) showErrors();
+      const fields = K.rowFields(c.row, rctx, 'new-' + c.row.id);
+      fields.forEach(f => { const x = f.querySelector('[data-key]'); if (x) x.setAttribute('data-testid', 'biz-new-' + x.dataset.key); });
+      c.grid.replaceChildren(...fields);
+      drawRate(c);
+      if (tried) showErrors(c);
     }
     const step = (title, ...body) => el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, title)), el('div', { class: 'card__body stack-4' }, ...body));
     form.append(
@@ -681,85 +739,127 @@
         step('Pickup', collection.el),
         el('section', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Package'),
           el('a', { class: 'biz-link', href: '#bulk', 'data-testid': 'biz-new-to-bulk' }, html(MDM.icon('plus', 16)), 'Several receivers? Bulk order')),
-          el('div', { class: 'card__body stack-4' }, cardHost,
-            el('div', { class: 'grid-2' }, field('qty', 'Packages', qty, { hint: 'Same size, same receiver' }),
-              el('label', { class: 'checkbox biz-fragile' }, el('input', { type: 'checkbox', name: 'fragile' }), el('span', null, 'Fragile'))),
-            vehicle,
+          el('div', { class: 'card__body stack-4' }, cardHost, singleSlot, addRow,
             scheduleBlock(form)))),
       el('div', { class: 'biz-split__side' },
         el('div', { class: 'biz-sum stack-4' },
           el('h2', { class: 'biz-sum__title' }, 'Summary'),
           priceBox, failure, submit,
           el('p', { class: 'small muted biz-sum__note' }, 'Invoiced weekly. Nothing to pay now.'))));
-    drawCard();
-    const tierNow = () => tiers.find(t => t.value === row.tier) || null;
-    const qtyNow = () => Math.max(1, Math.min(20, Math.round(Number(qty.value) || 1)));
-    function packagesFor(v) {
-      const t = tierNow() || tiers[0], n = qtyNow(), c = collection.value();
+    single.cards.forEach(addCard);
+    const tierOf = c => tiers.find(t => t.value === c.row.tier) || null;
+    const qtyOf = c => Math.max(1, Math.min(20, Math.round(Number(c.qty.value) || 1)));
+    function packagesFor(c) {
+      const t = tierOf(c) || tiers[0], n = qtyOf(c), co = collection.value(), row = c.row;
       const end = MDM.deliveryEndpoint(K.delivery(Object.assign({}, row, { zone: row.zone || 'male' })));
       const recipient = { name: String(row.name || '').trim(), phone: MDM.ui.phone.normalize(row.phone) || String(row.phone || '').trim() };
       const out = [];
-      for (let i = 0; i < n; i++) out.push({ id: MDM.id('pkg'), size: t.size, tier: t.value, description: String(row.description || '').trim(), fragile: !!v.fragile, underOneFt: t.size === 'bag', needsVehicle: false, notes: String(row.reference || '').trim(),
-        pickup: { address: c.address, zone: c.zone, landmark: c.landmark || '', contact: { name: c.contactName, phone: c.contactPhone }, instructions: c.instructions || '' },
+      for (let i = 0; i < n; i++) out.push({ id: MDM.id('pkg'), size: t.size, tier: t.value, description: String(row.description || '').trim(), fragile: c.fragile.checked, underOneFt: t.size === 'bag', needsVehicle: false, notes: String(row.reference || '').trim(),
+        pickup: { address: co.address, zone: co.zone, landmark: co.landmark || '', contact: { name: co.contactName, phone: co.contactPhone }, instructions: co.instructions || '' },
         dropoff: row.method === 'home' ? { address: String(row.address || '').trim(), zone: row.zone, landmark: String(row.landmark || '').trim(), recipient, instructions: String(row.instructions || '').trim(), meetAt: 'door' }
           : { recipient, instructions: String(row.instructions || '').trim(), zone: end.zone } });
       return out;
     }
+    // quoteFor(c) → { t, n, q } at the agreed rate with the delivery method's fees, or null until a size is chosen.
+    function quoteFor(c) {
+      const t = tierOf(c);
+      if (!t) return null;
+      const pk = packagesFor(c).map(p => Object.assign({}, p, { tierRate: t.rate, dropoff: c.row.method === 'home' ? Object.assign({}, p.dropoff, { zone: c.row.zone || 'male' }) : MDM.deliveryEndpoint(K.delivery(c.row)) }));
+      return { t, n: pk.length, q: MDM.pricing.quote({ service: 'business', packages: pk }, s) };
+    }
     const values = () => {
       const v = {}; ['collectDate', 'collectTime', 'deliverDate', 'deliverTime'].forEach(k => { const c = form.elements[k]; v[k] = c ? String(c.value || '').trim() : ''; });
-      v.level = form.elements.level.value; v.fragile = form.elements.fragile.checked;
+      v.level = form.elements.level.value;
       return v;
     };
     function updatePrice() {
-      const t = tierNow(), n = qtyNow();
-      const eligible = !!t && MDM.extraVehicleEligible(Array.from({ length: n }, () => ({ size: t.size })));
-      vehicle.hidden = !eligible; if (!eligible) form.elements.extraVehicle.checked = false;
-      const codAmt = K.parseMoney(row.cod);
-      if (!t) { priceBox.replaceChildren(el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, 'Choose the package size'))); return; }
-      const pk = packagesFor(values()).map(p => Object.assign({}, p, { tierRate: t.rate, dropoff: row.method === 'home' ? Object.assign({}, p.dropoff, { zone: row.zone || 'male' }) : MDM.deliveryEndpoint(K.delivery(row)) }));
-      const q = MDM.pricing.quote({ service: 'business', packages: pk }, s);
-      priceBox.replaceChildren(...[
-        el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, (n > 1 ? n + ' × ' : '') + t.label, el('small', null, money(t.rate) + ' each')), el('span', { class: 'summary__amount' }, money(q.totals.packages))),
-        q.feeLines.map(f => el('div', { class: 'summary__line summary__line--fee', 'data-fee': f.key }, el('span', { class: 'summary__desc' }, f.label, f.reason && f.key !== 'cargo' ? el('small', null, f.reason) : null), el('span', { class: 'summary__amount' }, money(f.amount)))),
-        el('div', { class: 'summary__line summary__total' }, el('span', { class: 'summary__desc' }, 'Total'), el('span', { class: 'summary__amount', 'data-testid': 'biz-new-total' }, money(q.totals.total))),
-        form.elements.extraVehicle.checked ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Extra vehicle: charge confirmed before pickup.')) : null,
+      cards.forEach(c => { c.s.qty = c.qty.value; c.s.fragile = c.fragile.checked; });
+      const quotes = cards.map(c => {
+        const t = tierOf(c), n = qtyOf(c);
+        const eligible = !!t && MDM.extraVehicleEligible(Array.from({ length: n }, () => ({ size: t.size })));
+        c.vehicle.hidden = !eligible; if (!eligible) c.ev.checked = false;
+        c.s.ev = c.ev.checked;
+        return quoteFor(c);
+      });
+      const codAmt = cards.reduce((sum, c) => sum + (K.parseMoney(c.row.cod) || 0), 0);
+      const tail = [
+        cards.some(c => c.ev.checked) ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Extra vehicle: charge confirmed before pickup.')) : null,
         codAmt > 0 ? el('div', { class: 'summary__line summary__line--fee', 'data-testid': 'biz-new-cod' }, el('span', { class: 'summary__desc' }, 'Cash to collect', el('small', null, 'Paid to you after delivery')), el('span', { class: 'summary__amount' }, money(codAmt))) : null,
-        values().level === 'express' ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Express: we confirm any extra charge first.')) : null].flat().filter(Boolean));
+        values().level === 'express' ? el('div', { class: 'summary__line summary__line--fee' }, el('span', { class: 'summary__desc' }, 'Express: we confirm any extra charge first.')) : null];
+      if (cards.length === 1) {
+        const x = quotes[0];
+        if (!x) { priceBox.replaceChildren(el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, 'Choose the package size'))); return; }
+        priceBox.replaceChildren(...[
+          el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, (x.n > 1 ? x.n + ' × ' : '') + x.t.label, el('small', null, money(x.t.rate) + ' each')), el('span', { class: 'summary__amount' }, money(x.q.totals.packages))),
+          x.q.feeLines.map(f => el('div', { class: 'summary__line summary__line--fee', 'data-fee': f.key }, el('span', { class: 'summary__desc' }, f.label, f.reason && f.key !== 'cargo' ? el('small', null, f.reason) : null), el('span', { class: 'summary__amount' }, money(f.amount)))),
+          el('div', { class: 'summary__line summary__total' }, el('span', { class: 'summary__desc' }, 'Total'), el('span', { class: 'summary__amount', 'data-testid': 'biz-new-total' }, money(x.q.totals.total))),
+          tail].flat().filter(Boolean));
+        return;
+      }
+      // Several orders: a line each (its packages, size and fees), then the total of them all.
+      const lines = cards.map((c, i) => {
+        const x = quotes[i], who = String(c.row.name || '').trim();
+        const sub = x ? plural(x.n, 'package') + ' · ' + x.t.label + x.q.feeLines.map(f => ' + ' + feeName(f)).join('') : 'Choose the package size';
+        return el('div', { class: 'summary__line', 'data-testid': 'biz-new-order-line' },
+          el('span', { class: 'summary__desc' }, 'Order ' + (i + 1) + (who ? ' · ' + who : ''), el('small', null, sub)), el('span', { class: 'summary__amount' }, x ? money(x.q.totals.total) : ''));
+      });
+      const sum = quotes.reduce((n, x) => n + (x ? x.q.totals.total : 0), 0);
+      priceBox.replaceChildren(...[lines,
+        el('div', { class: 'summary__line summary__total' }, el('span', { class: 'summary__desc' }, 'Total, ' + cards.length + ' orders'), el('span', { class: 'summary__amount', 'data-testid': 'biz-new-total' }, money(sum))),
+        tail].flat().filter(Boolean));
     }
     form.addEventListener('input', updatePrice); form.addEventListener('change', updatePrice); updatePrice();
+    let booked = [];   // orders this form booked before a failure
     form.addEventListener('submit', async e => {
       e.preventDefault(); failure.hidden = true;
       tried = true;
-      const cardOk = showErrors();
-      const r = MDM.ui.validate(form, { qty: v => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 20 ? null : 'Enter 1 to 20 packages'; } });
+      let ok = true;
+      cards.forEach(c => {
+        if (!showErrors(c)) ok = false;
+        const n = Number(c.qty.value);
+        const qErr = Number.isInteger(n) && n >= 1 && n <= 20 ? null : 'Enter 1 to 20 packages';
+        setError(c.qty, qErr);
+        if (qErr) ok = false;
+      });
       const cOk = collection.validate();
       const v = values();
       const extra = advanceRules(v);
       Object.keys(extra).forEach(k => { if (form.elements[k]) setError(form.elements[k], extra[k]); });
-      if (!r.ok || !cOk || !cardOk || Object.keys(extra).some(k => extra[k])) {
+      if (!ok || !cOk || Object.keys(extra).some(k => extra[k])) {
         const first = form.querySelector('[aria-invalid="true"]');
         if (first) { MDM.ui.scrollIntoViewIfNeeded(first); first.focus(); }
         return;
       }
       MDM.ui.setLoading(submit, true);
+      const made = [];
       try {
-        const t = tierNow(), c = collection.value();
-        const extraVehicle = !vehicle.hidden && form.elements.extraVehicle.checked;
-        const order = await MDM.store.createOrder({
-          source: 'business', requestType: 'business', service: 'business', serviceLevel: v.level, accountId: acc.id, by: 'business:' + acc.id,
-          customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
-          collection: { pointId: c.pointId, address: c.address, zone: c.zone, landmark: c.landmark, contactName: c.contactName, contactPhone: c.contactPhone, instructions: c.instructions, preferredTime: c.preferredTime },
-          delivery: K.delivery(row), details: { reference: String(row.reference || '').trim(), tier: t.value }, packages: packagesFor(v), schedule: scheduleValue(v),
-          payment: { method: 'invoice', status: 'invoiced' }, cod: K.parseMoney(row.cod) || 0, extraVehicle,
-          // An extra vehicle needs its charge confirmed first; everything else is priced at the agreed rate.
-          status: extraVehicle ? 'requested' : 'confirmed',
-        });
-        single.row = null;
-        state.done.order = order;
-        renderTab({ enter: true });
-        MDM.ui.toast('Delivery booked: ' + order.code, 'ok');
-      } catch (err) { showFail(failure, null, (err && err.message) || 'We could not book this delivery. Please try again.'); }
-      finally { if (document.contains(submit)) MDM.ui.setLoading(submit, false); }
+        const co = collection.value();
+        for (const c of cards.slice()) {
+          const t = tierOf(c);
+          const extraVehicle = !c.vehicle.hidden && c.ev.checked;
+          made.push(await MDM.store.createOrder({
+            source: 'business', requestType: 'business', service: 'business', serviceLevel: v.level, accountId: acc.id, by: 'business:' + acc.id,
+            customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
+            collection: { pointId: co.pointId, address: co.address, zone: co.zone, landmark: co.landmark, contactName: co.contactName, contactPhone: co.contactPhone, instructions: co.instructions, preferredTime: co.preferredTime },
+            delivery: K.delivery(c.row), details: { reference: String(c.row.reference || '').trim(), tier: t.value }, packages: packagesFor(c), schedule: scheduleValue(v),
+            payment: { method: 'invoice', status: 'invoiced' }, cod: K.parseMoney(c.row.cod) || 0, extraVehicle,
+            // An extra vehicle needs its charge confirmed first; everything else is priced at the agreed rate.
+            status: extraVehicle ? 'requested' : 'confirmed',
+          }));
+          // A booked order leaves the form, so trying again after a failure does not book it twice.
+          if (cards.length > 1) removeCard(c, false);
+        }
+      } catch (err) {
+        booked = booked.concat(made);
+        const text = (err && err.message) || 'We could not book this delivery. Please try again.';
+        showFail(failure, booked.length ? 'Booked ' + booked.map(o => o.code).join(', ') + '. ' + (cards.length > 1 ? 'The orders below are' : 'The order below is') + ' not booked yet.' : null, text);
+        return;
+      } finally { if (document.contains(submit)) MDM.ui.setLoading(submit, false); }
+      const all = booked.concat(made);
+      single.cards = [];
+      if (all.length > 1) state.done.orders = all; else state.done.order = all[0];
+      renderTab({ enter: true });
+      MDM.ui.toast(all.length > 1 ? plural(all.length, 'delivery', 'deliveries') + ' booked: ' + all.map(o => o.code).join(', ') : 'Delivery booked: ' + all[0].code, 'ok');
     });
     return form;
   }
@@ -784,6 +884,18 @@
       [el('a', { class: 'btn btn--primary', href: labelsHref('order=' + encodeURIComponent(o.id)), 'data-testid': 'biz-done-label' }, html(MDM.icon('printer', 16)), 'Print ' + plural((o.packages || []).length, 'label')),
         el('a', { class: 'btn btn--secondary', href: trackHref(o) }, 'Track'),
         el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'biz-new-another', on: { click: () => { state.done.order = null; renderTab({ enter: true }); } } }, 'Book another')]);
+  }
+  // Several orders booked together ("Add another order"): each code and receiver with a link to track it, and every label at once.
+  function newOrdersDone(list) {
+    const total = list.reduce((n, o) => n + ((o.totals || {}).total || 0), 0);
+    const pkgs = list.reduce((n, o) => n + (o.packages || []).length, 0);
+    const confirm = list.some(o => o.status === 'requested');
+    return doneCard('biz-new-done', plural(list.length, 'delivery', 'deliveries') + ' booked',
+      [plural(list.length, 'order') + ' from one pickup · ', confirm ? 'we confirm the price of an extra vehicle first.' : money(total) + ', invoiced weekly.'],
+      el('div', { class: 'rate-table', 'data-testid': 'biz-new-done-list' }, list.map(o => MDM.ui.rateRow(
+        el('span', null, el('span', { class: 'mono--code' }, o.code), ' to ' + o.delivery.recipientName), el('a', { class: 'biz-link', href: trackHref(o) }, 'Track'), { sub: methodLines(o)[0] + ' · ' + tierText(o) }))),
+      [el('a', { class: 'btn btn--primary', href: labelsHref('orders=' + list.map(o => encodeURIComponent(o.id)).join(',')), 'data-testid': 'biz-done-label' }, html(MDM.icon('printer', 16)), 'Print ' + plural(pkgs, 'label')),
+        el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'biz-new-another', on: { click: () => { state.done.orders = null; renderTab({ enter: true }); } } }, 'Book another')]);
   }
 
   // ---- Row controls (bulk rows editor and Excel review): MDM.bizKit.rowControl / rowFields, shared with the office's business order ----
@@ -1553,7 +1665,7 @@
     window.addEventListener('hashchange', () => { if (state.acc) renderTab(); });
     ['orders', 'batches', 'invoices', 'business_accounts'].forEach(c => MDM.store.subscribe(c, refresh));
     MDM.store.subscribe('settings', () => { if (!state.acc) render(); });
-    MDM.store.subscribe('*', msg => { if (msg && msg.op === 'reset') { state.received = null; state.done = { order: null, batch: null, excel: null }; bulk.rows = []; excel.rows = []; panel = null; render(); } });
+    MDM.store.subscribe('*', msg => { if (msg && msg.op === 'reset') { state.received = null; state.done = { order: null, orders: null, batch: null, excel: null }; single.cards = []; bulk.rows = []; excel.rows = []; panel = null; render(); } });
     // Another tab signed in or out. On the live service js/remote.js reloads this page for the new sign-in; acting on it here first
     // would look the new account up in this tab's old data, miss it and sign the new account out.
     window.addEventListener('storage', e => { if (e.key === SESSION && !MDM.auth) { panel = null; render(); } });

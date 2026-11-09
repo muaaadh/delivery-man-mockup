@@ -211,9 +211,15 @@
     counts.batches = { value: batches.length, hot: true };
     MDM.shell.setCounts(counts);
   }
+  // Recounted when what they count changes, not on every rider position, photo or message (client, 09/11/2026: "the website is slow";
+  // each count reads every order).
+  const COUNTED = ['orders', 'business_requests', 'leaves', 'batches'];
   function startCounts() {
     refreshCounts().catch(() => {});
-    if (!state.countsUnsub) state.countsUnsub = MDM.store.subscribe('*', () => { clearTimeout(state.countsTimer); state.countsTimer = setTimeout(() => refreshCounts().catch(() => {}), 60); });
+    if (!state.countsUnsub) state.countsUnsub = MDM.store.subscribe('*', msg => {
+      if (msg && COUNTED.indexOf(msg.collection) < 0 && msg.op !== 'reset' && msg.op !== 'refresh') return;
+      clearTimeout(state.countsTimer); state.countsTimer = setTimeout(() => refreshCounts().catch(() => {}), 60);
+    });
   }
   function stopCounts() { if (state.countsUnsub) { state.countsUnsub(); state.countsUnsub = null; } clearTimeout(state.countsTimer); }
 

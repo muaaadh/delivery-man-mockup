@@ -227,3 +227,6 @@ body.page-business .biz-photo .dropzone__drag { display: block; margin-top: 2px;
   body.page-business .biz-point .list__main { flex: 1 1 100%; }
   body.page-business .biz-point .list__aside { justify-content: flex-start; }
 }
+
+/* New order with several receivers ("Add another order"): each card's packages, fragile and extra vehicle inside it */
+body.page-business .bulk-item > .biz-card-more { margin-top: 16px; }
