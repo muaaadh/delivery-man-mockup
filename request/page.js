@@ -36,6 +36,8 @@
   const MAX_PER_SIZE = 20, MAX_ITEMS = 40;
   const MAXLEN = { text: '160', tel: '24', email: '120', textarea: '1000' };   // keeps a pasted essay out of labels and the driver's screen
   const NOTIFY = [{ value: 'whatsapp', label: 'WhatsApp' }, { value: 'sms', label: 'SMS' }, { value: 'viber', label: 'Viber' }, { value: 'email', label: 'Email' }];
+  // An office order that came in on WhatsApp or Viber is answered there too (client, 09/11/2026); Phone and Walk-in keep the choice.
+  const notifyFromSource = src => (NOTIFY.some(x => x.value === src) ? src : null);
   const SHOP_PROOF = [{ value: 'invoice', label: 'Invoice' }, { value: 'quotation', label: 'Quotation' }];
   const DOC_KIND = { collection_doc: 'Collection document', invoice: 'Shop invoice', quotation: 'Quotation', payment_slip: 'Payment slip', document: 'Document' };
   const CUSTOM_LABEL = 'custom';
@@ -1203,7 +1205,7 @@
       !OFFICE && profileReady() ? MDM.ui.notice('info', 'Signed in as ' + profile.name + '. Changes apply to this request only.', { testid: 'request-signed-in' }) : null,
       grid(F(n, 'customer.name', OFFICE ? 'Name' : 'Your name', { required: true, attrs: { autocomplete: OFFICE ? 'off' : 'name' }, onChange: sync }),
         F(n, 'customer.phone', 'Mobile number', { type: 'tel', required: true, intl: true, hint: 'A number from abroad: + and the country code', attrs: OFFICE ? { autocomplete: 'off' } : null, onChange: () => { sync(); if (OFFICE) lookupSoon(); } })),
-      seg(n, 'customer.notify', OFFICE ? 'Notify by' : 'Send updates by', NOTIFY, { onChange: () => { saveDraft(); rerender(n); } }),
+      seg(n, 'customer.notify', OFFICE ? 'Notify by' : 'Send updates by', NOTIFY, { onChange: () => { saveDraft(); rerender(n); }, hint: OFFICE ? 'Same as “Order received by” for WhatsApp and Viber' : null }),
       F(n, 'customer.email', 'Email', { type: 'email', required: draft.customer.notify === 'email', attrs: { autocomplete: OFFICE ? 'off' : 'email' } }),
       needsTerms() ? el('div', { class: 'request-terms', 'data-testid': 'request-terms-box' }, el('p', { class: 'request-terms__text' }, settings.terms || ''),
         check(n, 'termsAck', OFFICE ? 'The customer agrees to what we carry' : "I've read what we carry", { required: true, testid: 'request-terms',
@@ -1507,7 +1509,13 @@
     officeEls.status = el('div', { class: 'field__hint request-office__status', 'data-testid': 'office-customer', 'aria-live': 'polite', hidden: true });
     const source = el('fieldset', { class: 'segmented segmented--source', 'data-testid': 'office-source' }, SOURCES.map(s => el('label', { class: 'segmented__option', 'data-testid': 'office-source-' + s.value, 'data-value': s.value },
       el('input', { class: 'sr-only', type: 'radio', name: 'rq-office-source', value: s.value, checked: draft.source === s.value }), el('span', null, s.label))));
-    source.addEventListener('change', e => { if (e.target && e.target.checked) { draft.source = e.target.value; saveDraft(); } });
+    source.addEventListener('change', e => {
+      if (!e.target || !e.target.checked) return;
+      draft.source = e.target.value;
+      const nf = notifyFromSource(draft.source);
+      if (nf && draft.customer.notify !== nf) { draft.customer.notify = nf; if (step === 5) rerender(5); }
+      saveDraft();
+    });
     officeEls.phone.addEventListener('input', () => { draft.customer.phone = officeEls.phone.value; saveDraft(); syncStep5(); lookupSoon(); });
     officeEls.name.addEventListener('input', () => { draft.customer.name = officeEls.name.value; saveDraft(); syncStep5(); });
     const phoneField = MDM.ui.field({ name: 'office.phone', control: officeEls.phone, label: "Customer's mobile" });
@@ -1556,7 +1564,7 @@
     paintOfficeStatus(norm);
     if (o.boot) return;
     const c = draft.customer;
-    if (found) Object.assign(c, { name: found.name || c.name, email: found.email || '', notify: found.notify || c.notify });
+    if (found) Object.assign(c, { name: found.name || c.name, email: found.email || '', notify: notifyFromSource(draft.source) || found.notify || c.notify });
     else if (before) { if (trim(c.name) === trim(before.name)) c.name = ''; if (trim(c.email) === trim(before.email)) c.email = ''; }
     // The previous customer's tick, saved addresses and "Order again" order do not carry over to another customer.
     draft.termsAck = false;

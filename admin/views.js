@@ -566,6 +566,7 @@
   MDM.admin.views.customers = (function () {
     let ctx = null, root = null, body = null, tabs = null, search = null, tab = 'general', q = '', enterNext = false, rows = { general: [], business: [] };
     const ACCOUNT_STATUS = { approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } };
+    const NOTIFY_BY = { whatsapp: 'WhatsApp', sms: 'SMS', viber: 'Viber', email: 'Email' };
     function readQuery(params) { const x = queryOf(params); tab = x.get('tab') === 'business' ? 'business' : 'general'; q = x.get('q') || ''; }
     async function mount(host, params) {
       ctx = context(); root = host; readQuery(params);
@@ -624,8 +625,26 @@
         { label: 'Orders', num: true, render: r => String(r.count) },
         { label: 'Last order', nowrap: true, render: r => r.last ? fmtDate(r.last) : 'No orders yet' },
         { label: 'Unpaid', num: true, render: r => r.unpaid ? money(r.unpaid) : '' },
+        { label: 'Actions', actions: true, render: r => el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'customers-edit', 'aria-label': 'Edit ' + (r.c.name || phone.format(r.c.phone)),
+          on: { click: () => editCustomer(r.c) } }, 'Edit') },
       ];
-      return table(cols, list.map(r => ({ data: r, attrs: { class: 'is-clickable', 'data-testid': 'customers-row', 'data-customer-id': r.c.id, on: { click: e => { if (e.target.closest('a')) return; navigate(target(r.c)); } } } })), { testid: 'customers-table' });
+      return table(cols, list.map(r => ({ data: r, attrs: { class: 'is-clickable', 'data-testid': 'customers-row', 'data-customer-id': r.c.id, on: { click: e => { if (e.target.closest('a, button')) return; navigate(target(r.c)); } } } })), { testid: 'customers-table' });
+    }
+    // Name, email and how we send updates (client, 09/11/2026: "a customer wants his email linked to his number"). On the live service
+    // customers sign in with their email: with it on their record they see this number's orders.
+    async function editCustomer(c) {
+      const live = !!MDM.auth;
+      const v = await MDM.ui.dialog({ title: 'Edit ' + (c.name || phone.format(c.phone)), message: 'Mobile ' + phone.format(c.phone) + ' · ' + plural(c.orderCount || 0, 'order') + '.', okLabel: 'Save customer',
+        fields: [
+          { name: 'name', label: 'Name', type: 'text', required: true, value: c.name || '', maxlength: 80 },
+          { name: 'email', label: 'Email', type: 'email', value: c.email || '', autocomplete: 'off',
+            hint: live ? (c.userId ? 'They sign in with this email. A new one moves their sign-in to it.' : 'They sign in with this email and see the orders of this number.') : 'For order emails, and to sign in on the live service.' },
+          { name: 'notify', label: 'Send updates by', type: 'segmented', required: true, value: c.notify || 'whatsapp', options: Object.keys(NOTIFY_BY).map(k => ({ value: k, label: NOTIFY_BY[k] })) },
+        ],
+        validate: x => (x.notify === 'email' && !String(x.email || '').trim() ? 'Add the email to send updates by email' : null) });
+      if (!v) return;
+      try { await MDM.store.editCustomer(c.id, { name: v.name, email: v.email, notify: v.notify }, actor()); toast('Saved ' + (String(v.name || '').trim() || phone.format(c.phone))); }
+      catch (e) { toast(storeMessage(e), 'danger'); }
     }
     function businessTable(list) {
       const target = a => '#/business/' + encodeURIComponent(a.id);

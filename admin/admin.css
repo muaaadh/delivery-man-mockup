@@ -88,6 +88,8 @@ body.page-admin .charge__actions { flex: 1 1 100%; gap: 8px; }
 body.page-admin .charge.is-void .list__title, body.page-admin .charge.is-void .charge__amount { text-decoration: line-through; color: var(--text-3); }
 body.page-admin .item-list { margin-top: 16px; }
 body.page-admin .neworder-tier { margin-top: 8px; max-width: 340px; }
+/* An order card of the business order: packages, fragile, the boat contact and the extra vehicle under the receiver fields */
+body.page-admin .neworder-card__more { margin-top: 16px; }
 body.page-admin .file-list { margin-top: 12px; }
 body.page-admin .file-grid + .file-list { margin-top: 16px; }
 body.page-admin .neworder-tier .select { width: 100%; }

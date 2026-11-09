@@ -1792,9 +1792,11 @@
       el('div', { class: 'grid-2' }, field(cTime.id, 'Preferred collection time', cTime, { optional: true }), field(cNote.id, 'Collection instructions', cNote, { optional: true })),
       groupField('When', levelSeg), advBlock);
 
-    // The package (client, 01/11/2026): one card like the business portal's bulk order (MDM.bizKit.rowFields): the receiver, the
-    // delivery method and its details, the size category with its rate, cash to collect, instructions, reference and contents. Several
-    // packages of the same size go to the same receiver; a boat's own contact and fragile handling sit under the card.
+    // The orders (client, 01/11/2026): a card like the business portal's bulk order (MDM.bizKit.rowFields): the receiver, the delivery
+    // method and its details, the size category with its rate, cash to collect, instructions, reference and contents, then how many
+    // packages (same size, same receiver), fragile, a boat's own contact and the extra vehicle. "Add another order" (client, 09/11/2026:
+    // "each person receives one package", like "Add a stop" on a customer order) adds the next receiver as an order of its own, with
+    // the same account, collection and timing.
     const K = MDM.bizKit;
     // Business packages carry the account's size category and its agreed rate; a size the business never agreed keeps its own category
     // at the default rate (as the store does on a category change), instead of silently becoming the cheapest agreed category.
@@ -1803,130 +1805,210 @@
       return MDM.pricing.businessTiers(settings).map(t => agreed.find(a => a.value === t.value) || Object.assign({}, t, { rate: MDM.pricing.businessRate(account(), t.value, settings), notAgreed: true }))
         .map(t => Object.assign({}, t, { label: t.label + (t.notAgreed ? ' (default rate)' : '') }));
     }
-    const row = n.row = K.blankRow(tierChoices().filter(t => !t.notAgreed).concat(tierChoices()));
+    const MAX_ORDERS = 20;
+    const cards = n.cards = [];
     const cardHost = el('div', { class: 'bulk-items', 'data-testid': 'neworder-card-host' });
-    const qtyIn = input('qty', { type: 'number', inputmode: 'numeric', min: 1, max: 20, step: 1, value: '1' });
-    const qtyField = clearOnInput(qtyIn, field(qtyIn.id, 'Packages', qtyIn, { hint: 'Same size, same receiver' }));
-    const fragileIn = el('input', { type: 'checkbox', id: uid + '-fragile', 'data-testid': 'neworder-fragile' });
-    const boatContact = input('boat-contact', { type: 'tel', inputmode: 'numeric', placeholder: '7XX XXXX' });
-    const boatContactField = clearOnInput(boatContact, field(boatContact.id, 'Contact of the boat', boatContact, { optional: true, hint: 'Captain or crew, if not the receiver' }));
-    const evInput = el('input', { type: 'checkbox', id: uid + '-extra-vehicle', 'data-testid': 'neworder-extra-vehicle' });
-    const evBlock = el('label', { class: 'checkbox', for: evInput.id, hidden: true, 'data-testid': 'neworder-extra-vehicle-field' }, evInput,
-      el('span', null, 'Extra vehicle', el('span', { class: 'hint' }, 'Charge added when the price is confirmed')));
+    const addOrderBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'neworder-add-order', on: { click: () => {
+      if (cards.length >= MAX_ORDERS) return;
+      const c = addCard(cards[cards.length - 1]);
+      const first = c.node.querySelector('[data-key="name"]') || c.node.querySelector('input, select');
+      if (first) { MDM.ui.scrollIntoViewIfNeeded(first); first.focus(); }
+    } } }, html(MDM.icon('plus', 16)), 'Add another order');
+    const addOrderRow = el('div', { class: 'row row--wrap' }, addOrderBtn, el('span', { class: 'small muted' }, 'Another receiver, as an order of its own'));
     const estimate = el('div', { 'data-testid': 'neworder-estimate' });
-    let tried = false;
+    let tried = false, cardSeq = 0;
     const ctx = () => ({ tiers: tierChoices() });
-    const tierNow = () => tierChoices().find(t => t.value === row.tier) || null;
-    const qtyNow = () => Math.max(1, Math.min(20, Math.round(Number(qtyIn.value) || 1)));
-    function showErrors(only) {
-      const errs = K.validateRow(row, ctx());
-      cardHost.querySelectorAll('[data-key]').forEach(c => { const k = c.dataset.key; if (only && only !== k) return; setError(c.closest('.field'), errs[k] || null); });
+    const tierNow = c => tierChoices().find(t => t.value === c.row.tier) || null;
+    const qtyNow = c => Math.max(1, Math.min(20, Math.round(Number(c.qtyIn.value) || 1)));
+    // A new card starts with the size and delivery method of the one before it; the receiver and the details are its own.
+    function addCard(prev) {
+      const row = K.blankRow(tierChoices().filter(t => !t.notAgreed).concat(tierChoices()));
+      if (prev) { row.tier = prev.row.tier; row.method = prev.row.method; }
+      const cid = uid + '-o' + (++cardSeq);
+      const ci = (key, attrs) => el('input', Object.assign({ class: 'input', id: cid + '-' + key, type: 'text', autocomplete: 'off', 'data-testid': 'neworder-' + key }, attrs || {}));
+      const c = { row, cid, grid: el('div', { class: 'bulk-item__grid' }) };
+      c.qtyIn = ci('qty', { type: 'number', inputmode: 'numeric', min: 1, max: 20, step: 1, value: '1' });
+      c.qtyField = clearOnInput(c.qtyIn, field(c.qtyIn.id, 'Packages', c.qtyIn, { hint: 'Same size, same receiver' }));
+      c.fragileIn = el('input', { type: 'checkbox', id: cid + '-fragile', 'data-testid': 'neworder-fragile' });
+      c.boatContact = ci('boat-contact', { type: 'tel', inputmode: 'numeric', placeholder: '7XX XXXX' });
+      c.boatContactField = clearOnInput(c.boatContact, field(c.boatContact.id, 'Contact of the boat', c.boatContact, { optional: true, hint: 'Captain or crew, if not the receiver' }));
+      c.evInput = el('input', { type: 'checkbox', id: cid + '-extra-vehicle', 'data-testid': 'neworder-extra-vehicle' });
+      c.evBlock = el('label', { class: 'checkbox', for: c.evInput.id, hidden: true, 'data-testid': 'neworder-extra-vehicle-field' }, c.evInput,
+        el('span', null, 'Extra vehicle', el('span', { class: 'hint' }, 'Charge added when the price is confirmed')));
+      c.title = el('h3', { class: 'bulk-item__title' });
+      c.rate = el('span', { class: 'bulk-item__rate small muted', 'data-testid': 'neworder-card-rate' });
+      c.remove = el('button', { type: 'button', class: 'btn btn--ghost btn--sm bulk-item__remove', 'data-testid': 'neworder-remove-order', on: { click: () => removeCard(c, true) } }, html(MDM.icon('trash', 16)), 'Remove');
+      c.node = el('div', { class: 'bulk-item', 'data-testid': 'neworder-card' },
+        el('div', { class: 'bulk-item__head' }, c.title, c.rate, c.remove),
+        c.grid,
+        el('div', { class: 'stack-4 neworder-card__more' }, c.boatContactField,
+          el('div', { class: 'grid-2' }, c.qtyField, el('label', { class: 'checkbox', for: c.fragileIn.id }, c.fragileIn, el('span', null, 'Fragile'))), c.evBlock));
+      [c.qtyIn, c.evInput, c.fragileIn].forEach(x => x.addEventListener('input', renderPrice));
+      c.evInput.addEventListener('change', renderPrice);
+      cards.push(c);
+      cardHost.appendChild(c.node);
+      numberCards();
+      drawCard(c);
+      return c;
+    }
+    function removeCard(c, focus) {
+      const i = cards.indexOf(c);
+      if (i < 0 || cards.length < 2) return;
+      cards.splice(i, 1); c.node.remove();
+      numberCards(); renderPrice();
+      const next = focus && cards[Math.min(i, cards.length - 1)];
+      const f = next && next.node.querySelector('input, select');
+      if (f) f.focus();
+    }
+    // One card is "Package", as before; with more each is "Order 1, 2…" and can be removed.
+    function numberCards() {
+      cards.forEach((c, i) => { c.title.textContent = cards.length > 1 ? 'Order ' + (i + 1) : 'Package'; c.remove.hidden = cards.length < 2; c.remove.setAttribute('aria-label', 'Remove order ' + (i + 1)); });
+      addOrderBtn.hidden = cards.length >= MAX_ORDERS;
+    }
+    function showErrors(c, only) {
+      const errs = K.validateRow(c.row, ctx());
+      c.grid.querySelectorAll('[data-key]').forEach(x => { const k = x.dataset.key; if (only && only !== k) return; setError(x.closest('.field'), errs[k] || null); });
       return !Object.keys(errs).length;
     }
-    function drawCard() {
+    function drawCard(c) {
       const rctx = Object.assign(ctx(), {
-        onInput: (r, key) => { if (tried) showErrors(key); renderPackages(); },
-        onChange: (r, key) => { if (key === 'method') { drawCard(); const sel = cardHost.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else if (tried) showErrors(key); renderPackages(); },
+        onInput: (r, key) => { if (tried) showErrors(c, key); renderPrice(); },
+        onChange: (r, key) => { if (key === 'method') { drawCard(c); const sel = c.grid.querySelector('[data-key="method"]'); if (sel) sel.focus(); } else if (tried) showErrors(c, key); renderPrice(); },
       });
-      const fields = K.rowFields(row, rctx, uid + '-card');
-      fields.forEach(f => { const c = f.querySelector('[data-key]'); if (c) c.setAttribute('data-testid', 'neworder-' + c.dataset.key); });
-      cardHost.replaceChildren(el('div', { class: 'bulk-item', 'data-testid': 'neworder-card' },
-        el('div', { class: 'bulk-item__head' }, el('h3', { class: 'bulk-item__title' }, 'Package'), el('span', { class: 'bulk-item__rate small muted', 'data-testid': 'neworder-card-rate' })),
-        el('div', { class: 'bulk-item__grid' }, fields)));
-      boatContactField.hidden = row.method !== 'boat';
-      if (tried) showErrors();
-      renderPackages();
+      const fields = K.rowFields(c.row, rctx, c.cid + '-card');
+      fields.forEach(f => { const x = f.querySelector('[data-key]'); if (x) x.setAttribute('data-testid', 'neworder-' + x.dataset.key); });
+      c.grid.replaceChildren(...fields);
+      c.boatContactField.hidden = c.row.method !== 'boat';
+      if (tried) showErrors(c);
+      renderPrice();
     }
     // What createOrder records: the collection above as every package's pickup, the card's receiver and drop-off, the size category.
-    function packagesFor() {
-      const t = tierNow(), pick = pickupEnd();
+    function packagesFor(c) {
+      const t = tierNow(c), pick = pickupEnd(), row = c.row;
       if (!t) return [];
       const recipient = { name: trim(row.name), phone: phone.normalize(row.phone) || trim(row.phone) };
       const dropoff = row.method === 'home' ? { address: trim(row.address), zone: row.zone || 'male', landmark: trim(row.landmark), recipient, instructions: trim(row.instructions), meetAt: 'door' } : { recipient };
-      return Array.from({ length: qtyNow() }, () => ({ id: MDM.id('pkg'), size: t.size, tier: t.value, tierRate: t.rate, description: trim(row.description), fragile: fragileIn.checked, underOneFt: t.size === 'bag',
+      return Array.from({ length: qtyNow(c) }, () => ({ id: MDM.id('pkg'), size: t.size, tier: t.value, tierRate: t.rate, description: trim(row.description), fragile: c.fragileIn.checked, underOneFt: t.size === 'bag',
         needsVehicle: false, notes: trim(row.reference), sizeSource: 'operator', shop: null, pickup: Object.assign({}, pick, { cargo: null, meetAt: '' }), dropoff }));
     }
-    function deliveryFor() {
-      const d = K.delivery(row);
-      if (d.boat) d.boat = Object.assign({}, d.boat, { contact: phone.normalize(boatContact.value) || trim(boatContact.value), history: [] });
+    function deliveryFor(c) {
+      const d = K.delivery(c.row);
+      if (d.boat) d.boat = Object.assign({}, d.boat, { contact: phone.normalize(c.boatContact.value) || trim(c.boatContact.value), history: [] });
       if (d.method === 'boat') d.address = d.address || (d.boat && d.boat.island) || '';
       return d;
     }
-    function renderPackages() {
-      const t = tierNow(), pk = packagesFor();
-      const rate = cardHost.querySelector('[data-testid="neworder-card-rate"]');
-      if (rate) rate.textContent = t ? money(t.rate) + (t.notAgreed ? ', default rate' : '') : 'Choose a size';
-      const eligible = MDM.extraVehicleEligible(pk);
-      evBlock.hidden = !eligible;
-      if (!eligible) evInput.checked = false;
-      if (!pk.length) { estimate.replaceChildren(el('p', { class: 'muted small' }, 'Choose the package size to see the price.')); return; }
-      const end = row.method !== 'home' ? MDM.deliveryEndpoint(deliveryFor()) : null;
-      const eff = pk.map(x => Object.assign({}, x, end ? { dropoff: Object.assign({}, end, { recipient: x.dropoff.recipient }) } : {}, evInput.checked && (x.size === 'box' || x.size === 'xl') ? { needsVehicle: true } : {}));
-      const q = MDM.pricing.quote({ service: 'business', packages: eff }, settings);
-      const fees = (q.feeLines || []).map(f => el('div', { class: 'summary__line summary__line--fee', 'data-testid': 'neworder-fee', 'data-key': f.key },
-        el('div', { class: 'summary__desc' }, f.label, f.reason ? el('span', { class: 'summary__sub' }, f.reason) : null), el('div', { class: 'summary__amount mono' }, money(f.amount))));
-      const codAmount = K.parseMoney(row.cod) || 0;
-      estimate.replaceChildren(el('div', { class: 'summary' },
-        el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, plural(pk.length, 'package') + ' · ' + t.label), el('div', { class: 'summary__amount mono' }, money(q.totals.packages))),
-        fees,
-        el('div', { class: 'summary__rule' }),
-        el('div', { class: 'summary__total' }, el('span', null, 'Business rate'), el('span', { class: 'mono', 'data-testid': 'neworder-total' }, money(q.totals.total))),
-        codAmount > 0 ? el('p', { class: 'muted small', 'data-testid': 'neworder-cod-note' }, 'Plus ' + money(codAmount) + ' cash collected for the business.') : null));
+    // quoteFor(c) → { t, pk, q } at the agreed rate, with the delivery method's fees, or null until a size is chosen.
+    function quoteFor(c) {
+      const t = tierNow(c), pk = packagesFor(c);
+      if (!t || !pk.length) return null;
+      const end = c.row.method !== 'home' ? MDM.deliveryEndpoint(deliveryFor(c)) : null;
+      const eff = pk.map(x => Object.assign({}, x, end ? { dropoff: Object.assign({}, end, { recipient: x.dropoff.recipient }) } : {}, c.evInput.checked && (x.size === 'box' || x.size === 'xl') ? { needsVehicle: true } : {}));
+      return { t, pk, q: MDM.pricing.quote({ service: 'business', packages: eff }, settings) };
     }
-    [qtyIn, evInput, fragileIn].forEach(c => c.addEventListener('input', renderPackages));
-    evInput.addEventListener('change', renderPackages);
-    pointSel.addEventListener('change', () => renderPackages());
+    function renderPrice() {
+      const quotes = cards.map(c => {
+        const t = tierNow(c), eligible = MDM.extraVehicleEligible(packagesFor(c));
+        c.rate.textContent = t ? money(t.rate) + (t.notAgreed ? ', default rate' : '') : 'Choose a size';
+        c.evBlock.hidden = !eligible;
+        if (!eligible) c.evInput.checked = false;
+        return quoteFor(c);
+      });
+      const codAmount = cards.reduce((s, c) => s + (K.parseMoney(c.row.cod) || 0), 0);
+      const codNote = codAmount > 0 ? el('p', { class: 'muted small', 'data-testid': 'neworder-cod-note' }, 'Plus ' + money(codAmount) + ' cash collected for the business.') : null;
+      if (cards.length === 1) {
+        const x = quotes[0];
+        if (!x) { estimate.replaceChildren(el('p', { class: 'muted small' }, 'Choose the package size to see the price.')); return; }
+        const fees = (x.q.feeLines || []).map(f => el('div', { class: 'summary__line summary__line--fee', 'data-testid': 'neworder-fee', 'data-key': f.key },
+          el('div', { class: 'summary__desc' }, f.label, f.reason ? el('span', { class: 'summary__sub' }, f.reason) : null), el('div', { class: 'summary__amount mono' }, money(f.amount))));
+        estimate.replaceChildren(el('div', { class: 'summary' },
+          el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, plural(x.pk.length, 'package') + ' · ' + x.t.label), el('div', { class: 'summary__amount mono' }, money(x.q.totals.packages))),
+          fees,
+          el('div', { class: 'summary__rule' }),
+          el('div', { class: 'summary__total' }, el('span', null, 'Business rate'), el('span', { class: 'mono', 'data-testid': 'neworder-total' }, money(x.q.totals.total))),
+          codNote));
+        return;
+      }
+      // Several orders: a line each (its packages, size and fees), then the total of them all.
+      const lines = cards.map((c, i) => {
+        const x = quotes[i], who = trim(c.row.name);
+        const sub = x ? plural(x.pk.length, 'package') + ' · ' + x.t.label + (x.q.feeLines || []).map(f => ' + ' + f.label).join('') : 'Choose the package size';
+        return el('div', { class: 'summary__line', 'data-testid': 'neworder-order-line' },
+          el('div', { class: 'summary__desc' }, 'Order ' + (i + 1) + (who ? ' · ' + who : ''), el('span', { class: 'summary__sub' }, sub)),
+          el('div', { class: 'summary__amount mono' }, x ? money(x.q.totals.total) : ''));
+      });
+      const sum = quotes.reduce((s, x) => s + (x ? x.q.totals.total : 0), 0);
+      estimate.replaceChildren(el('div', { class: 'summary' }, lines,
+        el('div', { class: 'summary__rule' }),
+        el('div', { class: 'summary__total' }, el('span', null, 'Business rate, ' + cards.length + ' orders'), el('span', { class: 'mono', 'data-testid': 'neworder-total' }, money(sum))),
+        codNote));
+    }
+    pointSel.addEventListener('change', () => renderPrice());
     accountSel.addEventListener('change', () => {
       n.accountId = accountSel.value; syncTiers(); syncPoints();
       const tiers = tierChoices();
-      if (!tiers.some(t => t.value === row.tier && !t.notAgreed)) row.tier = ((tiers.find(t => !t.notAgreed) || tiers[0]) || {}).value || '';
-      drawCard();
+      cards.forEach(c => {
+        if (!tiers.some(t => t.value === c.row.tier && !t.notAgreed)) c.row.tier = ((tiers.find(t => !t.notAgreed) || tiers[0]) || {}).value || '';
+        drawCard(c);
+      });
     });
 
     const body = [
       sec('Account', 'neworder-account-section', accountBlock),
       sec('Collection', 'neworder-collection-section', collectionBlock),
-      sec('Package', 'neworder-packages-section', el('div', { class: 'stack-4' }, cardHost, boatContactField,
-        el('div', { class: 'grid-2' }, qtyField, el('label', { class: 'checkbox', for: fragileIn.id }, fragileIn, el('span', null, 'Fragile'))), evBlock)),
+      sec('Package', 'neworder-packages-section', el('div', { class: 'stack-4' }, cardHost, addOrderRow)),
       sec('Price', 'neworder-estimate-section', estimate),
     ];
     const createBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'neworder-create', on: { click: () => act(createOrder) } }, 'Create order');
     const footer = [el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'neworder-cancel', on: { click: () => drawer.close() } }, 'Cancel'), createBtn];
-    syncTiers(); syncPoints(); drawCard();
+    syncTiers(); syncPoints(); addCard(null);
     drawer.open({ title: 'New business order', body, footer, size: 'lg', onClose: () => onDrawerClosed('new') });
     if (accounts.length) accountSel.focus();
 
+    // The createOrder payload of one card.
+    function orderFor(c, acc, collection, schedule) {
+      const delivery = deliveryFor(c);
+      const packages = packagesFor(c).map(x => Object.assign({}, x, { pickup: endpointCoords(x.pickup), dropoff: c.row.method === 'home' ? endpointCoords(x.dropoff) : x.dropoff }));
+      const details = { tier: c.row.tier };
+      if (trim(c.row.reference)) details.reference = trim(c.row.reference);
+      return {
+        source: n.source, requestType: 'business', service: 'business', serviceLevel: n.level, accountId: acc.id, customerId: null,
+        customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
+        collection, delivery, details, packages, schedule, by: by(),
+        extraVehicle: !!(c.evInput.checked && MDM.extraVehicleEligible(packages)),
+        cod: K.parseMoney(c.row.cod) || 0,
+        payment: { method: 'invoice', status: 'invoiced' }, status: 'confirmed' };
+    }
     async function createOrder() {
       if (!state.neworder) return;
       const acc = account();
       if (!acc) { toast('Choose a business account', 'warn'); return; }
       tried = true;
       let ok = checkCollection();
-      if (!showErrors()) ok = false;
+      cards.forEach(c => {
+        if (!showErrors(c)) ok = false;
+        const q = Number(c.qtyIn.value);
+        if (!(Number.isInteger(q) && q >= 1 && q <= 20)) { setError(c.qtyField, 'Enter 1 to 20 packages'); ok = false; }
+        if (c.row.method === 'boat' && trim(c.boatContact.value) && !phone.valid(c.boatContact.value, { intl: true })) { setError(c.boatContactField, 'Enter a valid mobile number'); ok = false; }
+      });
       if (n.level === 'advance' && !(dateIn.value && dateIn.value >= dayKey(new Date()))) { setError(dateField, 'Choose today or a later date'); ok = false; }
-      const q = Number(qtyIn.value);
-      if (!(Number.isInteger(q) && q >= 1 && q <= 20)) { setError(qtyField, 'Enter 1 to 20 packages'); ok = false; }
-      if (row.method === 'boat' && trim(boatContact.value) && !phone.valid(boatContact.value, { intl: true })) { setError(boatContactField, 'Enter a valid mobile number'); ok = false; }
       if (!ok) { MDM.ui.focusFirstInvalid(drawer.el()); return; }
       MDM.ui.setLoading(createBtn, true);
+      const made = [];
       try {
         const collection = collectionFor();
-        const delivery = deliveryFor();
-        const packages = packagesFor().map(x => Object.assign({}, x, { pickup: endpointCoords(x.pickup), dropoff: row.method === 'home' ? endpointCoords(x.dropoff) : x.dropoff }));
-        const details = { tier: row.tier };
-        if (trim(row.reference)) details.reference = trim(row.reference);
         const schedule = n.level === 'advance' ? { type: 'advance', collectDate: dateIn.value, collectTime: timeIn.value, deliverDate: dateIn.value, deliverTime: '' } : { type: 'asap' };
-        const order = await MDM.store.createOrder({
-          source: n.source, requestType: 'business', service: 'business', serviceLevel: n.level, accountId: acc.id, customerId: null,
-          customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
-          collection, delivery, details, packages, schedule, by: by(),
-          extraVehicle: !!(evInput.checked && MDM.extraVehicleEligible(packages)),
-          cod: K.parseMoney(row.cod) || 0,
-          payment: { method: 'invoice', status: 'invoiced' }, status: 'confirmed' });
-        toast('Order ' + order.code + ' created', 'ok');
-        state.drawer.silent = true; drawer.close(); state.drawer.silent = false;
-        MDM.admin.openOrder(order.id);
+        for (const c of cards.slice()) {
+          made.push(await MDM.store.createOrder(orderFor(c, acc, collection, schedule)));
+          // A booked order leaves the form, so trying again after a failure does not book it twice.
+          if (cards.length > 1) removeCard(c, false);
+        }
+      } catch (e) {
+        if (made.length) toast('Created ' + made.map(o => o.code).join(', ') + '. The other orders are still in the form.', 'ok');
+        throw e;
       } finally { if (createBtn.isConnected) MDM.ui.setLoading(createBtn, false); }
+      toast(made.length > 1 ? made.length + ' orders created: ' + made.map(o => o.code).join(', ') : 'Order ' + made[0].code + ' created', 'ok');
+      state.drawer.silent = true; drawer.close(); state.drawer.silent = false;
+      if (made.length === 1) MDM.admin.openOrder(made[0].id);
     }
   }
 

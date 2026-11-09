@@ -1580,6 +1580,21 @@
     }
     return insert('customers', { name: c.name || '', phone, email: c.email || '', notify: c.notify || 'whatsapp', addresses: c.address ? [Object.assign({ id: MDM.id('adr'), label: 'Home' }, c.address)] : [], lastOrderAt: c.touch === false ? null : t, orderCount: c.touch === false ? 0 : 1, termsAcceptedAt: c.termsAcceptedAt || null });
   }
+  // The office edits a customer's name, email and how we send them updates (Customers → Edit, client 09/11/2026). On the live service
+  // the email is how the customer signs in: signing in with it links them to this number's orders (server/handler.js).
+  function editCustomer(id, patch, by) {
+    const c = readCol('customers').find(x => x.id === id);
+    if (!c) throw new StoreError('not_found', 'Customer not found');
+    const p = patch || {};
+    const email = String(p.email == null ? c.email || '' : p.email).trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new StoreError('validation', 'Enter a valid email address');
+    const notify = ['whatsapp', 'sms', 'viber', 'email'].indexOf(p.notify) >= 0 ? p.notify : c.notify || 'whatsapp';
+    if (notify === 'email' && !email) throw new StoreError('validation', 'Add the email to send updates by email');
+    const name = String(p.name == null ? '' : p.name).trim() || c.name || '';
+    const rec = update('customers', id, { name, email, notify });
+    if (email.toLowerCase() !== String(c.email || '').toLowerCase()) audit('customer_email', (email ? 'Set the email of ' : 'Removed the email of ') + (name || c.phone) + (email ? ' to ' + email : ''), by, { customerId: id });
+    return rec;
+  }
   // createOrder: the one place customer and admin requests become orders (keeps the shape identical everywhere).
   // The secret of an order's tracking link (orders.track_token on the live service, where the database makes it): with it the link
   // opens the whole order without signing in (client, 05/11/2026). The demo makes its own.
@@ -2052,7 +2067,7 @@
     handToOffice: P(handToOffice), changeDeliveryMethod: P(changeDeliveryMethod),
     driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
     createStoreOrder: P(createStoreOrder), punchIn: P(punchIn), punchOut: P(punchOut), openShift: P(openShift), requestLeave: P(requestLeave), decideLeave: P(decideLeave),
-    upsertCustomer: P(upsertCustomer), createInvoice: P(createInvoice), orderByCode: P(orderByCode),
+    upsertCustomer: P(upsertCustomer), editCustomer: P(editCustomer), createInvoice: P(createInvoice), orderByCode: P(orderByCode),
     addCharge: P(addCharge), setChargeBillable: P(setChargeBillable), voidCharge: P(voidCharge), reimburseCharges: P(reimburseCharges), addVehicleCharge: P(addVehicleCharge),
     updateBoat: P(updateBoat), businessCancel: P(businessCancel), markReturned: P(markReturned), cashHandover: P(cashHandover), remitCash: P(remitCash),
     offDayBalance: P(offDayBalance), saveAddress: P(saveAddress), removeAddress: P(removeAddress), saveCollectionPoint: P(saveCollectionPoint), removeCollectionPoint: P(removeCollectionPoint),
