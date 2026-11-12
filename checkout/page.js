@@ -209,8 +209,9 @@
       el('div', { class: 'summary__total' }, el('span', null, 'Amount due'), el('span', { class: 'mono', 'data-testid': 'checkout-amount' }, MDM.pricing.format(order.totals.total))));
     const from = {};
     (order.changes || []).forEach(c => { const m = /^package (.+) size$/.exec(c.field || ''); if (m && c.from && !from[m[1]]) from[m[1]] = c.from; });
-    const lines = (order.packages || []).map(p => line(MDM.pricing.lineLabel(p, order.service),
-      [p.description, from[p.id] && from[p.id] !== p.size ? 'changed from ' + MDM.pricing.sizeLabel(from[p.id]) + ' by our team' : ''].filter(Boolean).join(' · ') || null, p.price ? p.price.lineTotal : 0));
+    const shown = MDM.pricing.packageAmounts(order).amounts;
+    const lines = (order.packages || []).map((p, i) => line(MDM.pricing.lineLabel(p, order.service),
+      [p.description, from[p.id] && from[p.id] !== p.size ? 'changed from ' + MDM.pricing.sizeLabel(from[p.id]) + ' by our team' : ''].filter(Boolean).join(' · ') || null, p.price ? shown[i] : 0));
     (order.items || []).forEach(it => lines.unshift(line(it.qty + ' × ' + it.name, null, it.total)));
     const shopItems = Array.isArray((order.details || {}).items) ? order.details.items.filter(i => i && i.name) : [];
     const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0);

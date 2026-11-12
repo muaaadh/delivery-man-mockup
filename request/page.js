@@ -879,9 +879,28 @@
     }
     return out.filter(Boolean);
   }
+  // A normal or express order's times are for the day it is placed: { type: 'asap', day, collectTime?, deliverTime? }.
+  function timesToday() {
+    const s = draft.schedule, out = { type: 'asap' };
+    if (trim(s.collectTime)) out.collectTime = trim(s.collectTime);
+    if (trim(s.deliverTime)) out.deliverTime = trim(s.deliverTime);
+    if (out.collectTime || out.deliverTime) out.day = today();
+    return out;
+  }
   function scheduleFields(n) {
     const out = [seg(n, 'level', 'When', MDM.SERVICE_LEVELS.map(l => ({ value: l.value, label: l.label })), { testid: 'request-level', onChange: () => { saveDraft(); rerender(n); updateSummary(); } })];
     if (draft.level === 'express') out.push(MDM.ui.notice('info', 'Express depends on availability. We confirm it with the price.'));
+    // Normal and express orders today: a collection and a delivery time, optional on a normal order, at least one on an express order
+    // (client, 12/11/2026: urgent orders are worked in time order). Another day is an advance order.
+    if (draft.level !== 'advance') {
+      const express = draft.level === 'express', s = draft.schedule;
+      const back = new Date(Date.now() - 15 * 60000), soon = MDM.ui.dayKey(back) === today() ? MDM.ui.fmtTime(back) : '00:00';
+      const past = v => (v && v < soon ? 'Choose a time later today, or an advance order for another day' : null);
+      const either = () => (express && !trim(s.collectTime) && !trim(s.deliverTime) ? 'Give a collection or a delivery time' : null);
+      const after = () => (s.collectTime && s.deliverTime && s.deliverTime < s.collectTime ? 'Delivery must be after collection' : null);
+      out.push(grid(F(n, 'schedule.collectTime', 'Collection time', { type: 'time', noOptional: express, hint: express ? null : 'Today. Leave empty for any time', validate: v => past(v) || either() }),
+        F(n, 'schedule.deliverTime', 'Delivery time', { type: 'time', noOptional: express, hint: express ? 'Today. One of the two is enough' : 'Today. Leave empty for any time', validate: v => past(v) || after() || either() })));
+    }
     if (draft.level === 'advance') {
       const later = () => { const s = draft.schedule; if (!s.collectDate || !s.deliverDate) return null; return (s.deliverDate + 'T' + (s.deliverTime || '00:00')) < (s.collectDate + 'T' + (s.collectTime || '00:00')) ? 'Delivery must be after collection' : null; };
       out.push(grid(F(n, 'schedule.collectDate', 'Collection date', { type: 'date', required: true, attrs: { min: today() }, validate: v => (v < today() ? 'Choose today or a later date' : null) }), F(n, 'schedule.collectTime', 'Collection time', { type: 'time', required: true })),
@@ -1257,7 +1276,9 @@
     if (t === 'office') { add('Office or ministry', d.organisation); add('Task', (MDM.OFFICE_TASKS.find(x => x.value === d.task) || {}).label); add('References', d.reference); add('Details', d.details); if (d.returnDocs) add('Return', 'Bring the receipt or documents back'); }
     const docs = draft.docs.filter(x => relevantDoc(x.kind));
     if (docs.length) rows.push(reviewRow('Documents', docs.map(x => x.name).join(', ')));
-    add('Timing', draft.level === 'advance' ? 'Collect ' + draft.schedule.collectDate + ' ' + draft.schedule.collectTime + ', deliver ' + draft.schedule.deliverDate + ' ' + draft.schedule.deliverTime : (MDM.SERVICE_LEVELS.find(x => x.value === draft.level) || {}).label);
+    const sch = draft.schedule, level = (MDM.SERVICE_LEVELS.find(x => x.value === draft.level) || {}).label;
+    add('Timing', draft.level === 'advance' ? 'Collect ' + sch.collectDate + ' ' + sch.collectTime + ', deliver ' + sch.deliverDate + ' ' + sch.deliverTime
+      : [level, trim(sch.collectTime) ? 'collect at ' + sch.collectTime : '', trim(sch.deliverTime) ? 'deliver by ' + sch.deliverTime : ''].filter(Boolean).join(', '));
     return rows;
   }
   // The extra stops (multi collection) as review rows: 'Stop 2' → what happens there.
@@ -1479,7 +1500,7 @@
         source: OFFICE ? draft.source : 'web', requestType: isShop() ? 'shop_buy' : t, service: service(), serviceLevel: draft.level, customerId: saved.id, customer,
         collection, delivery, details, documents, packages, extraCollections: extraData(), termsAcceptedAt,
         extraVehicle: !!draft.extraVehicle && MDM.extraVehicleEligible(packages),
-        schedule: draft.level === 'advance' ? Object.assign({ type: 'advance' }, draft.schedule) : { type: 'asap' },
+        schedule: draft.level === 'advance' ? Object.assign({ type: 'advance' }, draft.schedule) : timesToday(),
         payment: { method: 'transfer', status: 'pending', upfrontRequired: upfrontForced() || draft.pay === 'upfront' },
         by: OFFICE ? officeBy() : 'customer',
       });

@@ -172,6 +172,48 @@
   MDM.priceAfterCollection = o => !!(o && o.pricing && o.pricing.afterCollection && o.pricing.status !== 'confirmed');
   // priceToFinalise(o) → true once the proof of collection is in and the price still waits for the operator.
   MDM.priceToFinalise = o => MDM.priceAfterCollection(o) && ['cancelled', 'returned'].indexOf(o.status) < 0 && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
+  // When an order is wanted (client, 12/11/2026: urgent orders in time order, by the collection or the delivery time; a normal order's
+  // times are optional). orderTimes(o) → { collect, deliver }, each { day: 'YYYY-MM-DD', time: 'HH:MM' or '' } or null: an advance
+  // order's dates and times; the times a normal or express order was given for its day (schedule.day, else the day it was made); a
+  // business collection point's preferred time; and, once a failed stop is rescheduled, its new time.
+  const hhmm = t => (/^\d{1,2}:\d{2}/.test(String(t || '')) ? String(t).slice(0, 5).replace(/^(\d):/, '0$1:').slice(0, 5) : '');
+  const collectedYet = o => ['collected', 'out_for_delivery', 'delivered', 'returned'].indexOf(o.status) >= 0 ||
+    (o.status === 'failed' && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done'));
+  MDM.orderTimes = function (o) {
+    const s = (o && o.schedule) || {}, made = MDM.localDayKey((o && o.createdAt) || Date.now());
+    const at = (day, time) => (day || hhmm(time) ? { day: day || made, time: hhmm(time) } : null);
+    let collect = null, deliver = null;
+    if (s.type === 'advance') { collect = at(s.collectDate, s.collectTime); deliver = at(s.deliverDate, s.deliverTime); }
+    else { if (hhmm(s.collectTime)) collect = at(s.day, s.collectTime); if (hhmm(s.deliverTime)) deliver = at(s.day, s.deliverTime); }
+    if (!collect && o && o.collection && hhmm(o.collection.preferredTime)) collect = at(s.day, o.collection.preferredTime);
+    const r = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2})/.exec(String(s.rescheduledFor || ''));
+    if (r) { if (collectedYet(o)) deliver = { day: r[1], time: hhmm(r[2]) }; else collect = { day: r[1], time: hhmm(r[2]) }; }
+    return { collect, deliver };
+  };
+  // nextTime(o) → the time that matters now, with kind 'collect' or 'deliver': the collection's until it is collected (or the
+  // delivery's when only that was given), then the delivery's. timeAt(t) → that moment in ms on this device's clock (a day without a
+  // time counts as its end).
+  MDM.nextTime = function (o) {
+    const t = MDM.orderTimes(o), kind = collectedYet(o) || !t.collect ? 'deliver' : 'collect';
+    return t[kind] ? Object.assign({ kind }, t[kind]) : null;
+  };
+  MDM.timeAt = t => (t && t.day ? new Date(t.day + 'T' + (t.time || '23:59')).getTime() : null);
+  // urgencyRank(o): an approved urgent request 0, another approved priority 1, express 2, the rest 9 (the driver's order since round 1).
+  MDM.urgencyRank = function (o) {
+    const p = (o && o.priority) || {};
+    if (p.status === 'approved' && p.level && p.level !== 'normal') return p.level === 'urgent' ? 0 : 1;
+    return o && o.serviceLevel === 'express' ? 2 : 9;
+  };
+  MDM.urgentOrder = o => MDM.urgencyRank(o) < 9;
+  // byUrgency(a, b): urgent orders first; within each rank by the time that matters now, soonest first; then the orders without a time,
+  // oldest first. The office board and the driver's jobs sort with it.
+  MDM.byUrgency = function (a, b) {
+    const ra = MDM.urgencyRank(a), rb = MDM.urgencyRank(b);
+    if (ra !== rb) return ra - rb;
+    const ta = MDM.timeAt(MDM.nextTime(a)), tb = MDM.timeAt(MDM.nextTime(b));
+    if (ta !== tb) { if (ta == null) return 1; if (tb == null) return -1; return ta - tb; }
+    return (a.createdAt || '') < (b.createdAt || '') ? -1 : (a.createdAt || '') > (b.createdAt || '') ? 1 : 0;
+  };
   // Extra collection points on one order (updates 17/10/2026): collect from an address or buy at a shop, all packed together and
   // delivered to the one delivery address. order.extraCollections = [{ id, kind: 'collect'|'shop', address, zone, landmark,
   // contactName, contactPhone, instructions, shop: { name, phone, list, budget, unavailable, receiptTotal, receiptPhotoId } }]. Since round 4
@@ -652,7 +694,7 @@
     const now0 = o.totals.total, shopping = (o.totals.budget || 0) + ((o.fees && o.fees.shopping) || 0);
     const total = q.delivery != null && q.delivery !== '' ? Math.round(Number(q.delivery)) + shopping : q.total == null || q.total === '' ? now0 : Math.round(Number(q.total));
     if (total !== now0) {
-      o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: MDM.id('adj'), preset: q.preset || 'quote', label: q.label || 'Price confirmation', amount: total - now0, at: now(), by: q.by || 'admin', remarks: q.remarks || '' }]);
+      o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: MDM.id('adj'), preset: q.preset || 'quote', label: q.label || 'Price confirmation', amount: total - now0, at: now(), by: q.by || 'admin', remarks: q.remarks || '', confirm: true }]);
       recalc(o);
     }
     const fromProof = MDM.priceToFinalise(o);
@@ -1677,13 +1719,15 @@
       if (!MDM.inPeriod(span, at)) return;
       // A price still waiting for its quote (extra vehicle, XL) would be billed at the estimate: the office confirms it first.
       if (o.totals && o.totals.quoteRequired && !(o.pricing && o.pricing.status === 'confirmed')) throw new StoreError('validation', 'Confirm the price of ' + o.code + ' first: it was delivered before its price was set');
-      (o.packages || []).forEach(pkg => {
-        const rate = pkg.price ? pkg.price.lineTotal : (acc.ratePerPackage || s.rates.business);
+      // The price our team confirmed shows in the package lines, not as a line of its own (client, 12/11/2026).
+      const shown = MDM.pricing.packageAmounts(o);
+      (o.packages || []).forEach((pkg, i) => {
+        const rate = pkg.price ? shown.amounts[i] : (acc.ratePerPackage || s.rates.business);
         lines.push({ kind: 'package', tier: pkg.tier || null, size: pkg.size, date: at, orderCode: o.code, recipient: pkg.dropoff && pkg.dropoff.recipient ? pkg.dropoff.recipient.name : '', description: pkg.description || '', packages: 1, rate, amount: rate });
       });
       if (o.fees && o.fees.cargo) lines.push({ kind: 'cargo', date: at, orderCode: o.code, recipient: '', description: 'Maldivian Cargo fee', packages: 0, rate: o.fees.cargo, amount: o.fees.cargo });
       if (o.fees && o.fees.airport) lines.push({ kind: 'airport', date: at, orderCode: o.code, recipient: '', description: 'Airport fee', packages: 0, rate: o.fees.airport, amount: o.fees.airport });
-      (o.fees && o.fees.adjustments || []).forEach(a => lines.push({ kind: 'adjustment', preset: a.preset || null, date: at, orderCode: o.code, recipient: '', description: a.label, packages: 0, rate: a.amount, amount: a.amount }));
+      (o.fees && o.fees.adjustments || []).filter(a => !shown.folded[a.id]).forEach(a => lines.push({ kind: 'adjustment', preset: a.preset || null, date: at, orderCode: o.code, recipient: '', description: a.label, packages: 0, rate: a.amount, amount: a.amount }));
     });
     const subtotal = lines.reduce((n, l) => n + l.amount, 0);
     const gstPercent = Number(s.gstPercent) || 0;

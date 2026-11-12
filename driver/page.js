@@ -152,8 +152,15 @@
     if (o.serviceLevel === 'express') return { rank: 2, label: 'Express' };
     return { rank: 9, label: '' };
   }
-  function sortJobs(list) {
-    return list.slice().sort((a, b) => priorityOf(a).rank - priorityOf(b).rank || (a.createdAt < b.createdAt ? -1 : 1));
+  // Urgent first, each in time order by the collection or delivery time, then the rest oldest first (client, 12/11/2026: the same order
+  // as the office's board).
+  function sortJobs(list) { return list.slice().sort(MDM.byUrgency); }
+  // The time that matters now, as a tag: "Collect 10:30" until it is collected, then "Deliver by 14:00"; red once it has passed.
+  function dueTag(o) {
+    const t = MDM.nextTime(o);
+    if (!t || !t.time) return null;
+    const late = MDM.timeAt(t) < Date.now();
+    return el('span', { class: 'tag' + (late ? ' tag--hot' : ''), 'data-testid': 'driver-due', 'data-late': late ? 'true' : null }, icon('clock', 12), (t.kind === 'deliver' ? 'Deliver by ' : 'Collect ') + MDM.ui.timeText(t));
   }
   function scheduleLine(o) {
     const s = o.schedule || {};
@@ -162,6 +169,13 @@
       if (s.collectDate) parts.push('Collect ' + MDM.ui.fmtDate(s.collectDate + 'T00:00', { time: false }) + (s.collectTime ? ' at ' + s.collectTime : ''));
       if (s.deliverDate) parts.push('deliver by ' + (s.deliverDate !== s.collectDate ? MDM.ui.fmtDate(s.deliverDate + 'T00:00', { time: false }) + ' ' : '') + (s.deliverTime || ''));
     } else if (s.type === 'slot' && s.date) parts.push('Slot ' + MDM.ui.fmtDate(s.date + 'T00:00', { time: false }) + (s.window ? ' ' + s.window : ''));
+    else {
+      // A normal or express order's optional times (client, 12/11/2026) and a business's preferred collection time.
+      const day = s.day && s.day !== MDM.ui.dayKey(new Date()) ? MDM.ui.timeText({ day: s.day }) + ' ' : '';
+      const ct = s.collectTime || (o.collection || {}).preferredTime;
+      if (ct) parts.push((s.collectTime ? 'Collect at ' : 'Collect around ') + day + ct);
+      if (s.deliverTime) parts.push((parts.length ? 'deliver by ' : 'Deliver by ') + day + s.deliverTime);
+    }
     if (s.rescheduledFor) parts.push('Rescheduled for ' + s.rescheduledFor);
     return parts.join(', ');
   }
@@ -419,6 +433,8 @@
     const showDrop = drops.find(s => cur && s.id === cur.id) || drops.find(isOpen) || drops[drops.length - 1];
     const tags = [];
     if (pri.label) tags.push(el('span', { class: 'tag tag--hot', 'data-testid': 'driver-priority' }, pri.label));
+    const due = dueTag(o);
+    if (due) tags.push(due);
     if (methodTag(o)) tags.push(el('span', { class: 'tag', 'data-testid': 'driver-method-tag' }, methodTag(o)));
     if (codDue(o)) tags.push(el('span', { class: 'tag tag--cash', 'data-testid': 'driver-cod-tag' }, 'Cash ' + money(o.cod.amount)));
     if ((o.packages || []).some(p => p.fragile)) tags.push(el('span', { class: 'tag' }, 'Fragile'));
@@ -463,7 +479,7 @@
     const pri = priorityOf(o);
     return el('li', { class: 'list__item job__row', 'data-testid': testid, 'data-order-id': o.id, 'data-code': o.code },
       el('div', { class: 'list__main' },
-        el('div', { class: 'list__title' }, el('span', { class: 'mono' }, o.code), ' · ', MDM.requestTypeLabel(o.requestType), pri.label ? [' ', el('span', { class: 'tag tag--hot' }, pri.label)] : null),
+        el('div', { class: 'list__title' }, el('span', { class: 'mono' }, o.code), ' · ', MDM.requestTypeLabel(o.requestType), pri.label ? [' ', el('span', { class: 'tag tag--hot' }, pri.label)] : null, (t => t ? [' ', t] : null)(dueTag(o))),
         el('div', { class: 'list__meta' }, (o.collection ? MDM.geo.zoneShort(o.collection.zone) : '') + ' to ' + (o.delivery ? MDM.geo.zoneShort(o.delivery.zone) : '') + ' · ' + packagesLine(o))),
       el('div', { class: 'list__aside' }, aside));
   }

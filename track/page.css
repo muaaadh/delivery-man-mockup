@@ -47,9 +47,9 @@ body.page-track .track-result .section-head { margin-bottom: 16px; }
 body.page-track .track-result .section-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
 body.page-track .track-summary-note { margin-top: 12px; }
 
-/* Route: the map edge to edge in its card, the stops under it. A stop row is a real button while the map is shown (tap to pan). */
-body.page-track .track-route .map { border: 0; border-radius: var(--radius-lg); box-shadow: inset 0 0 0 1px var(--border); }
-body.page-track .track-map-holder + .stops { margin-top: 12px; }
+/* Route: the stops under the status; the map is the last section (client, 12/11/2026). A stop row is a real button while the map is
+   shown: a tap brings the map into view on that stop. */
+body.page-track .track-map-holder .map { border: 0; border-radius: var(--radius-lg); box-shadow: inset 0 0 0 1px var(--border); }
 body.page-track button.stop { width: 100%; cursor: pointer; transition: background-color .15s ease, box-shadow .15s ease; }
 body.page-track button.stop:focus-visible { box-shadow: var(--focus); }
 body.page-track .stop__main { min-width: 0; }

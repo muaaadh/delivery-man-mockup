@@ -330,11 +330,13 @@
     const first = state.enteredId !== o.id;
     state.enteredId = o.id;
     if (!owner) { renderPublic(o, refs, first); return; }
-    // Status first (the hero), then the map, then the progress steps; the details follow.
+    // Status first (the hero), the stops, the progress steps, then the photos and documents and the driver (client, 12/11/2026: the
+    // photos between Progress and the driver, the map at the bottom); the details follow and the map comes last.
     const parts = [buildHead(o, refs), buildNotices(o, stops)];
-    if (NO_MAP.indexOf(o.status) < 0 || stops.length) parts.push(buildRoute(o, stops));
-    else destroyMap();
+    if (stops.length) parts.push(buildRoute(o, stops));
     parts.push(buildProgress(o, first));
+    const proofs = buildProofs(o, stops, files);
+    if (proofs) parts.push(proofs);
     if (driver) parts.push(buildDriver(o, driver, refs));
     const collections = buildCollections(o);
     if (collections) parts.push(collections);
@@ -343,9 +345,10 @@
     else parts.push(buildPrice(o), buildPayment(o));
     const details = buildDetails(o);
     if (details) parts.push(details);
-    const proofs = buildProofs(o, stops, files);
-    if (proofs) parts.push(proofs);
     parts.push(buildTimeline(o));
+    const map = buildMap(o);
+    if (map) parts.push(map);
+    else destroyMap();
     resultEl.replaceChildren(...parts);
     state.refs = refs;
     resultEl.hidden = false; form.hidden = true; introEl.hidden = true;
@@ -423,7 +426,7 @@
     }
     switch (o.status) {
       case 'confirmed': return state.receiver || !priceConfirmed(o) ? 'We are assigning a driver.' : 'Final price ' + fmt(o.totals.total) + '. We are assigning a driver' + (o.schedule && o.schedule.type === 'advance' ? ' for your booked time.' : '.');
-      case 'assigned': return 'You see the driver on the map once they set off.';
+      case 'assigned': return 'You see the driver on the map below once they set off.';
       case 'dispatched': return 'Your driver sets off shortly.';
       case 'collected': return MDM.waitingAtOffice(o) && o.atOffice ? 'At our office. A driver delivers it next.' : '';
       case 'returned': return 'We could not deliver it, so it went back to the sender.';
@@ -640,8 +643,7 @@
   }
 
   function buildRoute(o, stops) {
-    const withMap = NO_MAP.indexOf(o.status) < 0;
-    const clickable = withMap && MDM.map.available();
+    const clickable = NO_MAP.indexOf(o.status) < 0 && MDM.map.available();
     const active = ACTIVE.indexOf(o.status) >= 0;
     const current = active ? stops.findIndex(x => x.status === 'arrived' || x.status === 'pending') : -1;
     const rows = stops.map((x, i) => {
@@ -657,17 +659,26 @@
       const shopName = x.shop ? String(x.label || '').replace(/^Shop: /, '') : '';
       const title = shopName ? (x.address && x.address.indexOf(shopName) === 0 ? x.address : shopName + (x.address && x.address !== shopName ? ' · ' + x.address : '')) : x.address;
       const attrs = { class: cls, 'data-testid': 'track-stop', dataset: { stopId: x.id, status: x.status } };
-      if (clickable) { attrs.type = 'button'; attrs.on = { click: () => panToStop(x) }; attrs['aria-label'] = 'Show ' + kind.toLowerCase() + ' on the map: ' + x.address; }
+      if (clickable) { attrs.type = 'button'; attrs.on = { click: () => showStop(x) }; attrs['aria-label'] = 'Show ' + kind.toLowerCase() + ' on the map: ' + x.address; }
       return el(clickable ? 'button' : 'div', attrs,
         el('span', { class: 'stop__marker', 'aria-hidden': 'true' }, String(i + 1)),
         el('span', { class: 'stop__main' }, el('span', { class: 'stop__title' }, title), el('span', { class: 'stop__meta' }, meta.join(' · '))),
         el('span', { class: 'stop__aside' }, aside));
     });
-    const body = [];
-    if (withMap) { const holder = el('div', { class: 'track-map-holder' }); mountMap(holder); body.push(holder); }
-    else destroyMap();
-    body.push(el('div', { class: 'stops', 'data-testid': 'track-stops' }, rows));
-    return el('section', { class: 'section track-route', 'aria-labelledby': 'track-route-h' }, el('h2', { id: 'track-route-h', class: 'sr-only' }, 'Route'), body);
+    return el('section', { class: 'section track-route', 'aria-labelledby': 'track-route-h' }, el('h2', { id: 'track-route-h', class: 'sr-only' }, 'Route'),
+      el('div', { class: 'stops', 'data-testid': 'track-stops' }, rows));
+  }
+  // The route map, last on the page (client, 12/11/2026). A stop above brings it into view on that stop.
+  function buildMap(o) {
+    if (NO_MAP.indexOf(o.status) >= 0) return null;
+    const holder = el('div', { class: 'track-map-holder' });
+    mountMap(holder);
+    return section('track-map-h', 'Map', holder);
+  }
+  function showStop(s) {
+    const box = state.map && state.map.el;
+    if (box) MDM.ui.scrollIntoViewIfNeeded(box, 'center');
+    panToStop(s);
   }
 
   function buildDriver(o, d, refs) {
@@ -802,10 +813,11 @@
     const est0 = estimateOf(o), est = { min: est0.min + charged, max: est0.max + charged };
     if (confirmed) {
       (o.items || []).forEach(it => lines.push(priceLine(it.qty + ' × ' + it.name, null, it.total)));
-      o.packages.forEach(p => lines.push(priceLine(MDM.pricing.lineLabel(p, o.service),
+      const shown = MDM.pricing.packageAmounts(o).amounts;
+      o.packages.forEach((p, i) => lines.push(priceLine(MDM.pricing.lineLabel(p, o.service),
         [p.description, p.price && p.price.businessRate && p.tier ? tierLabel(p.tier) + ' business rate' : null,
           firstFrom[p.id] && firstFrom[p.id] !== p.size ? 'changed from ' + MDM.pricing.sizeLabel(firstFrom[p.id]) + ' by our team' : null].filter(Boolean).join(' · '),
-        p.price ? p.price.lineTotal : 0, { testid: 'track-package-line' })));
+        p.price ? shown[i] : 0, { testid: 'track-package-line' })));
       if (budget) lines.push(budgetLine(null));
     } else {
       // The delivery part of the estimate is what is left once the budget and the fixed fees are taken out.
@@ -918,8 +930,10 @@
       const tiers = [...new Set((o.packages || []).map(p => p.tier).filter(Boolean))];
       if (tiers.length) add('Package size', tiers.map(tierLabel).join(', '));
     }
-    const s = o.schedule || {};
-    if (s.type === 'advance') { add('Collection', fmtDate(s.collectDate, { dateOnly: true }) + ' ' + (s.collectTime || '')); add('Delivery', fmtDate(s.deliverDate, { dateOnly: true }) + ' ' + (s.deliverTime || '')); }
+    // The times asked for (an advance order's, or the optional ones on a normal or express order, client 12/11/2026).
+    const times = MDM.orderTimes(o);
+    if (times.collect) add('Collection time', MDM.ui.timeText(times.collect));
+    if (times.deliver) add('Delivery time', MDM.ui.timeText(times.deliver));
     if (o.serviceLevel === 'express') add('Service', 'Express');
     const pr = o.priority || {};
     if (pr.status === 'approved' && pr.level !== 'normal') add('Priority', (MDM.PRIORITY_LEVELS.find(x => x.value === pr.level) || {}).label);

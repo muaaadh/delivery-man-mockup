@@ -155,8 +155,9 @@
     const lines = [];
     (o.items || []).forEach(it => lines.push(line(it.qty + ' × ' + it.name, it.unit ? MDM.pricing.format(it.price) + ' per ' + it.unit : null, it.total)));
     const from = sizeFrom(o);
-    (o.packages || []).forEach(pk => lines.push(line(MDM.pricing.lineLabel(pk, o.service),
-      [pk.description, from[pk.id] && from[pk.id] !== pk.size ? 'changed from ' + MDM.pricing.sizeLabel(from[pk.id]) + ' by our team' : ''].filter(Boolean).join(' · ') || null, pk.price ? pk.price.lineTotal : 0)));
+    const shown = MDM.pricing.packageAmounts(o).amounts;
+    (o.packages || []).forEach((pk, i) => lines.push(line(MDM.pricing.lineLabel(pk, o.service),
+      [pk.description, from[pk.id] && from[pk.id] !== pk.size ? 'changed from ' + MDM.pricing.sizeLabel(from[pk.id]) + ' by our team' : ''].filter(Boolean).join(' · ') || null, pk.price ? shown[i] : 0)));
     // Shop & deliver: the budget (or receipt) line carries the shopping list so the shopping fee reads against it.
     // A shop stop on a multi-collection order carries its list the same way.
     const shopItems = o.service === 'shop' && Array.isArray((o.details || {}).items) ? o.details.items.filter(i => i && i.name) : [];

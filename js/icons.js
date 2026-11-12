@@ -21,6 +21,10 @@
     phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
     mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
     'message-circle': '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+    // Chat apps (client, 12/11/2026: a customer's WhatsApp or Viber at a glance on the office board); drawn in the same line style,
+    // the colour comes from the page.
+    whatsapp: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9 9.2c.5 2.6 2.4 4.6 5 5.2l1.4-1.4-2-1.1-.9.8a4 4 0 0 1-1.9-1.9l.8-.9-1.1-2Z"/>',
+    viber: '<path d="M12 2.5c4.8 0 8.5 2.3 8.5 7.5s-3.7 7.5-8.5 7.5c-.8 0-1.6-.1-2.4-.2L6.5 20v-3.4C4.4 15.3 3.5 13 3.5 10c0-5.2 3.7-7.5 8.5-7.5Z"/><path d="M12.6 6.6a3.2 3.2 0 0 1 2.8 2.8"/><path d="M12.6 4.4a5.4 5.4 0 0 1 5 5"/><path d="M8.8 8.2c.4 1.8 1.9 3.3 3.7 3.7l1-1-1.4-.8-.7.5a3 3 0 0 1-1.3-1.3l.5-.7-.8-1.4Z"/>',
     smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
     clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
     history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',

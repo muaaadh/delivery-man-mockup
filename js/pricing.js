@@ -136,8 +136,28 @@
       const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) || extraShops(order.extraCollections).some(sh => sh.receiptTotal > 0);
       out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? 'of the receipt' : 'of the items' });
     }
-    (f.adjustments || []).forEach(a => out.push({ key: 'adjustment', id: a.id, label: a.label, amount: a.amount, reason: '', preset: a.preset }));
+    const folded = packageAmounts(order).folded;
+    (f.adjustments || []).forEach(a => { if (!folded[a.id]) out.push({ key: 'adjustment', id: a.id, label: a.label, amount: a.amount, reason: '', preset: a.preset }); });
     return out;
+  }
+  // The confirmed price in the package rows (client, 12/11/2026: "display the final confirmed price directly in the first/original
+  // price row, without showing additional remarks, adjustments, or separate rows"). packageAmounts(order) → { amounts, folded }:
+  // amounts[i] is package i's frozen price with the difference our price confirmation recorded added in, and folded lists those
+  // adjustments by id so feeLines leaves them out. The difference goes on the first package; a cut larger than its price carries on
+  // to the next ones. An extra vehicle charge keeps its own row, and a cut the packages cannot take stays a row of its own as before.
+  const confirmation = a => a && (a.preset === 'quote' || (a.confirm && a.preset !== 'vehicle'));
+  function packageAmounts(order) {
+    const pk = (order && order.packages) || [];
+    const amounts = pk.map(p => round(p.price && p.price.lineTotal));
+    const adj = (((order && order.fees) || {}).adjustments || []).filter(confirmation);
+    if (!pk.length || !adj.length) return { amounts, folded: {} };
+    let diff = adj.reduce((n, a) => n + round(a.amount), 0);
+    const out = amounts.slice();
+    if (diff >= 0) out[0] += diff;
+    else for (let i = 0; i < out.length && diff < 0; i++) { const cut = Math.max(diff, -out[i]); out[i] += cut; diff -= cut; }
+    if (diff < 0) return { amounts, folded: {} };
+    const folded = {}; adj.forEach(a => { folded[a.id] = true; });
+    return { amounts: out, folded };
   }
 
   // format(n, { cents }) → 'MVR 1,250' | 'MVR 1,250.00' | '−MVR 20' (true minus sign)
@@ -205,5 +225,5 @@
     if (size === 'xl') return 'MVR ' + round(cell.same) + '++';
     return round(cell.same) === round(cell.cross) ? format(cell.same) : 'MVR ' + round(cell.same) + '–' + round(cell.cross);
   }
-  MDM.pricing = { estimateRange, countsRange, businessTiers, businessRate, accountTiers, rangeLabel, quote, recalc, feeLines, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
+  MDM.pricing = { estimateRange, countsRange, businessTiers, businessRate, accountTiers, rangeLabel, quote, recalc, feeLines, packageAmounts, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
 })(window.MDM);

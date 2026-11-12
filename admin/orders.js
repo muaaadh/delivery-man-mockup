@@ -56,9 +56,14 @@
   const label = (list, v) => ((list || []).find(x => x.value === v) || {}).label || v || '';
 
   // ---- Filters ------------------------------------------------------------------------------------------------------------
-  const FILTER_KEYS = ['tab', 'status', 'type', 'method', 'payment', 'driver', 'zone', 'from', 'to', 'q', 'customer', 'account', 'batch'];
+  const FILTER_KEYS = ['view', 'tab', 'status', 'type', 'method', 'payment', 'driver', 'zone', 'from', 'to', 'q', 'customer', 'account', 'batch'];
+  // Board or list (client, 12/11/2026: the board). A link into a queue, a status, a payment state, a customer, a business or a bulk
+  // order opens the list; otherwise each person's last choice, the board at first.
+  const VIEW_KEY = 'mdm:orders-view';
+  const storedView = () => { try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board'; } catch (e) { return 'board'; } };
   function readFilters(q) {
     const f = {}; FILTER_KEYS.forEach(k => { f[k] = q.get(k) || ''; });
+    if (f.view !== 'board' && f.view !== 'list') f.view = ['tab', 'status', 'payment', 'customer', 'account', 'batch'].some(k => q.get(k)) ? 'list' : storedView();
     if (!TABS.some(t => t.value === f.tab)) f.tab = 'all';
     if (f.status && !MDM.STATUS[f.status]) f.status = '';
     if (f.payment && !MDM.PAYMENT[f.payment]) f.payment = '';
@@ -73,8 +78,14 @@
     MDM.admin.setQuery(q);
     render().catch(() => {});
   }
-  function clearFilters() { const p = {}; FILTER_KEYS.forEach(k => { p[k] = k === 'tab' ? state.filters.tab : ''; }); setFilters(p); }
-  function activeCount() { return FILTER_KEYS.filter(k => k !== 'tab' && state.filters[k]).length; }
+  function clearFilters() { const p = {}; FILTER_KEYS.forEach(k => { p[k] = k === 'tab' || k === 'view' ? state.filters[k] : ''; }); setFilters(p); }
+  function activeCount() { return FILTER_KEYS.filter(k => k !== 'tab' && k !== 'view' && state.filters[k]).length; }
+  function setView(v) {
+    try { localStorage.setItem(VIEW_KEY, v); } catch (e) { /* storage blocked: the hash still says it */ }
+    if (state.filters.view === v) return;
+    state.lastTab = null;
+    setFilters({ view: v });
+  }
   function zonesOf(o) {
     const z = [o.collection && o.collection.zone, o.delivery && o.delivery.zone];
     (o.packages || []).forEach(p => { if (o.service === 'shop' && p.shop) z.push(p.shop.zone); else if (p.pickup) z.push(p.pickup.zone); if (p.dropoff) z.push(p.dropoff.zone); });
@@ -175,9 +186,9 @@
       MDM.store.list('business_accounts'), MDM.store.list('batches'), MDM.store.settings()]);
     if (!state.alive) return;
     state.settings = settings; state.drivers = drivers;
-    const ctx = { drivers, customer, accountName: {}, batchCode: {} };
+    const ctx = { drivers, customer, accountName: {}, batchCode: {}, batchById: {} };
     accounts.forEach(a => { ctx.accountName[a.id] = a.name; });
-    batches.forEach(b => { ctx.batchCode[b.id] = b.code; });
+    batches.forEach(b => { ctx.batchCode[b.id] = b.code; ctx.batchById[b.id] = b; });
     const base = applyFilters(orders, ctx, true);
     state.slots.tabs.querySelectorAll('[data-tab]').forEach(t => {
       const def = TABS.find(x => x.value === t.dataset.tab);
@@ -202,9 +213,17 @@
     state.slots.chips.replaceChildren(...chips(ctx));
     const n = activeCount();
     state.slots.filtersBtn.replaceChildren(html(MDM.icon('filter', 16)), n ? 'Filters · ' + n : 'Filters');
+    const board = f.view === 'board';
+    state.slots.tabs.hidden = board; state.slots.table.hidden = board; state.slots.board.hidden = !board;
+    state.slots.viewSwitch.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === f.view ? 'true' : 'false'));
     const narrow = window.innerWidth < 1400;
     const cols = F.columnsFor({ narrow });
-    if (!slice.length) {
+    if (board) {
+      const [zones, attendance] = await Promise.all([MDM.store.list('zones'), MDM.store.list('attendance')]);
+      if (!state.alive) return;
+      const onDuty = {}; attendance.filter(a => !a.outAt).forEach(a => { onDuty[a.staffId] = true; });
+      renderBoard(base, Object.assign({}, ctx, { zones, onDuty }));
+    } else if (!slice.length) {
       state.slots.table.replaceChildren(F.emptyBlock('No orders match.', f.tab !== 'all' ? 'Nothing in "' + label(TABS, f.tab) + '" right now.' : 'Try a wider date range or clear a filter.',
         activeCount() ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'orders-empty-clear', on: { click: clearFilters } }, 'Clear filters') : null));
     } else {
@@ -216,7 +235,7 @@
           el('span', null, 'Showing ' + (from + 1) + ' to ' + (from + slice.length) + ' of ' + rows.length),
           el('div', { class: 'pagination__actions' }, el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'orders-export', on: { click: () => exportRows(rows, ctx) } }, html(MDM.icon('download', 16)), 'Export CSV'), prev, next)));
     }
-    if (entering && MDM.motion) MDM.motion.enter(entering === 'view' ? state.host : state.slots.table);
+    if (entering && MDM.motion) MDM.motion.enter(entering === 'view' ? state.host : board ? state.slots.board : state.slots.table);
     if (state.drawer.kind === 'order' && state.drawer.id) await renderOrderDrawer();
   }
   function exportRows(rows, ctx) {
@@ -605,6 +624,7 @@
       el('div', { class: 'row row--wrap' }, methodBtn(o), labelsLink)));
   }
   function packagesSection(o, ctx) {
+    const shown = MDM.pricing.packageAmounts(o).amounts;
     const items = (o.packages || []).map((pkg, i) => {
       const lines = [];
       if (o.service === 'shop' && pkg.shop) {
@@ -630,7 +650,7 @@
           lines.map(l => el('div', { class: 'list__meta' }, l)),
           tags.length ? el('div', { class: 'tags' }, tags.map(f => el('span', { class: 'tag' }, f))) : null,
           photo.length ? el('div', { class: 'thumbs' }, photo) : null),
-        el('div', { class: 'list__aside' }, el('span', { class: 'mono' }, money(pkg.price ? pkg.price.lineTotal : 0)),
+        el('div', { class: 'list__aside' }, el('span', { class: 'mono' }, money(pkg.price ? shown[i] : 0)),
           canChange ? el('div', { class: 'row' }, rowBtn('Change category', 'drawer-change-category', () => changeCategory(o, pkg.id), 'btn--secondary', { 'data-package-id': pkg.id })) : null));
     });
     return sec('Packages', 'drawer-packages', el('div', { class: 'list' }, items), categoryHistory(o));
@@ -710,9 +730,11 @@
   function pricingSection(o) {
     const t = o.totals || {}, p = o.pricing || {};
     const confirmed = p.status === 'confirmed';
-    const lines = (o.packages || []).map(pkg => el('div', { class: 'summary__line' },
+    // The confirmed price shows in the package's own row (client, 12/11/2026); "Price changes" below keeps the estimate it replaced.
+    const shown = MDM.pricing.packageAmounts(o).amounts;
+    const lines = (o.packages || []).map((pkg, i) => el('div', { class: 'summary__line', 'data-testid': 'drawer-package-line' },
       el('div', { class: 'summary__desc' }, MDM.pricing.lineLabel(pkg, o.service === 'store' ? 'pick' : o.service), pkg.description ? el('span', { class: 'summary__sub' }, pkg.description) : null),
-      el('div', { class: 'summary__amount mono' }, money(pkg.price ? pkg.price.lineTotal : 0))));
+      el('div', { class: 'summary__amount mono' }, money(pkg.price ? shown[i] : 0))));
     if (t.items) lines.push(el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, 'Store items'), el('div', { class: 'summary__amount mono' }, money(t.items))));
     const extraShops = (o.extraCollections || []).filter(c => c.kind === 'shop' && c.shop);
     if ((o.service === 'shop' || extraShops.length) && t.budget) {
@@ -1786,11 +1808,17 @@
     const timeIn = el('input', { class: 'input', id: uid + '-time', type: 'time', value: n.schedule.time, 'data-testid': 'neworder-time' });
     const dateField = clearOnInput(dateIn, field(dateIn.id, 'Collection date', dateIn));
     const advBlock = el('div', { class: 'grid-2', hidden: true }, dateField, field(timeIn.id, 'Collection time', timeIn));
-    const levelSeg = segmented(uid + '-level', MDM.SERVICE_LEVELS, 'normal', 'neworder-level', v => { n.level = v; advBlock.hidden = v !== 'advance'; });
+    // Normal or express, today (client, 12/11/2026): the preferred collection time above and an optional delivery time; an express
+    // order needs one of the two, so it can be worked in time order.
+    const deliverIn = input('deliver-time', { type: 'time' });
+    const deliverField = clearOnInput(deliverIn, field(deliverIn.id, 'Delivery time', deliverIn, { optional: true, hint: 'Today. Express: this or the collection time' }));
+    cTime.addEventListener('input', () => setError(deliverField, null));
+    const todayBlock = el('div', { class: 'grid-2' }, deliverField);
+    const levelSeg = segmented(uid + '-level', MDM.SERVICE_LEVELS, 'normal', 'neworder-level', v => { n.level = v; advBlock.hidden = v !== 'advance'; todayBlock.hidden = v === 'advance'; setError(deliverField, null); });
     const collectionBlock = el('div', { class: 'stack-4', 'data-testid': 'neworder-collection' },
       pointField, onceBlock,
       el('div', { class: 'grid-2' }, field(cTime.id, 'Preferred collection time', cTime, { optional: true }), field(cNote.id, 'Collection instructions', cNote, { optional: true })),
-      groupField('When', levelSeg), advBlock);
+      groupField('When', levelSeg), advBlock, todayBlock);
 
     // The orders (client, 01/11/2026): a card like the business portal's bulk order (MDM.bizKit.rowFields): the receiver, the delivery
     // method and its details, the size category with its rate, cash to collect, instructions, reference and contents, then how many
@@ -1991,12 +2019,15 @@
         if (c.row.method === 'boat' && trim(c.boatContact.value) && !phone.valid(c.boatContact.value, { intl: true })) { setError(c.boatContactField, 'Enter a valid mobile number'); ok = false; }
       });
       if (n.level === 'advance' && !(dateIn.value && dateIn.value >= dayKey(new Date()))) { setError(dateField, 'Choose today or a later date'); ok = false; }
+      if (n.level === 'express' && !cTime.value && !deliverIn.value) { setError(deliverField, 'Give a collection or a delivery time'); ok = false; }
+      if (n.level !== 'advance' && cTime.value && deliverIn.value && deliverIn.value < cTime.value) { setError(deliverField, 'Delivery must be after collection'); ok = false; }
       if (!ok) { MDM.ui.focusFirstInvalid(drawer.el()); return; }
       MDM.ui.setLoading(createBtn, true);
       const made = [];
       try {
         const collection = collectionFor();
-        const schedule = n.level === 'advance' ? { type: 'advance', collectDate: dateIn.value, collectTime: timeIn.value, deliverDate: dateIn.value, deliverTime: '' } : { type: 'asap' };
+        const schedule = n.level === 'advance' ? { type: 'advance', collectDate: dateIn.value, collectTime: timeIn.value, deliverDate: dateIn.value, deliverTime: '' }
+          : Object.assign({ type: 'asap' }, deliverIn.value || cTime.value ? { day: dayKey(new Date()) } : {}, deliverIn.value ? { deliverTime: deliverIn.value } : {});
         for (const c of cards.slice()) {
           made.push(await MDM.store.createOrder(orderFor(c, acc, collection, schedule)));
           // A booked order leaves the form, so trying again after a failure does not book it twice.
@@ -2010,6 +2041,224 @@
       state.drawer.silent = true; drawer.close(); state.drawer.silent = false;
       if (made.length === 1) MDM.admin.openOrder(made[0].id);
     }
+  }
+
+  // ---- Board (client, 12/11/2026: "kanban board style", five columns) -----------------------------------------------------------
+  // New order · Dispatch · a slim column for advance orders and orders at the office · Delivery · Payment. A card shows the order
+  // number and the time that matters now, the customer and the chat they use (WhatsApp green, Viber purple), where it is collected and
+  // delivered with any time asked for, the packages, the driver, and one step button: the step the order is at, in its colour, and the
+  // next step, which moves the card on (New order red, Assigned yellow, then Dispatch; Dispatched blue, On the way yellow, Collected
+  // green, then Out for delivery; Out for delivery yellow, Delivered green, then Request payment; Payment requested yellow, Due red,
+  // Paid green). Each column is in MDM.byUrgency order (urgent orders first, by their time). The filters and the search above apply;
+  // the queue tabs belong to the list.
+  const BOARD_COLS = [
+    { key: 'new', title: 'New order', steps: ['new', 'confirmed', 'assigned'] },
+    { key: 'dispatch', title: 'Dispatch', steps: ['failed', 'dispatched', 'on_the_way', 'arrived', 'collected'] },
+    { key: 'later', title: 'Advance / Office', long: 'Advance orders and orders at the office', slim: true, steps: ['advance', 'office'] },
+    { key: 'delivery', title: 'Delivery', steps: ['failed', 'return', 'out', 'delivered'] },
+    { key: 'payment', title: 'Payment', steps: ['due', 'received', 'requested', 'paid'] }];
+  // A payment asked for more than a day ago and still not paid is due.
+  const DUE_AFTER_MS = 24 * 3600 * 1000;
+  const payDue = o => (o.payment || {}).status === 'requested' && !!o.payment.requestedAt && Date.now() - Date.parse(o.payment.requestedAt) > DUE_AFTER_MS;
+  const isToday = iso => !!iso && dayKey(iso) === dayKey(new Date());
+  // An advance order for a later day that has not started waits in the slim column until its collection day.
+  function laterAdvance(o) {
+    if (o.serviceLevel !== 'advance' && (o.schedule || {}).type !== 'advance') return false;
+    if (['requested', 'confirmed', 'assigned'].indexOf(o.status) < 0) return false;
+    const t = MDM.orderTimes(o).collect;
+    return !!(t && t.day > dayKey(new Date()));
+  }
+  // boardStep(order, ctx) → { col, key, label, tone, next: { key, label, run } | null, note } or null when the order is off the board:
+  // cancelled or returned, paid on an earlier day, or on a weekly invoice and delivered on an earlier day.
+  function boardStep(o, ctx) {
+    const st = o.status, p = o.payment || {};
+    const step = (col, key, label, tone, next, note) => ({ col, key, label, tone, next: next || null, note: note || '' });
+    const go = (key, text, run) => ({ key, label: text, run });
+    if (st === 'cancelled') return F.returnPending(o) ? step('delivery', 'return', 'Return', 'red', go('returned', 'Returned', () => markReturned(o))) : null;
+    if (st === 'returned') return null;
+    if (['requested', 'confirmed', 'assigned'].indexOf(st) >= 0) {
+      if (laterAdvance(o)) return step('later', 'advance', 'Advance', st === 'requested' ? 'red' : 'grey', null, { requested: 'New order', confirmed: 'Confirmed', assigned: 'Assigned' }[st]);
+      if (st === 'assigned') return step('new', 'assigned', 'Assigned', 'yellow', go('dispatch', 'Dispatch', () => dispatchOrder(o)));
+      if (st === 'requested' && !MDM.priceAfterCollection(o)) return step('new', 'new', 'New order', 'red', go('price', 'Confirm price', () => confirmPrice(o)));
+      if (o.batchId) return step('new', 'confirmed', 'Confirmed', 'red', null, 'Bulk collection');
+      return step('new', st === 'requested' ? 'new' : 'confirmed', st === 'requested' ? 'New order' : 'Confirmed', 'red', go('assign', 'Assign', () => pickDriver(o, ctx)));
+    }
+    if (st === 'dispatched') return step('dispatch', 'dispatched', 'Dispatched', 'blue', go('start', 'On the way', () => startRoute(o)));
+    if (st === 'on_the_way' || st === 'arrived') return step('dispatch', st, st === 'arrived' ? 'Arrived' : 'On the way', 'yellow', go('collected', 'Collected', () => collected(o)));
+    if (st === 'collected') return o.driverId ? step('dispatch', 'collected', 'Collected', 'green', go('out', 'Out for delivery', () => outForDelivery(o)))
+      : step('later', 'office', 'At the office', 'yellow', go('out', 'Out for delivery', () => outFromOffice(o, ctx)));
+    if (st === 'failed') {
+      const collectedYet = ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
+      return step(collectedYet ? 'delivery' : 'dispatch', 'failed', 'Failed', 'red', go('resolve', 'Decide', () => resolveFailure(o, ctx)));
+    }
+    if (st === 'out_for_delivery') return step('delivery', 'out', 'Out for delivery', 'yellow', go('delivered', nextStop(o, ['return']) ? 'Returned' : 'Delivered', () => delivered(o)));
+    if (st !== 'delivered') return null;
+    if (MDM.priceToFinalise(o)) return step('delivery', 'delivered', 'Delivered', 'green', go('price', 'Finalise price', () => confirmPrice(o)));
+    if (p.method === 'invoice' || p.status === 'invoiced') return isToday(F.deliveredAt(o)) ? step('delivery', 'delivered', 'Delivered', 'green', null, 'Weekly invoice') : null;
+    if (p.status === 'pending') return step('delivery', 'delivered', 'Delivered', 'green', go('request', 'Request payment', () => requestPayment(o)));
+    if (p.status === 'requested') return payDue(o) ? step('payment', 'due', 'Due', 'red', go('paid', 'Paid', () => markPaid(o))) : step('payment', 'requested', 'Payment requested', 'yellow', go('paid', 'Paid', () => markPaid(o)));
+    if (p.status === 'received') return step('payment', 'received', 'Slip received', 'blue', go('verify', 'Verify', () => verify(o)));
+    if (p.status === 'paid') return isToday(p.paidAt || p.verifiedAt) || isToday(F.deliveredAt(o)) ? step('payment', 'paid', 'Paid', 'green', null) : null;
+    return null;
+  }
+  async function pickDriver(o, ctx) {
+    const options = driverChoices(o, ctx, null), first = options.find(x => !x.disabled);
+    const v = await dialog({ title: 'Assign a driver to ' + o.code, okLabel: 'Assign driver', fields: [{ name: 'driverId', label: 'Driver', type: 'select', options, value: first ? first.value : '' }] });
+    if (v && v.driverId) await assign(o, v.driverId);
+  }
+  // At the office: the driver who takes it out, then out for delivery in one go (the card moves to Delivery).
+  async function outFromOffice(o, ctx) {
+    const options = driverChoices(o, ctx, null), first = options.find(x => !x.disabled);
+    const v = await dialog({ title: o.code + ' out for delivery', message: 'At the office. Choose the driver who takes it out.', okLabel: 'Out for delivery',
+      fields: [{ name: 'driverId', label: 'Driver', type: 'select', options, value: first ? first.value : '' }] });
+    if (!v || !v.driverId) return;
+    await MDM.store.assignDriver(o.id, v.driverId, { by: by() });
+    await outForDelivery(await fresh(o));
+  }
+  // How the customer talks to us: their "Notify by", else how the order came in; WhatsApp and Viber open the chat, the rest calls.
+  function chatOf(o) {
+    const c = o.customer || {}, links = c.phone ? phone.links(c.phone) : null;
+    if (!links) return null;
+    const via = c.notify === 'whatsapp' || c.notify === 'viber' ? c.notify : o.source === 'whatsapp' || o.source === 'viber' ? o.source : 'phone';
+    return { via, href: via === 'whatsapp' ? links.wa : via === 'viber' ? links.viber : links.tel, label: via === 'whatsapp' ? 'WhatsApp' : via === 'viber' ? 'Viber' : 'Call' };
+  }
+  function sizesLine(o) {
+    const n = {}; (o.packages || []).forEach(p => { n[p.size] = (n[p.size] || 0) + 1; });
+    return ['bag', 'box', 'xl'].filter(k => n[k]).map(k => n[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(' · ');
+  }
+  function pickupText(o) {
+    const shop = o.service === 'shop' ? ((o.packages || []).find(p => p.shop) || {}).shop : null, c = o.collection || {};
+    const where = shop ? [MDM.shopName(shop), shop.address].filter(Boolean).join(', ') : c.address;
+    const more = (o.extraCollections || []).length;
+    return [where, MDM.geo.zoneShort((shop && shop.zone) || c.zone || 'male')].filter(Boolean).join(' · ') + (more ? ' · +' + plural(more, 'stop') : '');
+  }
+  function dropText(o) {
+    const d = o.delivery || {};
+    return (d.method || 'home') !== 'home' ? F.methodText(o) : [d.address, MDM.geo.zoneShort(d.zone || 'male')].filter(Boolean).join(' · ');
+  }
+  // The time that matters now, top right: red once it has passed, amber within the hour or on an urgent order.
+  function dueBox(o) {
+    const t = MDM.nextTime(o);
+    if (!t) return null;
+    const at = MDM.timeAt(t), late = at < Date.now(), hot = late || MDM.urgentOrder(o) || at - Date.now() < 3600000;
+    const text = MDM.ui.timeText(t);
+    return el('span', { class: ['kb-due', late ? 'is-late' : hot ? 'is-soon' : null], 'data-testid': 'board-due', 'data-kind': t.kind, title: (t.kind === 'deliver' ? 'Deliver by ' : 'Collect at ') + text + (late ? ', passed' : '') },
+      html(MDM.icon(hot ? 'alert-triangle' : 'clock', 14)), text);
+  }
+  function stepButton(o, s) {
+    if (!s.next) return el('span', { class: 'kb-step kb-step--' + s.tone + ' is-static', 'data-testid': 'board-step', 'data-step': s.key }, el('span', { class: 'kb-step__state' }, s.label), s.note ? el('span', { class: 'kb-step__next' }, s.note) : null);
+    return el('button', { type: 'button', class: 'kb-step kb-step--' + s.tone, 'data-testid': 'board-step', 'data-step': s.key, 'data-next': s.next.key, 'aria-label': o.code + ': ' + s.label + '. Next: ' + s.next.label,
+      on: { click: e => { const b = e.currentTarget; if (b.dataset.busy) return; b.dataset.busy = '1'; act(s.next.run).finally(() => { delete b.dataset.busy; }); } } },
+      el('span', { class: 'kb-step__state' }, s.label), el('span', { class: 'kb-step__next' }, s.next.label, html(MDM.icon('chevron-right', 14))));
+  }
+  // The driver: a picker on a new order without one (choosing assigns), else the name, which changes the driver while the order runs.
+  function boardDriver(o, s, ctx) {
+    if (s.col === 'new' && !o.driverId && !o.batchId && ['requested', 'confirmed'].indexOf(o.status) >= 0) {
+      const sel = el('select', { class: 'select select--sm kb-driver-select', 'aria-label': 'Assign a driver to ' + o.code, 'data-testid': 'board-driver' },
+        el('option', { value: '' }, 'Assign driver'), driverChoices(o, ctx, null).map(x => el('option', { value: x.value, disabled: x.disabled }, x.label)));
+      sel.addEventListener('change', () => { if (!sel.value) return; const id = sel.value; sel.blur(); act(() => assign(o, id)); });
+      return sel;
+    }
+    const name = F.driverName(o.driverId, ctx.drivers);
+    if (!name) return null;
+    const body = [html(MDM.icon('bike', 14)), el('span', null, name)];
+    return ['assigned', 'dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery'].indexOf(o.status) >= 0
+      ? el('button', { type: 'button', class: 'kb-driver', 'data-testid': 'board-driver-name', 'aria-label': 'Driver ' + name + ', change the driver of ' + o.code, on: { click: () => act(() => reassign(o, ctx)) } }, body)
+      : el('span', { class: 'kb-driver', 'data-testid': 'board-driver-name' }, body);
+  }
+  const openFromCard = id => e => { if (!e.target.closest('a, button, select, input, label')) MDM.admin.openOrder(id); };
+  function boardCard(o, s, ctx) {
+    const c = o.customer || {}, times = MDM.orderTimes(o), chat = chatOf(o), sizes = sizesLine(o);
+    const tags = [];
+    const level = F.flags(o).find(f => f.key === 'priority' || f.key === 'express');
+    if (level) tags.push(html(MDM.ui.badge('danger', level.label, { 'data-flag': level.key })));
+    if (o.accountId) tags.push(html(MDM.ui.badge('neutral', o.batchId ? 'Business bulk' : 'Business', { 'data-flag': 'business' })));
+    F.flags(o).filter(f => ['priority', 'express', 'advance'].indexOf(f.key) < 0).forEach(f => tags.push(html(MDM.ui.badge(f.kind, f.label, { 'data-flag': f.key }))));
+    if (o.cod && Number(o.cod.amount) > 0 && o.cod.status === 'pending') tags.push(html(MDM.ui.badge('warn', 'Cash ' + money(o.cod.amount), { 'data-flag': 'cod' })));
+    if (s.col !== 'payment' && (o.payment || {}).status === 'requested' && o.status !== 'delivered') tags.push(html(MDM.ui.badge('warn', 'Payment requested', { 'data-flag': 'pay-upfront' })));
+    const stop = (iconName, text, t, testid) => el('div', { class: 'kb-stop' }, html(MDM.icon(iconName, 14)), el('span', { class: 'kb-stop__text' }, text || '·'),
+      t ? el('span', { class: 'kb-stop__time', 'data-testid': testid }, MDM.ui.timeText(t)) : null);
+    return el('article', { class: ['kb-card', 'kb-card--' + s.tone], 'data-testid': 'board-card', 'data-order-id': o.id, 'data-code': o.code, 'data-step': s.key, on: { click: openFromCard(o.id) } },
+      el('div', { class: 'kb-card__head' },
+        el('a', { class: 'kb-card__code mono', href: '#/orders/' + encodeURIComponent(o.id), 'data-testid': 'board-card-link' }, o.code),
+        s.col !== 'payment' && o.status !== 'delivered' ? dueBox(o) : null),
+      el('div', { class: 'kb-card__who' },
+        el('span', { class: 'kb-card__name' }, c.name || ''),
+        chat ? el('a', { class: 'kb-chat kb-chat--' + chat.via, href: chat.href, target: chat.via === 'phone' ? null : '_blank', rel: chat.via === 'phone' ? null : 'noopener', 'data-testid': 'board-chat', 'data-via': chat.via,
+          'aria-label': chat.label + ' ' + (c.name || '') + ', ' + phone.format(c.phone), title: chat.label }, html(MDM.icon(chat.via === 'phone' ? 'phone' : chat.via, 14)), el('span', { class: 'mono' }, phone.format(c.phone))) : null),
+      tags.length ? el('div', { class: 'kb-card__tags' }, tags) : null,
+      el('div', { class: 'kb-card__route' },
+        stop('circle-dot', pickupText(o), times.collect, 'board-collect-time'),
+        sizes ? el('div', { class: 'kb-sizes', 'data-testid': 'board-sizes' }, sizes) : null,
+        stop('map-pin', dropText(o), times.deliver, 'board-deliver-time')),
+      el('div', { class: 'kb-card__foot' }, boardDriver(o, s, ctx), stepButton(o, s)));
+  }
+  // The slim column: the order, who, when and where it stands; at the office it can go out for delivery from here.
+  function miniCard(o, s) {
+    const t = MDM.nextTime(o);
+    return el('article', { class: ['kb-card', 'kb-card--mini', 'kb-card--' + s.tone], 'data-testid': 'board-card', 'data-order-id': o.id, 'data-code': o.code, 'data-step': s.key, on: { click: openFromCard(o.id) } },
+      el('a', { class: 'kb-card__code mono', href: '#/orders/' + encodeURIComponent(o.id), 'data-testid': 'board-card-link' }, o.code),
+      el('div', { class: 'kb-card__name' }, (o.customer || {}).name || ''),
+      t ? el('div', { class: 'kb-mini__when', 'data-testid': 'board-mini-when' }, html(MDM.icon('calendar', 12)), MDM.ui.timeText(t)) : null,
+      el('div', { class: 'kb-mini__state' }, s.label + (s.note ? ' · ' + s.note : '')),
+      s.next ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm kb-mini__go', 'data-testid': 'board-step', 'data-step': s.key, 'data-next': s.next.key, 'aria-label': o.code + ': ' + s.next.label,
+        on: { click: e => { const b = e.currentTarget; if (b.dataset.busy) return; b.dataset.busy = '1'; act(s.next.run).finally(() => { delete b.dataset.busy; }); } } }, s.next.label, html(MDM.icon('chevron-right', 14))) : null);
+  }
+  // A bulk order's packages waiting for the bulk collection, or sorted at the office, are one card per bulk order (each package is an
+  // order of its own; a bulk of thirty would fill the column). The card opens the bulk order.
+  function bulkCard(g, ctx) {
+    const b = ctx.batchById[g.batchId] || {}, c = b.collection || {}, first = g.items[0].o, slim = g.s.col === 'later';
+    const open = () => { if (MDM.admin.can('bulk')) MDM.admin.navigate('#/bulk/' + encodeURIComponent(g.batchId)); else setFilters({ view: 'list', batch: g.batchId }); };
+    const t = MDM.nextTime(first);
+    const what = plural(g.items.length, 'package') + (slim ? ' at the office' : ' to collect');
+    const go = el('button', { type: 'button', class: slim ? 'btn btn--secondary btn--sm kb-mini__go' : 'kb-step kb-step--' + g.s.tone, 'data-testid': 'board-step', 'data-step': g.s.key, 'data-next': 'bulk', 'aria-label': (b.code || 'Bulk order') + ': open the bulk order', on: { click: open } },
+      slim ? ['Open bulk order', html(MDM.icon('chevron-right', 14))] : [el('span', { class: 'kb-step__state' }, g.s.label), el('span', { class: 'kb-step__next' }, 'Open bulk order', html(MDM.icon('chevron-right', 14)))]);
+    return el('article', { class: ['kb-card', 'kb-card--bulk', slim ? 'kb-card--mini' : null, 'kb-card--' + g.s.tone], 'data-testid': 'board-bulk', 'data-batch-id': g.batchId, 'data-count': String(g.items.length),
+      on: { click: e => { if (!e.target.closest('a, button')) open(); } } },
+      el('div', { class: 'kb-card__head' }, el('span', { class: 'kb-card__code mono' }, b.code || 'Bulk order'), !slim && t ? dueBox(first) : null),
+      el('div', { class: 'kb-card__name' }, b.name || ctx.accountName[first.accountId] || ''),
+      el('div', { class: slim ? 'kb-mini__state' : 'kb-sizes kb-sizes--flush', 'data-testid': 'board-bulk-count' }, (slim ? '' : 'Business bulk · ') + what),
+      slim ? null : el('div', { class: 'kb-card__route' }, el('div', { class: 'kb-stop' }, html(MDM.icon('circle-dot', 14)), el('span', { class: 'kb-stop__text' }, [c.address, MDM.geo.zoneShort(c.zone || 'male')].filter(Boolean).join(' · ') || pickupText(first)))),
+      slim ? go : el('div', { class: 'kb-card__foot' }, go));
+  }
+  const STEP_LABEL = { new: 'New order', confirmed: 'Confirmed', assigned: 'Assigned', failed: 'Failed', dispatched: 'Dispatched', on_the_way: 'On the way', arrived: 'Arrived', collected: 'Collected',
+    advance: 'Advance', office: 'At the office', return: 'Return', out: 'Out for delivery', delivered: 'Delivered', due: 'Due', received: 'Slip received', requested: 'Payment requested', paid: 'Paid' };
+  function boardColumn(c, items, ctx) {
+    const n = {}, tone = {};
+    items.forEach(x => { n[x.s.key] = (n[x.s.key] || 0) + (x.group ? x.items.length : 1); tone[x.s.key] = x.s.tone; });
+    const legend = c.steps.filter(k => n[k]).map(k => el('span', { class: 'kb-legend kb-legend--' + tone[k] }, STEP_LABEL[k] + ' ' + n[k]));
+    return el('section', { class: ['kb-col', c.slim ? 'kb-col--slim' : null], 'data-testid': 'board-col-' + c.key, 'aria-labelledby': 'kb-h-' + c.key },
+      el('div', { class: 'kb-col__head' },
+        el('h2', { class: 'kb-col__title', id: 'kb-h-' + c.key, title: c.long || null }, c.title, c.long ? el('span', { class: 'sr-only' }, ': ' + c.long) : null),
+        el('span', { class: 'kb-col__count', 'data-testid': 'board-count-' + c.key }, String(items.reduce((t, x) => t + (x.group ? x.items.length : 1), 0))),
+        legend.length && !c.slim ? el('div', { class: 'kb-col__legend' }, legend) : null),
+      el('div', { class: 'kb-col__body' }, items.length ? items.map(x => (x.group ? bulkCard(x, ctx) : c.slim ? miniCard(x.o, x.s) : boardCard(x.o, x.s, ctx))) : el('p', { class: 'kb-col__empty' }, 'Nothing here')));
+  }
+  function renderBoard(orders, ctx) {
+    const host = state.slots.board;
+    // A driver picker in use keeps the board as it is until it is left (a change elsewhere would close it).
+    const active = document.activeElement;
+    if (active && active.tagName === 'SELECT' && host.contains(active)) { state.boardStale = true; return; }
+    state.boardStale = false;
+    const cols = {}, bulks = {}; BOARD_COLS.forEach(c => { cols[c.key] = []; });
+    orders.forEach(o => {
+      const s = boardStep(o, ctx);
+      if (!s) return;
+      if (o.batchId && (s.key === 'confirmed' || s.key === 'office')) {
+        const k = o.batchId + ':' + s.key;
+        if (!bulks[k]) cols[s.col].push(bulks[k] = { group: true, batchId: o.batchId, s, o, items: [] });
+        bulks[k].items.push({ o, s });
+      } else cols[s.col].push({ o, s });
+    });
+    const problem = x => (x.s.key === 'failed' || x.s.key === 'return' ? 0 : 1);
+    ['new', 'dispatch', 'later', 'delivery'].forEach(k => cols[k].sort((a, b) => problem(a) - problem(b) || MDM.byUrgency(a.o, b.o)));
+    const PAY = { due: 0, received: 1, requested: 2, paid: 3 };
+    const payAt = x => (x.s.key === 'paid' ? -Date.parse(x.o.payment.paidAt || x.o.updatedAt || 0) : Date.parse(x.o.payment.requestedAt || x.o.payment.submittedAt || x.o.updatedAt || 0)) || 0;
+    cols.payment.sort((a, b) => PAY[a.s.key] - PAY[b.s.key] || payAt(a) - payAt(b));
+    // Keyboard focus stays on the card it was on (its step button), wherever the card moved.
+    const was = active && host.contains(active) ? active.closest('[data-order-id]') : null;
+    host.replaceChildren(el('div', { class: 'kb', 'data-testid': 'board' }, BOARD_COLS.map(c => boardColumn(c, cols[c.key], ctx))));
+    if (was) { const back = host.querySelector('[data-order-id="' + was.dataset.orderId + '"] [data-testid="board-step"]') || host.querySelector('[data-order-id="' + was.dataset.orderId + '"] a'); if (back) { try { back.focus({ preventScroll: true }); } catch (e) { /* gone */ } } }
   }
 
   // ---- View registration ---------------------------------------------------------------------------------------------------
@@ -2033,15 +2282,21 @@
       state.slots.tabs = tabsBar();
       state.slots.chips = el('div', { class: 'filters__chips', 'data-testid': 'orders-chips' });
       state.slots.table = el('div', { class: 'card', 'data-testid': 'orders-list' });
+      state.slots.board = el('div', { class: 'orders-board', 'data-testid': 'orders-board' });
+      state.slots.board.addEventListener('focusout', () => setTimeout(() => { if (state.alive && state.boardStale) render().catch(() => {}); }, 0));
+      state.slots.viewSwitch = el('div', { class: 'orders-view', role: 'group', 'aria-label': 'Show orders as', 'data-testid': 'orders-view' },
+        [['board', 'Board', 'dashboard'], ['list', 'List', 'list']].map(([v, text, ic]) => el('button', { type: 'button', class: 'orders-view__option', 'data-view': v, 'data-testid': 'orders-view-' + v, 'aria-pressed': 'false',
+          on: { click: () => setView(v) } }, html(MDM.icon(ic, 16)), text)));
       state.slots.filtersBtn = el('button', { type: 'button', class: 'btn btn--secondary orders-filters-btn', 'data-testid': 'orders-filters-button', on: { click: openFiltersDrawer } }, 'Filters');
       host.append(
         el('div', { class: 'page-head' },
           el('h1', { tabindex: '-1' }, 'Orders'),
-          el('div', { class: 'page-head__actions' }, el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'orders-new', 'aria-haspopup': 'dialog', on: { click: chooseNewOrder } }, html(MDM.icon('plus', 16)), 'New order'))),
+          el('div', { class: 'page-head__actions' }, state.slots.viewSwitch, el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'orders-new', 'aria-haspopup': 'dialog', on: { click: chooseNewOrder } }, html(MDM.icon('plus', 16)), 'New order'))),
         state.slots.tabs,
         el('div', { class: 'orders-toolbar' }, el('div', { class: 'orders-filters' }, state.controls.el), state.slots.filtersBtn),
         state.slots.chips,
-        state.slots.table);
+        state.slots.table,
+        state.slots.board);
       await render();
       const schedule = () => { clearTimeout(state.timer); state.timer = setTimeout(() => render().catch(() => {}), 40); };
       ['orders', 'drivers', 'files', 'notifications'].forEach(c => state.unsubs.push(MDM.store.subscribe(c, schedule)));

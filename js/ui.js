@@ -526,6 +526,15 @@
     return fmtDate(d);
   }
   function dayKey(v) { const d = toDate(v == null ? new Date() : v); return d ? d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) : ''; }
+  // timeText({ day, time }) → '14:30' today, 'Tomorrow 14:30', 'Yesterday 14:30', '13 Nov 14:30', or '13 Nov' without a time (an
+  // MDM.orderTimes entry).
+  function timeText(t) {
+    if (!t || !t.day) return '';
+    const today = dayKey(new Date()), d = new Date(t.day + 'T12:00');
+    const near = k => dayKey(new Date(Date.now() + k * 86400000));
+    const day = t.day === today ? '' : t.day === near(1) ? 'Tomorrow' : t.day === near(-1) ? 'Yesterday' : fmtDate(d, { dateOnly: true });
+    return [day, t.time || (day ? '' : 'Today')].filter(Boolean).join(' ');
+  }
   function monthKey(v) { const d = toDate(v == null ? new Date() : v); return d ? d.getFullYear() + '-' + pad2(d.getMonth() + 1) : ''; }
   function windowLabel(str) {
     const m = String(str == null ? '' : str).match(/^\s*(\d{1,2}:\d{2})\s*(?:-|–|to)\s*(\d{1,2}:\d{2})\s*$/);
@@ -680,7 +689,7 @@
     toast, drawer, confirm, dialog,
     badge, statusBadge, statusLabel, invoiceBadge, paymentBadge, paymentLabel, setError, validate, focusFirstInvalid, setLoading,
     plural, field, alert: alertBox, notice: alertBox, mapFallback, rateRow,
-    phone, fmtDate, fmtTime, timeAgo, dayKey, monthKey, window: windowLabel, minutesToHHMM, parseHHMM, hours, closedWindowsFor,
+    phone, fmtDate, fmtTime, timeAgo, dayKey, timeText, monthKey, window: windowLabel, minutesToHHMM, parseHHMM, hours, closedWindowsFor,
     money, formatBytes, copy, fileToDataUrl, imageToJpeg,
   };
 })(window.MDM);

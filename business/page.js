@@ -111,7 +111,7 @@
     if (!pk.length) return '';
     const names = {};
     pk.forEach(p => { const t = p.tier ? tierInfo(p.tier) : null, k = t ? t.label : MDM.pricing.sizeLabel(p.size); names[k] = (names[k] || 0) + 1; });
-    const sum = pk.reduce((n, p) => n + ((p.price && p.price.lineTotal) || 0), 0);
+    const sum = MDM.pricing.packageAmounts(o).amounts.reduce((n, v) => n + v, 0);
     return Object.keys(names).map(k => (pk.length > 1 ? names[k] + ' × ' : '') + k).join(', ') + ' · ' + money(sum);
   }
   // [main, detail] lines for an order's delivery method.
@@ -624,15 +624,21 @@
       field('collectDate', 'Collection date', input({ type: 'date' })), field('collectTime', 'Collection time', input({ type: 'time', value: '10:00' })),
       field('deliverDate', 'Delivery date', input({ type: 'date' })), field('deliverTime', 'Delivery time', input({ type: 'time', value: '14:00' })));
     const seg = segmented('level', MDM.SERVICE_LEVELS.map(l => ({ value: l.value, label: l.label, hint: l.value === 'normal' ? 'Same day' : l.value === 'express' ? 'Confirmed by us' : 'Pick a date' })), 'normal', 'biz-level');
-    seg.addEventListener('change', () => { adv.hidden = form.elements.level.value !== 'advance'; });
-    return [MDM.ui.field({ label: 'Service', control: seg }), adv];
+    // Normal or express, today (client, 12/11/2026): an optional delivery time beside the preferred collection time; an express order
+    // needs one of the two, so it is worked in time order.
+    const today = el('div', { class: 'grid-2 biz-today' }, field('todayDeliver', 'Delivery time', input({ type: 'time', 'data-testid': 'biz-deliver-time' }), { optional: true, hint: 'Today. Express: this or the preferred collection time' }));
+    seg.addEventListener('change', () => { const level = form.elements.level.value; adv.hidden = level !== 'advance'; today.hidden = level === 'advance'; setError(form.elements.todayDeliver, null); });
+    return [MDM.ui.field({ label: 'Service', control: seg }), adv, today];
   }
   function scheduleValue(v) {
     if (v.level === 'advance') return { type: 'advance', collectDate: v.collectDate, collectTime: v.collectTime, deliverDate: v.deliverDate || v.collectDate, deliverTime: v.deliverTime };
-    return { type: 'asap' };
+    return Object.assign({ type: 'asap' }, v.todayDeliver || v.cTime ? { day: MDM.ui.dayKey() } : {}, v.todayDeliver ? { deliverTime: v.todayDeliver } : {});
   }
   function advanceRules(v) {
-    if (v.level !== 'advance') return {};
+    if (v.level !== 'advance') {
+      return { todayDeliver: v.level === 'express' && !v.todayDeliver && !v.cTime ? 'Give a delivery time or a preferred collection time'
+        : v.todayDeliver && v.cTime && v.todayDeliver < v.cTime ? 'Delivery must be after collection' : null };
+    }
     const today = MDM.ui.dayKey();
     return { collectDate: !v.collectDate ? 'Choose the collection date' : (v.collectDate < today ? 'Choose today or a later date' : null),
       deliverDate: v.deliverDate && v.deliverDate < v.collectDate ? 'Delivery cannot be before collection' : null };
@@ -768,7 +774,7 @@
       return { t, n: pk.length, q: MDM.pricing.quote({ service: 'business', packages: pk }, s) };
     }
     const values = () => {
-      const v = {}; ['collectDate', 'collectTime', 'deliverDate', 'deliverTime'].forEach(k => { const c = form.elements[k]; v[k] = c ? String(c.value || '').trim() : ''; });
+      const v = {}; ['collectDate', 'collectTime', 'deliverDate', 'deliverTime', 'todayDeliver', 'cTime'].forEach(k => { const c = form.elements[k]; v[k] = c ? String(c.value || '').trim() : ''; });
       v.level = form.elements.level.value;
       return v;
     };
