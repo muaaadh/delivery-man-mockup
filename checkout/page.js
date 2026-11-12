@@ -38,7 +38,7 @@
       const ch = charges.find(c => (a.chargeId && c.id === a.chargeId) || (c.adjustmentId && c.adjustmentId === a.id));
       if (ch && (ch.void || !ch.billable)) return null;
       if (ch) return Object.assign({}, f, { key: 'charge-' + ch.type, reason: [ch.type !== 'other' ? ch.description : '', CHARGE_STAGE[ch.stage]].filter(Boolean).join(', ') });
-      if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: a.remarks || '' });
+      if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: f.reason || a.remarks || '' });
       return f;
     }).filter(Boolean);
   }

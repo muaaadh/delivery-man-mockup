@@ -83,6 +83,17 @@ body.page-admin .kb-col__title { font-size: 14px; font-weight: 600; letter-spaci
 body.page-admin .kb-col__count { font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 body.page-admin .kb-col__legend { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--text-2); }
 body.page-admin .kb-legend::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: var(--kb); vertical-align: 1px; }
+/* A column's statuses as filters (client, 12/11/2026 evening): press one or several; "All" shows the column again. */
+body.page-admin .kb-col__legend[role="group"] { gap: 4px; margin-top: 2px; }
+body.page-admin .kb-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 2px 9px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--card); font: inherit; font-size: 12px; font-weight: 500; line-height: 1.2; color: var(--text-2); text-align: left; cursor: pointer; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+body.page-admin .kb-chip:not(.kb-chip--all)::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--kb); }
+body.page-admin .kb-chip__n { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+body.page-admin .kb-chip.is-on { border-color: var(--kb); background: var(--kb-bg); color: var(--kb); font-weight: 600; }
+body.page-admin .kb-chip.is-on .kb-chip__n { color: inherit; }
+body.page-admin .kb-chip--all.is-on { border-color: var(--text); background: var(--text); color: var(--bg); }
+@media (hover: hover) { body.page-admin .kb-chip:not(.is-on):hover { border-color: var(--text-3); color: var(--text); } }
+body.page-admin .kb-chip:focus-visible { box-shadow: var(--focus); outline: none; }
+body.page-admin .kb-col.is-filtered .kb-col__count { font-weight: 600; color: var(--text); }
 body.page-admin .kb-col__body { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
 @media (min-width: 961px) { body.page-admin .kb-col__body { max-height: calc(100dvh - 250px); min-height: 160px; overflow-y: auto; overscroll-behavior: contain; } }
 body.page-admin .kb-col__empty { margin: 0; padding: 16px 4px; font-size: 13px; color: var(--text-3); text-align: center; }
@@ -136,6 +147,10 @@ body.page-admin .kb-step.is-static .kb-step__next { font-weight: 400; color: var
 @media (hover: hover) { body.page-admin button.kb-step:hover { box-shadow: inset 0 0 0 1px var(--kb); } }
 body.page-admin .kb-step:focus-visible { box-shadow: var(--focus); outline: none; }
 body.page-admin .kb-step[data-busy] { opacity: .6; }
+/* Cancel a new order from its card (before anyone is assigned). */
+body.page-admin .kb-cancel { align-self: flex-end; margin: -2px -4px -4px 0; padding: 3px 4px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: 12px; color: var(--text-3); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+@media (hover: hover) { body.page-admin .kb-cancel:hover { color: var(--danger); } }
+body.page-admin .kb-cancel:focus-visible { box-shadow: var(--focus); outline: none; color: var(--danger); }
 /* The slim column: the order, who, when, where it stands. */
 body.page-admin .kb-card--mini { gap: 3px; padding: 8px 8px 8px 12px; }
 body.page-admin .kb-card--mini .kb-card__name { font-size: 12px; font-weight: 500; color: var(--text-2); }
@@ -148,6 +163,56 @@ body.page-admin .kb-mini__go .icon { width: 14px; height: 14px; }
   body.page-admin .kb { grid-template-columns: repeat(2, 84vw) 60vw repeat(2, 84vw); margin: 0 -16px; padding: 0 16px 8px; scroll-snap-type: x mandatory; scroll-padding: 0 16px; }
   body.page-admin .kb-col { scroll-snap-align: start; }
   body.page-admin .kb-step, body.page-admin .kb-driver-select { min-height: 44px; }
+  body.page-admin .kb-chip { min-height: 34px; padding: 4px 12px; font-size: 13px; }
+  body.page-admin .kb-cancel { padding: 8px 6px; font-size: 13px; }
+}
+
+/* The price as an item table (client, 12/11/2026 evening: "editable and add row style"): item, quantity, rate, amount. .ptable is
+   the order's Pricing section, .pedit the dialog that edits it. Under 560px a row is the item, then quantity, rate and amount. */
+body.page-admin .ptable__head, body.page-admin .ptable__row, body.page-admin .pedit__head, body.page-admin .pedit__row { display: grid; grid-template-columns: minmax(0, 1fr) 44px 92px 96px; column-gap: 12px; align-items: start; }
+body.page-admin .pedit__head, body.page-admin .pedit__row { grid-template-columns: minmax(0, 1fr) 68px 104px 100px 32px; column-gap: 10px; }
+body.page-admin .ptable__head, body.page-admin .pedit__head { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text-3); }
+body.page-admin .ptable__head span:nth-child(n+2), body.page-admin .pedit__head span:nth-child(n+2) { text-align: right; }
+body.page-admin .ptable__row { padding: 9px 0; font-size: 15px; color: var(--text); }
+body.page-admin .ptable__row + .ptable__row, body.page-admin .pedit__row + .pedit__row { border-top: 1px solid var(--border); }
+body.page-admin .ptable__row--fee { color: var(--text-2); }
+body.page-admin .ptable__item { min-width: 0; overflow-wrap: anywhere; }
+body.page-admin .ptable__qty, body.page-admin .ptable__rate, body.page-admin .ptable__amount, body.page-admin .pedit__qty, body.page-admin .pedit__rate, body.page-admin .pedit__amount { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+body.page-admin .ptable__amount, body.page-admin .pedit__amount { font-weight: 600; color: var(--text); }
+body.page-admin .ptable__row--fee .ptable__amount { font-weight: 400; color: inherit; }
+body.page-admin .ptable__k { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+body.page-admin .pedit { border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 14px 12px; background: var(--card); }
+body.page-admin .pedit__row { padding: 10px 0; font-size: 15px; color: var(--text); align-items: center; }
+body.page-admin .pedit__row--auto { color: var(--text-2); }
+body.page-admin .pedit__item { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+body.page-admin .pedit__row--edit .pedit__item { flex-direction: row; gap: 6px; }
+body.page-admin .pedit__row--edit .pedit__item .select { flex: 0 0 200px; min-width: 0; width: auto; }
+body.page-admin .pedit__row--edit .pedit__item .input { flex: 1 1 120px; min-width: 0; }
+body.page-admin .pedit__name { font-weight: 500; }
+body.page-admin .pedit__num { width: 100%; padding: 0 8px; text-align: right; font-variant-numeric: tabular-nums; }
+body.page-admin .pedit__amount { padding-top: 0; }
+body.page-admin .pedit__link { align-self: flex-start; margin-top: 2px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+@media (hover: hover) { body.page-admin .pedit__link:hover { color: var(--text); } }
+body.page-admin .pedit__link:focus-visible { border-radius: 4px; box-shadow: var(--focus); outline: none; }
+body.page-admin .pedit__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--border-strong); }
+body.page-admin .pedit__total { display: flex; align-items: baseline; gap: 16px; margin-left: auto; padding-right: 42px; font-size: 17px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+body.page-admin .dialog--price { width: min(860px, calc(100vw - 32px)); }
+@media (max-width: 560px) {
+  body.page-admin .ptable__head, body.page-admin .pedit__head { display: none; }
+  body.page-admin .ptable__row { grid-template-columns: auto auto minmax(0, 1fr); column-gap: 6px; row-gap: 2px; }
+  body.page-admin .ptable__item { grid-column: 1 / -1; }
+  body.page-admin .ptable__qty, body.page-admin .ptable__rate { text-align: left; font-size: 13px; color: var(--text-2); }
+  body.page-admin .ptable__k { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+  body.page-admin .pedit { padding: 2px 10px 10px; }
+  body.page-admin .pedit__row { grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr) 32px; row-gap: 6px; }
+  body.page-admin .pedit__item { grid-column: 1 / 4; }
+  body.page-admin .pedit__row .pedit__x { grid-column: 4; grid-row: 1; }
+  body.page-admin .pedit__qty { grid-column: 1; text-align: left; }
+  body.page-admin .pedit__rate { grid-column: 2; }
+  body.page-admin .pedit__amount { grid-column: 3 / 5; }
+  body.page-admin .pedit__row--edit .pedit__item { flex-direction: column; }
+  body.page-admin .pedit__row--edit .pedit__item .select, body.page-admin .pedit__row--edit .pedit__item .input { flex: none; width: 100%; }
+  body.page-admin .pedit__total { padding-right: 0; }
 }
 
 /* Drawer content */

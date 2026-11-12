@@ -162,6 +162,33 @@
     const late = MDM.timeAt(t) < Date.now();
     return el('span', { class: 'tag' + (late ? ' tag--hot' : ''), 'data-testid': 'driver-due', 'data-late': late ? 'true' : null }, icon('clock', 12), (t.kind === 'deliver' ? 'Deliver by ' : 'Collect ') + MDM.ui.timeText(t));
   }
+  // Several collections or deliveries on one job (client, 12/11/2026 evening: a second stop is hard to spot in a rush). A purple tag
+  // says how many, every stop is listed in the order to do them with the one to go to now marked, the stop being worked on says
+  // which one it is ("Collection 2 of 2"), and so does the button.
+  function stopCounts(o) {
+    const stops = (o.route && o.route.stops) || [];
+    const picks = stops.length ? stops.filter(s => s.type === 'pickup').length : 1 + (o.extraCollections || []).length;
+    return { picks, drops: stops.filter(s => s.type !== 'pickup').length };
+  }
+  function stopsTag(o) {
+    const n = stopCounts(o);
+    if (n.picks < 2 && n.drops < 2) return null;
+    return el('span', { class: 'tag tag--stops', 'data-testid': 'driver-stops-tag' }, icon('route', 12), [n.picks > 1 ? n.picks + ' collections' : '', n.drops > 1 ? n.drops + ' deliveries' : ''].filter(Boolean).join(' · '));
+  }
+  function stopsList(o, pickups, drops, cur) {
+    const all = pickups.concat(drops), left = all.filter(isOpen).length;
+    const word = s => (s.type === 'pickup' ? (s.shop ? 'Shop' : 'Collect') : s.type === 'return' ? 'Return' : 'Deliver');
+    return el('div', { class: 'job__route', 'data-testid': 'driver-stops', 'data-count': String(all.length) },
+      el('div', { class: 'job__route-title' }, icon('route', 16), el('span', null, all.length + ' stops on this job'), el('span', { class: 'job__route-left' }, left ? left + ' to go' : 'All done')),
+      el('ol', { class: 'job__route-list' }, all.map((s, i) => {
+        const now = !!cur && s.id === cur.id && isOpen(s);
+        const st = s.status === 'done' ? 'done' : s.status === 'failed' ? 'failed' : s.status === 'skipped' ? 'skipped' : now ? 'now' : 'next';
+        return el('li', { class: ['job__route-stop', 'is-' + st], 'data-testid': 'driver-stops-item', 'data-stop-id': s.id, 'data-state': st, 'aria-current': now ? 'step' : null },
+          el('span', { class: 'job__route-n' }, st === 'done' ? icon('check', 14) : String(i + 1)),
+          el('span', { class: 'job__route-text' }, el('strong', null, word(s) + ' '), addressText(o, s), s.zone ? ' · ' + MDM.geo.zoneShort(s.zone) : ''),
+          el('span', { class: 'job__route-state' }, st === 'done' ? 'Done' : st === 'failed' ? 'Problem' : st === 'skipped' ? 'Skipped' : now ? 'Now' : ''));
+      })));
+  }
   function scheduleLine(o) {
     const s = o.schedule || {};
     const parts = [];
@@ -435,12 +462,18 @@
     if (pri.label) tags.push(el('span', { class: 'tag tag--hot', 'data-testid': 'driver-priority' }, pri.label));
     const due = dueTag(o);
     if (due) tags.push(due);
+    const multi = stopsTag(o);
+    if (multi) tags.push(multi);
     if (methodTag(o)) tags.push(el('span', { class: 'tag', 'data-testid': 'driver-method-tag' }, methodTag(o)));
     if (codDue(o)) tags.push(el('span', { class: 'tag tag--cash', 'data-testid': 'driver-cod-tag' }, 'Cash ' + money(o.cod.amount)));
     if ((o.packages || []).some(p => p.fragile)) tags.push(el('span', { class: 'tag' }, 'Fragile'));
     const meta = [MDM.requestTypeLabel(o.requestType), o.customer && o.customer.name].filter(Boolean).join(' · ');
     const target = (ph.stop || cur || showDrop || showPick);
-    const primary = ph.label ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary job__primary--' + (PHASE_TONE[ph.key] || 'go'), 'data-testid': 'driver-action', 'data-action': ph.key, on: { click: e => act(e.currentTarget, o, ph) } }, ph.label) : null;
+    // On a job with several stops of one kind the button says which one it is: "Collected · 1 of 2".
+    const mates = ph.stop ? (ph.stop.type === 'pickup' ? pickups : drops) : [];
+    const which = mates.length > 1 ? (mates.indexOf(ph.stop) + 1) + ' of ' + mates.length : '';
+    const primary = ph.label ? el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary job__primary--' + (PHASE_TONE[ph.key] || 'go'), 'data-testid': 'driver-action', 'data-action': ph.key, on: { click: e => act(e.currentTarget, o, ph) } },
+      ph.label, which ? el('span', { class: 'job__primary-which', 'data-testid': 'driver-action-which' }, '· ' + which) : null) : null;
     const canFail = ACTIVE.indexOf(o.status) >= 0 && cur;
     // Collected and not delivered yet: the driver may bring it to the office instead (client, 05/11/2026), next to the problem button.
     const canHandOver = ['collected', 'out_for_delivery'].indexOf(o.status) >= 0 && pickups.every(s => s.status === 'done') && cur && cur.type === 'dropoff';
@@ -453,14 +486,15 @@
         meta ? el('div', { class: 'job__meta' }, meta) : null,
         stepsNode(o)),
       el('div', { class: 'card__body job__body job__stops' },
-        pickups.length > 1 ? el('div', { class: 'job__multi' }, pickups.every(s => s.status === 'done') ? 'All ' + pickups.length + ' collections done' : 'Collection ' + (pickups.indexOf(showPick) + 1) + ' of ' + pickups.length) : null,
+        multi ? stopsList(o, pickups, drops, cur) : null,
+        pickups.length > 1 ? el('div', { class: ['job__multi', pickups.every(s => s.status === 'done') && 'is-done'], 'data-testid': 'driver-multi-pickup' }, el('span', { class: 'job__multi-pill' }, pickups.every(s => s.status === 'done') ? 'All ' + pickups.length + ' collections done' : 'Collection ' + (pickups.indexOf(showPick) + 1) + ' of ' + pickups.length)) : null,
         showPick ? stopBlock(o, showPick, 'Collect from', 'driver-pickup') : null,
         // Once everything is collected the package details fold into one line, so the delivery and its button come up (client,
         // 02/11/2026: as little scrolling as possible for the drivers).
         pickups.length && pickups.every(s => s.status === 'done')
           ? el('details', { class: 'job__fold', 'data-testid': 'driver-collect-fold', open: state.openFolds.has(o.id), on: { toggle: e => { if (e.currentTarget.open) state.openFolds.add(o.id); else state.openFolds.delete(o.id); } } }, el('summary', { class: 'job__fold-summary' }, 'Packages and details', el('span', { class: 'job__count' }, packagesLine(o))), collectInfo(o))
           : collectInfo(o),
-        drops.length > 1 ? el('div', { class: 'job__multi' }, 'Delivery ' + (drops.indexOf(showDrop) + 1) + ' of ' + drops.length) : null,
+        drops.length > 1 ? el('div', { class: ['job__multi', drops.every(s => s.status === 'done') && 'is-done'], 'data-testid': 'driver-multi-drop' }, el('span', { class: 'job__multi-pill' }, drops.every(s => s.status === 'done') ? 'All ' + drops.length + ' deliveries done' : 'Delivery ' + (drops.indexOf(showDrop) + 1) + ' of ' + drops.length)) : null,
         showDrop ? stopBlock(o, showDrop, showDrop.type === 'return' ? 'Return to' : 'Deliver to', 'driver-drop') : null),
       el('div', { class: 'card__body job__actions' },
         o.status === 'failed' ? officeAlert(o) : null,
@@ -479,7 +513,7 @@
     const pri = priorityOf(o);
     return el('li', { class: 'list__item job__row', 'data-testid': testid, 'data-order-id': o.id, 'data-code': o.code },
       el('div', { class: 'list__main' },
-        el('div', { class: 'list__title' }, el('span', { class: 'mono' }, o.code), ' · ', MDM.requestTypeLabel(o.requestType), pri.label ? [' ', el('span', { class: 'tag tag--hot' }, pri.label)] : null, (t => t ? [' ', t] : null)(dueTag(o))),
+        el('div', { class: 'list__title' }, el('span', { class: 'mono' }, o.code), ' · ', MDM.requestTypeLabel(o.requestType), pri.label ? [' ', el('span', { class: 'tag tag--hot' }, pri.label)] : null, (t => t ? [' ', t] : null)(dueTag(o)), (t => t ? [' ', t] : null)(stopsTag(o))),
         el('div', { class: 'list__meta' }, (o.collection ? MDM.geo.zoneShort(o.collection.zone) : '') + ' to ' + (o.delivery ? MDM.geo.zoneShort(o.delivery.zone) : '') + ' · ' + packagesLine(o))),
       el('div', { class: 'list__aside' }, aside));
   }
@@ -1101,7 +1135,14 @@
     if (naalu) { patch.naalu = naalu; patch.naaluNote = v.naaluNote || ''; }
     const extra = [Object.keys(sizes).length ? 'category changed' : '', naalu ? 'naalu ' + money(naalu) + ' at collection recorded' : ''].filter(Boolean).join(', ');
     const r = await run(btn, o, () => MDM.store.setStop(o.id, stop.id, patch), x => (x.status === 'collected' ? o.code + ' collected' : 'Collection saved') + (extra ? ': ' + extra : ''), 'Could not save the collection');
-    if (r) resumeSimAt(stop.id);
+    if (r) { resumeSimAt(stop.id); nextStopToast(r, 'pickup'); }
+  }
+  // More of the same to do on this job (client, 12/11/2026 evening): right after one is saved, say which is next and where.
+  function nextStopToast(o, type) {
+    const same = ((o.route && o.route.stops) || []).filter(s => (type === 'pickup' ? s.type === 'pickup' : s.type !== 'pickup'));
+    const next = same.find(isOpen);
+    if (same.length < 2 || !next) return;
+    MDM.ui.toast((type === 'pickup' ? 'Next collection, ' : 'Next delivery, ') + (same.indexOf(next) + 1) + ' of ' + same.length + ': ' + addressText(o, next), 'warn');
   }
   // Delivered: proof, then the money (§5.6, §6): cash collected (required when there is cash on delivery), naalu paid at delivery and a
   // packing charge that goes on the customer's bill.
@@ -1170,7 +1211,7 @@
     const cashText = (cod ? (patch.cashCollected > 0 ? ', cash ' + money(patch.cashCollected) + ' with you' : ', no cash collected') : '')
       + (patch.cargoCharge ? ', Maldivian Cargo charges ' + money(patch.cargoCharge) + ' added to the bill' : '');
     const r = await run(btn, o, () => MDM.store.setStop(o.id, stop.id, patch), x => (x.status === 'delivered' ? o.code + ' delivered' : x.status === 'returned' ? o.code + ' returned to sender' : 'Delivery saved') + cashText, 'Could not save the delivery');
-    if (r) resumeSimAt(stop.id);
+    if (r) { resumeSimAt(stop.id); nextStopToast(r, 'dropoff'); }
   }
   // Boat details change after booking (§5.3 note): the speedboat changed, the departure moved, or the driver missed it.
   async function onBoatUpdate(btn, o) {

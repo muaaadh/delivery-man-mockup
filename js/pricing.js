@@ -137,27 +137,85 @@
       out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? 'of the receipt' : 'of the items' });
     }
     const folded = packageAmounts(order).folded;
-    (f.adjustments || []).forEach(a => { if (!folded[a.id]) out.push({ key: 'adjustment', id: a.id, label: a.label, amount: a.amount, reason: '', preset: a.preset }); });
+    // A row the office added in the price table carries what it is for (description) and, when there is more than one, how many at
+    // what rate ('2 × MVR 80'); both show under the label wherever the row is listed.
+    (f.adjustments || []).forEach(a => {
+      if (folded[a.id]) return;
+      const many = Number(a.qty) > 1 && a.rate != null ? a.qty + ' × ' + format(a.rate) : '';
+      out.push({ key: 'adjustment', id: a.id, label: a.label, amount: a.amount, reason: [a.description, many].filter(Boolean).join(' · '), preset: a.preset });
+    });
     return out;
   }
   // The confirmed price in the package rows (client, 12/11/2026: "display the final confirmed price directly in the first/original
   // price row, without showing additional remarks, adjustments, or separate rows"). packageAmounts(order) → { amounts, folded }:
   // amounts[i] is package i's frozen price with the difference our price confirmation recorded added in, and folded lists those
-  // adjustments by id so feeLines leaves them out. The difference goes on the first package; a cut larger than its price carries on
-  // to the next ones. An extra vehicle charge keeps its own row, and a cut the packages cannot take stays a row of its own as before.
+  // adjustments by id so feeLines leaves them out. A confirmation made in the price table names each package's difference (split:
+  // { packageId: MVR }); one that only set a total is shared out evenly (client, 12/11/2026 evening: three bags confirmed at MVR 120
+  // read 40 each, not 50, 35, 35), a cut a package cannot take carrying on to the others. An extra vehicle charge keeps its own row,
+  // and a cut the packages cannot take together stays a row of its own as before.
   const confirmation = a => a && (a.preset === 'quote' || (a.confirm && a.preset !== 'vehicle'));
   function packageAmounts(order) {
     const pk = (order && order.packages) || [];
     const amounts = pk.map(p => round(p.price && p.price.lineTotal));
     const adj = (((order && order.fees) || {}).adjustments || []).filter(confirmation);
     if (!pk.length || !adj.length) return { amounts, folded: {} };
-    let diff = adj.reduce((n, a) => n + round(a.amount), 0);
-    const out = amounts.slice();
-    if (diff >= 0) out[0] += diff;
-    else for (let i = 0; i < out.length && diff < 0; i++) { const cut = Math.max(diff, -out[i]); out[i] += cut; diff -= cut; }
-    if (diff < 0) return { amounts, folded: {} };
+    const out = amounts.slice(), at = {};
+    pk.forEach((p, i) => { at[p.id] = i; });
+    let loose = 0;
+    adj.forEach(a => {
+      let left = round(a.amount);
+      Object.keys(a.split || {}).forEach(id => { if (at[id] != null) { const d = round(a.split[id]); out[at[id]] += d; left -= d; } });
+      loose += left;
+    });
+    if (loose) { const each = Math.trunc(loose / out.length), rest = loose - each * out.length; out.forEach((v, i) => { out[i] = v + each + (i < Math.abs(rest) ? Math.sign(rest) : 0); }); }
+    let short = 0;
+    out.forEach((v, i) => { if (v < 0) { short += v; out[i] = 0; } });
+    for (let i = 0; i < out.length && short < 0; i++) { const cut = Math.max(short, -out[i]); out[i] += cut; short -= cut; }
+    if (short < 0) return { amounts, folded: {} };
     const folded = {}; adj.forEach(a => { folded[a.id] = true; });
     return { amounts: out, folded };
+  }
+  // rowForm(adjustment) → how a row reads in the price table: { preset, description, qty, rate }. A row with its own wording (an
+  // 'Other' row, or an older adjustment the office named by hand) keeps that wording as its description.
+  function rowForm(a) {
+    const qty = Number(a.qty) > 0 ? round(a.qty) : 1;
+    const types = MDM.ADJUSTMENT_PRESETS || [];
+    const preset = a.preset !== 'quote' && types.some(p => p.value === a.preset) ? a.preset : 'other';
+    const listed = (types.find(p => p.value === preset) || {}).label;
+    const named = a.label && a.label !== listed && a.label !== a.description ? a.label : '';
+    return { preset, description: [named, a.description].filter(Boolean).join(', '), qty, rate: a.rate != null ? round(a.rate) : round(a.amount / qty) };
+  }
+  // priceRows(order, settings) → the order's price as the rows of an item table (client, 12/11/2026 evening: "editable and add row
+  // style", as in their invoicing tool): item, quantity, rate, amount. Packages of one category on one route at one price are one row
+  // ('Bag · Malé to Malé', 3 × MVR 40); then the e-store goods, the shopping items, the fees that follow the order by themselves
+  // (airport, Maldivian Cargo, shopping) and every other row (extra vehicle, naalu, a discount, a charge billed from Charges).
+  //   { kind: 'package', ids, label, sub, qty, rate, amount } | { kind: 'goods' | 'items', label, sub, qty, rate, amount }
+  //   | { kind: 'fee', key, label, sub, amount } | { kind: 'row', id, preset, label, sub, qty, rate, amount, chargeId }
+  function priceRows(order, settings) {
+    const o = order || {}, rows = [], groups = {};
+    const shown = packageAmounts(o).amounts;
+    (o.items || []).forEach(it => rows.push({ kind: 'goods', label: it.name, sub: '', qty: Number(it.qty) || 1, rate: round(it.price != null ? it.price : it.total), amount: round(it.total) }));
+    (o.packages || []).forEach((p, i) => {
+      const label = lineLabel(p, o.service === 'store' ? 'pick' : o.service), amount = p.price ? shown[i] : 0, key = label + '|' + amount;
+      if (!groups[key]) rows.push(groups[key] = { kind: 'package', ids: [], label, notes: [], qty: 0, rate: amount, amount: 0 });
+      const g = groups[key];
+      g.ids.push(p.id); g.qty += 1; g.amount += amount;
+      if (p.description && g.notes.indexOf(p.description) < 0) g.notes.push(p.description);
+    });
+    rows.forEach(r => { if (r.kind === 'package') { r.sub = r.notes.join(', '); delete r.notes; } });
+    const t = o.totals || {};
+    if (t.budget) {
+      const shops = (o.service === 'shop' ? (o.packages || []).filter(p => p.shop).map(p => p.shop) : []).concat(extraShops(o.extraCollections));
+      rows.push({ kind: 'items', label: shops.some(sh => sh.receiptTotal > 0) ? 'Receipt total' : 'Items agreed', sub: '', qty: 1, rate: round(t.budget), amount: round(t.budget) });
+    }
+    const adjById = {}; ((o.fees || {}).adjustments || []).forEach(a => { adjById[a.id] = a; });
+    feeLines(o, settings).forEach(f => {
+      const a = f.id ? adjById[f.id] : null;
+      if (!a) { rows.push({ kind: 'fee', key: f.key, label: f.label, sub: f.reason || '', amount: round(f.amount) }); return; }
+      const form = rowForm(a);
+      rows.push({ kind: 'row', id: a.id, preset: form.preset, label: a.label, sub: a.description || '', description: form.description, qty: form.qty, rate: form.rate, amount: round(a.amount), chargeId: a.chargeId || null });
+    });
+    return rows;
   }
 
   // format(n, { cents }) → 'MVR 1,250' | 'MVR 1,250.00' | '−MVR 20' (true minus sign)
@@ -225,5 +283,5 @@
     if (size === 'xl') return 'MVR ' + round(cell.same) + '++';
     return round(cell.same) === round(cell.cross) ? format(cell.same) : 'MVR ' + round(cell.same) + '–' + round(cell.cross);
   }
-  MDM.pricing = { estimateRange, countsRange, businessTiers, businessRate, accountTiers, rangeLabel, quote, recalc, feeLines, packageAmounts, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
+  MDM.pricing = { estimateRange, countsRange, businessTiers, businessRate, accountTiers, rangeLabel, quote, recalc, feeLines, packageAmounts, priceRows, rowForm, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
 })(window.MDM);

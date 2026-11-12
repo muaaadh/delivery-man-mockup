@@ -730,25 +730,21 @@
   function pricingSection(o) {
     const t = o.totals || {}, p = o.pricing || {};
     const confirmed = p.status === 'confirmed';
-    // The confirmed price shows in the package's own row (client, 12/11/2026); "Price changes" below keeps the estimate it replaced.
-    const shown = MDM.pricing.packageAmounts(o).amounts;
-    const lines = (o.packages || []).map((pkg, i) => el('div', { class: 'summary__line', 'data-testid': 'drawer-package-line' },
-      el('div', { class: 'summary__desc' }, MDM.pricing.lineLabel(pkg, o.service === 'store' ? 'pick' : o.service), pkg.description ? el('span', { class: 'summary__sub' }, pkg.description) : null),
-      el('div', { class: 'summary__amount mono' }, money(pkg.price ? shown[i] : 0))));
-    if (t.items) lines.push(el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, 'Store items'), el('div', { class: 'summary__amount mono' }, money(t.items))));
-    const extraShops = (o.extraCollections || []).filter(c => c.kind === 'shop' && c.shop);
-    if ((o.service === 'shop' || extraShops.length) && t.budget) {
-      const receipt = (o.packages || []).some(x => x.shop && x.shop.receiptTotal) || extraShops.some(c => c.shop.receiptTotal);
-      lines.push(el('div', { class: 'summary__line' }, el('div', { class: 'summary__desc' }, receipt ? 'Receipt total' : 'Items agreed'), el('div', { class: 'summary__amount mono' }, money(t.budget))));
-    }
+    // The price as an item table (client, 12/11/2026 evening): item, quantity, rate and amount, packages of one kind at one price on
+    // one row ('Bag · Malé to Malé', 3 × MVR 40). The confirmed price shows in the package's own row; "Price changes" below keeps
+    // the estimate it replaced. "Confirm price" opens the same table to edit (priceEditor).
     const adjById = {}; ((o.fees || {}).adjustments || []).forEach(a => { adjById[a.id] = a; });
-    MDM.pricing.feeLines(o, state.settings).forEach(f => {
-      const a = f.id ? adjById[f.id] : null;
-      lines.push(el('div', { class: 'summary__line summary__line--fee', 'data-testid': f.key === 'adjustment' ? 'drawer-adjustment' : null },
-        el('div', { class: 'summary__desc' }, f.label, f.reason ? el('span', { class: 'summary__sub' }, f.reason) : null, a ? el('span', { class: 'summary__sub' }, [a.remarks, F.byLabel(a.by) + ', ' + fmtDate(a.at)].filter(Boolean).join(' · ')) : null),
-        el('div', { class: 'summary__amount mono' }, money(f.amount))));
+    const lines = MDM.pricing.priceRows(o, state.settings).map(r => {
+      const a = r.id ? adjById[r.id] : null, main = ['package', 'goods', 'items'].indexOf(r.kind) >= 0;
+      return el('div', { class: ['ptable__row', main ? null : 'ptable__row--fee'], 'data-testid': r.kind === 'package' ? 'drawer-package-line' : r.kind === 'row' ? 'drawer-adjustment' : 'drawer-price-line', 'data-kind': r.kind, 'data-qty': r.qty != null ? String(r.qty) : null, 'data-rate': r.rate != null ? String(r.rate) : null, 'data-amount': String(r.amount) },
+        el('div', { class: 'ptable__item' }, r.label, r.sub ? el('span', { class: 'summary__sub' }, r.sub) : null,
+          a && a.remarks ? el('span', { class: 'summary__sub' }, a.remarks) : null),
+        el('div', { class: 'ptable__qty mono' }, r.qty != null ? [el('span', { class: 'ptable__k' }, 'Qty '), String(r.qty)] : null),
+        el('div', { class: 'ptable__rate mono' }, r.rate != null ? [el('span', { class: 'ptable__k' }, 'at '), money(r.rate)] : null),
+        el('div', { class: 'ptable__amount mono' }, money(r.amount)));
     });
-    const summary = el('div', { class: 'summary', 'data-testid': 'drawer-summary' }, lines, el('div', { class: 'summary__rule' }),
+    const head = el('div', { class: 'ptable__head', 'aria-hidden': 'true' }, ['Item', 'Qty', 'Rate', 'Amount'].map(h => el('span', null, h)));
+    const summary = el('div', { class: 'summary ptable', 'data-testid': 'drawer-summary' }, head, lines, el('div', { class: 'summary__rule' }),
       el('div', { class: 'summary__total' }, el('span', null, confirmed ? 'Confirmed total' : 'Estimated total'), el('span', { class: 'mono', 'data-testid': 'drawer-total' }, money(t.total))));
     const est = o.estimate && !confirmed ? el('p', { class: 'muted small' }, 'Customer estimate: ' + money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') + '. The final price includes any vehicle fee.') : null;
     const reasons = !confirmed && t.quoteRequired && (t.quoteReasons || []).length ? el('div', { class: 'alert alert--warn' }, html(MDM.icon('alert-triangle', 16)),
@@ -991,16 +987,18 @@
       if (pay === 'pending') items.push(btn('Request payment', 'drawer-footer-request-payment', 'btn--primary', () => requestPayment(o)));
       else if (pay === 'received') items.push(btn('Verify payment', 'drawer-footer-verify', 'btn--primary', () => verify(o)));
     }
+    // Cancel order (client, 12/11/2026 evening: customers cancel before anyone is assigned, and after): on every order that is not
+    // collected yet, with or without a driver. Once collected it goes through "Report failed", which brings the package back.
+    if (MDM.CANCELLABLE.indexOf(st) >= 0) items.push(cancelBtn());
     if (st === 'requested' && MDM.priceAfterCollection(o)) {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
-      items.push(cancelBtn(), btn('Confirm price', 'drawer-confirm', 'btn--secondary', () => confirmPrice(o)), sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
+      items.push(btn('Confirm price', 'drawer-confirm', 'btn--secondary', () => confirmPrice(o)), sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
     } else if (st === 'requested') {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
-      items.push(cancelBtn(), sel, btn('Assign driver', 'drawer-assign', 'btn--secondary', () => assign(o, sel.value)), btn('Confirm price', 'drawer-confirm', 'btn--primary', () => confirmPrice(o)));
+      items.push(sel, btn('Assign driver', 'drawer-assign', 'btn--secondary', () => assign(o, sel.value)), btn('Confirm price', 'drawer-confirm', 'btn--primary', () => confirmPrice(o)));
     }
     else if (st === 'confirmed' || MDM.waitingAtOffice(o)) {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
-      if (st === 'confirmed') items.push(cancelBtn());
       items.push(sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
     } else if (st === 'assigned') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('Dispatch', 'drawer-dispatch', 'btn--primary', () => dispatchOrder(o)));
     else if (st === 'dispatched') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('On the way', 'drawer-start', 'btn--primary', () => startRoute(o)));
@@ -1101,33 +1099,156 @@
   // What a correction after delivery does to the bill (correctable): the invoice already sent shows the new total.
   const correctionNote = o => !correctable(o) || o.payment.status === 'pending' ? ''
     : ' Already delivered: the invoice changes to the new total' + (o.payment.status === 'received' ? '; the customer\'s transfer slip of ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total) + ' still waits to be checked.' : '.');
-  async function confirmPrice(o) {
-    o = await fresh(o);
-    const presets = MDM.ADJUSTMENT_PRESETS.filter(p => p.value !== 'discount');
-    const est = o.estimate ? money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') : money(o.totals.total);
-    // Price after collection (17/10/2026): finalised from the proof of collection; once delivered, confirming it sends the invoice.
+  // The price as an item table the office edits (client, 12/11/2026 evening: "editable and add row style", as in their invoicing
+  // tool). Each package row has its rate (packages of one kind at one price share a row; "Price each one" opens them up), a shopping
+  // order has what the items cost at each shop, and "Add row" adds a line with what it is, a quantity and a rate: a vehicle, naalu,
+  // waiting time, a discount, anything else. Lines that follow the order by themselves (the airport, Maldivian Cargo and shopping
+  // fees, a charge billed from Charges) are listed and are not typed over. Resolves with what store.confirmPrice takes, or null.
+  const ROW_TYPES = MDM.ADJUSTMENT_PRESETS.filter(p => p.value !== 'quote');
+  function priceEditor(o) {
+    const settings = state.settings || {}, pct = Number((settings.rates || {}).shoppingPct) || 10;
+    const base = MDM.pricing.priceRows(o, settings);
+    const pkgById = {}; (o.packages || []).forEach((p, i) => { pkgById[p.id] = { p, n: i + 1 }; });
+    const confirmed = !!o.pricing && o.pricing.status === 'confirmed';
     const finalise = MDM.priceToFinalise(o), delivered = o.status === 'delivered';
     const canAsk = o.payment && o.payment.method !== 'invoice' && o.payment.status === 'pending' && !delivered;
-    // Shopping (round 4): no budget on the request; the items and their cost are agreed with the customer on a call, entered here per
-    // shop, and the shopping fee follows them. The rest of the price is the delivery.
-    const shopsOn = MDM.orderShops(o), pct = Number(((state.settings || {}).rates || {}).shoppingPct) || 0;
-    const shoppingNow = (o.totals.budget || 0) + ((o.fees || {}).shopping || 0);
-    const priceFields = shopsOn.length
-      ? shopsOn.map(x => ({ name: 'item_' + x.key, label: 'Items at ' + MDM.shopName(x.shop) + ', MVR', type: 'number', required: true, min: 0, step: 1, value: x.shop.budget || '',
-        hint: x.shop.list ? 'To buy: ' + x.shop.list : null, requiredMessage: 'Enter what the items cost, as agreed on the call' }))
-        .concat([{ name: 'delivery', label: 'Delivery price, MVR', type: 'number', required: true, value: o.totals.total - shoppingNow, min: 0, step: 1, hint: 'Packages and fees, without the items' + (pct ? ' and the ' + pct + '% shopping fee' : '') }])
-      : [{ name: 'total', label: 'Final price (MVR)', type: 'number', required: true, value: o.totals.total, min: 0, step: 1 }];
-    const v = await dialog({ title: (finalise ? 'Finalise the price for ' : 'Confirm the price for ') + o.code, okLabel: finalise ? 'Finalise price' : 'Confirm price',
-      message: 'Now ' + money(o.totals.total) + ', estimate ' + est + '. ' + (finalise ? 'Set it from the collection photo. ' : '') + (shopsOn.length ? 'Enter the items as agreed with the customer on the call; the ' + pct + '% shopping fee is added to them. ' : '') + 'Include any vehicle fee.' +
-        (finalise && delivered && o.payment && o.payment.status === 'pending' ? ' The invoice goes out once you confirm.' : '') + correctionNote(o),
-      fields: priceFields.concat([
-        { name: 'preset', label: 'Reason for any difference', type: 'select', required: true, options: presets,
-          value: (o.packages || []).some(p => p.needsVehicle) && !((o.fees || {}).adjustments || []).some(a => a.preset === 'vehicle') ? 'vehicle' : 'quote' },
-        { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2, placeholder: 'Checked the photo: 2 boxes, needs the pickup truck' },
-        canAsk ? { name: 'requestPayment', label: 'Ask the customer to pay now', type: 'checkbox', value: upfrontDefault(o), hint: 'Otherwise the invoice goes out after delivery' } : null]).filter(Boolean) });
+    const m = {
+      pkgs: base.filter(r => r.kind === 'package').map(r => ({ ids: r.ids.slice(), label: r.label, sub: r.sub, rate: r.rate })),
+      shops: MDM.orderShops(o).map(x => ({ key: x.key, name: MDM.shopName(x.shop), list: x.shop.list || '', receipt: x.shop.receiptTotal > 0 ? Math.round(x.shop.receiptTotal) : null, cost: x.shop.budget || '' })),
+      fixed: base.filter(r => r.kind === 'goods' || (r.kind === 'fee' && r.key !== 'shopping') || (r.kind === 'row' && r.chargeId)),
+      rows: base.filter(r => r.kind === 'row' && !r.chargeId).map(r => ({ id: r.id, preset: r.preset, description: r.description, qty: r.qty, rate: r.rate })),
+    };
+    // The rows this table shows: saving takes off only the ones removed here, never a row a colleague added meanwhile.
+    const known = m.rows.map(r => r.id);
+    const num = c => { const t = trim(c.value); return t === '' || (c.validity && c.validity.badInput) ? NaN : Number(t); };
+    const whole = c => { const v = num(c); return isNaN(v) ? 0 : Math.round(v); };
+    const cell = (cls, ...kids) => el('div', { class: 'pedit__' + cls }, kids);
+    const numberInput = (value, name, testid, min) => el('input', { class: 'input input--sm pedit__num', type: 'number', inputmode: 'numeric', step: 1, min, value: value == null ? '' : String(value), 'aria-label': name, 'data-testid': testid });
+    const amountCell = () => el('div', { class: 'pedit__amount mono', 'data-testid': 'price-amount' });
+    const list = el('div', { class: 'pedit__rows', 'data-testid': 'price-rows' });
+    const totalEl = el('span', { class: 'mono', 'data-testid': 'price-total' });
+    const formError = el('div', { class: 'field__error dialog__error', role: 'alert', hidden: true, 'data-testid': 'price-error' });
+    let live = [];
+    function tally() {
+      let sum = 0;
+      live.forEach(r => { const a = r.amount(); r.out.textContent = money(a); sum += a; });
+      totalEl.textContent = money(sum);
+      formError.hidden = true;
+      return sum;
+    }
+    function pkgRow(g) {
+      const rate = numberInput(g.rate, 'Rate for ' + g.label + (g.sub ? ', ' + g.sub : ''), 'price-rate', 0), out = amountCell();
+      rate.addEventListener('input', () => { g.rate = rate.value; tally(); });
+      const each = g.ids.length > 1 ? el('button', { type: 'button', class: 'pedit__link', 'data-testid': 'price-each', on: { click: () => {
+        m.pkgs.splice(m.pkgs.indexOf(g), 1, ...g.ids.map(id => ({ ids: [id], label: g.label, sub: pkgById[id].p.description || 'Package ' + pkgById[id].n, rate: g.rate })));
+        paint();
+      } } }, 'Price each one') : null;
+      return { out, amount: () => g.ids.length * whole(rate), check: () => (isNaN(num(rate)) || num(rate) < 0 ? [rate, 'Enter the rate of every row, 0 or more'] : null),
+        node: el('div', { class: 'pedit__row', 'data-testid': 'price-row', 'data-kind': 'package', 'data-qty': String(g.ids.length) },
+          cell('item', el('span', { class: 'pedit__name' }, g.label), g.sub ? el('span', { class: 'summary__sub' }, g.sub) : null, each),
+          cell('qty mono', el('span', { class: 'ptable__k' }, 'Qty '), String(g.ids.length)), cell('rate', rate), out, cell('x')) };
+    }
+    function shopRow(x) {
+      const out = amountCell();
+      if (x.receipt != null) return { out, amount: () => x.receipt, check: () => null, node: el('div', { class: 'pedit__row pedit__row--auto', 'data-testid': 'price-row', 'data-kind': 'receipt' },
+        cell('item', el('span', { class: 'pedit__name' }, 'Receipt at ' + x.name), el('span', { class: 'summary__sub' }, 'From the shop receipt')), cell('qty mono'), cell('rate'), out, cell('x')) };
+      const cost = numberInput(x.cost, 'Items at ' + x.name + ', MVR', 'price-items', 0);
+      cost.addEventListener('input', () => { x.cost = cost.value; tally(); });
+      return { out, amount: () => whole(cost), check: () => (isNaN(num(cost)) || num(cost) < 0 ? [cost, 'Enter what the items cost, as agreed on the call'] : null),
+        node: el('div', { class: 'pedit__row', 'data-testid': 'price-row', 'data-kind': 'items', 'data-shop': x.key },
+          cell('item', el('span', { class: 'pedit__name' }, 'Items at ' + x.name), el('span', { class: 'summary__sub' }, x.list ? 'To buy: ' + x.list : 'As agreed with the customer on the call')),
+          cell('qty mono', el('span', { class: 'ptable__k' }, 'Qty '), '1'), cell('rate', cost), out, cell('x')) };
+    }
+    function fixedRow(r, amount) {
+      const out = amountCell();
+      return { out, amount: amount || (() => r.amount), check: () => null, node: el('div', { class: 'pedit__row pedit__row--auto', 'data-testid': 'price-row', 'data-kind': r.chargeId ? 'charge' : r.kind },
+        cell('item', el('span', { class: 'pedit__name' }, r.label), el('span', { class: 'summary__sub' }, [r.sub, r.chargeId ? 'Billed from Charges' : r.kind === 'fee' ? 'Added by itself' : ''].filter(Boolean).join(' · '))),
+        cell('qty mono', r.qty != null ? [el('span', { class: 'ptable__k' }, 'Qty '), String(r.qty)] : null), cell('rate mono', r.rate != null ? money(r.rate) : null), out, cell('x')) };
+    }
+    function extraRow(r) {
+      const type = el('select', { class: 'select select--sm', 'aria-label': 'Item', 'data-testid': 'price-row-type' }, el('option', { value: '' }, 'Choose item'), ROW_TYPES.map(t => el('option', { value: t.value }, t.label)));
+      type.value = r.preset || '';
+      const text = el('input', { class: 'input input--sm', type: 'text', placeholder: 'Description', 'aria-label': 'Description', maxlength: 120, value: r.description || '', 'data-testid': 'price-row-text' });
+      const qty = numberInput(r.qty || 1, 'Quantity', 'price-row-qty', 1), rate = numberInput(r.rate, 'Rate, MVR', 'price-rate'), out = amountCell();
+      const sync = () => { r.preset = type.value; r.description = text.value; r.qty = qty.value; r.rate = rate.value; tally(); };
+      [type, text, qty, rate].forEach(c => { c.addEventListener('input', sync); c.addEventListener('change', sync); });
+      const remove = el('button', { type: 'button', class: 'btn btn--ghost btn--icon btn--sm', 'aria-label': 'Remove this row', title: 'Remove this row', 'data-testid': 'price-row-remove',
+        on: { click: () => { m.rows.splice(m.rows.indexOf(r), 1); paint(); addBtn.focus(); } } }, html(MDM.icon('x', 16)));
+      return { out, first: type,
+        // A discount takes money off whichever way it is typed.
+        amount: () => { const v = whole(rate); return Math.max(1, whole(qty) || 1) * (type.value === 'discount' && v > 0 ? -v : v); },
+        check: () => (!type.value ? [type, 'Choose what each added row is, or remove the row'] : type.value === 'other' && !trim(text.value) ? [text, 'Describe the row'] : isNaN(num(qty)) || num(qty) < 1 || num(qty) % 1 ? [qty, 'A quantity is a whole number, 1 or more']
+          : isNaN(num(rate)) || !num(rate) ? [rate, 'Enter the rate of every row, or remove the row'] : null),
+        node: el('div', { class: 'pedit__row pedit__row--edit', 'data-testid': 'price-row', 'data-kind': 'row', 'data-row-id': r.id || null }, cell('item', type, text), cell('qty', qty), cell('rate', rate), out, cell('x', remove)) };
+    }
+    function paint() {
+      live = m.pkgs.map(pkgRow).concat(m.shops.map(shopRow));
+      if (m.shops.length) live.push(fixedRow({ kind: 'fee', label: 'Shopping fee ' + pct + '%', sub: 'of the items' }, () => m.shops.reduce((n, x) => n + Math.round((x.receipt != null ? x.receipt : Math.max(0, Math.round(Number(x.cost) || 0))) * pct / 100), 0)));
+      live = live.concat(m.fixed.map(r => fixedRow(r)), m.rows.map(extraRow));
+      list.replaceChildren(...live.map(r => r.node));
+      vehicleBtn.hidden = !wantsVehicle || m.rows.some(r => r.preset === 'vehicle');
+      tally();
+    }
+    const addRow = r => { m.rows.push(r); paint(); const made = live[live.length - 1]; (r.preset ? made.node.querySelector('[data-testid="price-rate"]') : made.first).focus(); };
+    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'price-add-row', on: { click: () => addRow({ id: null, preset: '', description: '', qty: 1, rate: '' }) } }, html(MDM.icon('plus', 16)), 'Add row');
+    // An extra vehicle the customer asked for, or a package that needs one: one press adds the row at the rate card's vehicle rate.
+    const wantsVehicle = !!o.extraVehicle || (o.packages || []).some(p => p.needsVehicle);
+    const vehicleBtn = el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'price-add-vehicle', hidden: true, on: { click: () => addRow({ id: null, preset: 'vehicle', description: '', qty: 1, rate: vehicleRate() || '' }) } },
+      html(MDM.icon('plus', 16)), o.extraVehicle ? 'Add the vehicle the customer asked for' : 'Add a vehicle charge');
+    const remarks = el('textarea', { class: 'textarea', id: 'price-remarks', rows: 2, placeholder: 'Checked the photo: 2 boxes, needs the pickup truck', 'data-testid': 'price-remarks' });
+    const ask = canAsk ? el('input', { type: 'checkbox', id: 'price-ask', checked: upfrontDefault(o), 'data-testid': 'price-request-payment' }) : null;
+    const est = o.estimate ? money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') : money(o.totals.total);
+    const okBtn = el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'price-ok' }, finalise ? 'Finalise price' : confirmed ? 'Save price' : 'Confirm price');
+    const cancelBtn = el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'price-cancel' }, 'Cancel');
+    const form = el('form', { method: 'dialog', class: 'dialog__form', novalidate: true },
+      el('h2', { class: 'dialog__title', id: 'price-title' }, (finalise ? 'Finalise the price for ' : confirmed ? 'Change the price of ' : 'Confirm the price for ') + o.code),
+      el('p', { class: 'dialog__message' }, 'Now ' + money(o.totals.total) + (confirmed ? '' : ', estimate ' + est) + '. ' + (finalise ? 'Set it from the collection photo. ' : '') + 'Type the rate of each row. "Add row" adds a vehicle, naalu or any other line.' +
+        (m.shops.some(x => x.receipt == null) ? ' Enter the items as agreed with the customer on the call; the ' + pct + '% shopping fee follows them.' : '') +
+        (finalise && delivered && o.payment && o.payment.status === 'pending' ? ' The invoice goes out once you confirm.' : '') + correctionNote(o)),
+      el('div', { class: 'dialog__fields' },
+        el('div', { class: 'pedit' },
+          el('div', { class: 'pedit__head', 'aria-hidden': 'true' }, ['Item', 'Qty', 'Rate (MVR)', 'Amount', ''].map(h => el('span', null, h))),
+          list,
+          el('div', { class: 'pedit__foot' }, el('div', { class: 'row row--wrap' }, addBtn, vehicleBtn), el('div', { class: 'pedit__total' }, el('span', null, 'Total'), totalEl))),
+        el('div', { class: 'field' }, el('label', { for: 'price-remarks' }, 'Remarks', el('span', { class: 'optional' }, ' (optional)')), remarks),
+        ask ? el('div', { class: 'field' }, el('label', { class: 'checkbox', for: 'price-ask' }, ask, el('span', null, 'Ask the customer to pay now', el('span', { class: 'hint' }, 'Otherwise the invoice goes out after delivery')))) : null,
+        formError),
+      el('div', { class: 'dialog__actions' }, cancelBtn, okBtn));
+    const dlg = el('dialog', { class: 'dialog dialog--wide dialog--price', 'aria-labelledby': 'price-title', 'data-testid': 'price-dialog' }, form);
+    return new Promise(resolve => {
+      let result = null;
+      form.addEventListener('submit', e => {
+        e.preventDefault();
+        const bad = live.map(r => r.check()).find(Boolean);
+        if (bad) { formError.textContent = bad[1]; formError.hidden = false; try { bad[0].focus({ preventScroll: false }); } catch (x) { bad[0].focus(); } return; }
+        const packages = {}; m.pkgs.forEach(g => g.ids.forEach(id => { packages[id] = Math.round(Number(g.rate) || 0); }));
+        const open = m.shops.filter(x => x.receipt == null);
+        result = { items: { packages, known, rows: m.rows.map(r => ({ id: r.id || null, preset: r.preset, description: trim(r.description), qty: Math.max(1, Math.round(Number(r.qty) || 1)), rate: Math.round(Number(r.rate) || 0) })) },
+          itemCosts: open.length ? open.reduce((x, s) => { x[s.key] = Math.max(0, Math.round(Number(s.cost) || 0)); return x; }, {}) : null,
+          remarks: trim(remarks.value), requestPayment: !!(ask && ask.checked), total: tally() };
+        dlg.close();
+      });
+      cancelBtn.addEventListener('click', () => dlg.close());
+      dlg.addEventListener('click', e => {
+        if (e.target !== dlg) return;
+        const r = dlg.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+      });
+      dlg.addEventListener('close', () => { dlg.remove(); resolve(result); });
+      document.body.appendChild(dlg);
+      paint();
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+      const first = list.querySelector('input'); (first || okBtn).focus();
+      if (first && first.select) first.select();
+    });
+  }
+  async function confirmPrice(o) {
+    o = await fresh(o);
+    if (document.querySelector('dialog[data-testid="price-dialog"]')) return;
+    const delivered = o.status === 'delivered';
+    const v = await priceEditor(o);
     if (!v) return;
-    const itemCosts = shopsOn.length ? shopsOn.reduce((m, x) => { m[x.key] = v['item_' + x.key]; return m; }, {}) : null;
-    const upd = await MDM.store.confirmPrice(o.id, { total: shopsOn.length ? null : v.total, delivery: shopsOn.length ? v.delivery : null, itemCosts, preset: v.preset, label: v.preset === 'quote' ? 'Price confirmation' : label(presets, v.preset), remarks: v.remarks, requestPayment: !!v.requestPayment, by: by() });
+    const upd = await MDM.store.confirmPrice(o.id, { items: v.items, itemCosts: v.itemCosts, remarks: v.remarks, requestPayment: v.requestPayment, by: by() });
     toast('Price confirmed: ' + money(upd.totals.total) + (upd.payment.status === 'requested' ? (delivered ? ', invoice sent' : ', payment requested') : ''), 'ok');
   }
   async function addAdjustment(o) {
@@ -1403,7 +1524,12 @@
     toast('Settled', 'ok');
   }
   async function cancelOrder(o) {
-    const v = await dialog({ title: 'Cancel ' + o.code, message: 'The customer sees the reason on the tracking page and gets a notification.', okLabel: 'Cancel order', cancelLabel: 'Keep order', danger: true,
+    o = await fresh(o);
+    if ((MDM.ALLOWED[o.status] || []).indexOf('cancelled') < 0) { toast(o.code + ' is ' + MDM.STATUS[o.status].label.toLowerCase() + ': it can no longer be cancelled', 'warn'); return; }
+    const driver = F.driverName(o.driverId, state.drivers);
+    const held = ((o.route && o.route.stops) || []).some(x => x.type === 'pickup' && x.status === 'done');
+    const v = await dialog({ title: 'Cancel ' + o.code, okLabel: 'Cancel order', cancelLabel: 'Keep order', danger: true,
+      message: 'The customer sees the reason on the tracking page and gets a notification.' + (held ? ' The package is already collected: ' + (driver || 'the driver') + ' is told to bring it back to the sender.' : driver ? ' ' + driver + ' is told not to collect it.' : ' No driver is assigned yet.'),
       fields: [{ name: 'reason', label: 'Reason', type: 'textarea', required: true, placeholder: 'Customer asked to cancel by phone' }] });
     if (!v) return;
     let refund = null;
@@ -2191,7 +2317,9 @@
         stop('circle-dot', pickupText(o), times.collect, 'board-collect-time'),
         sizes ? el('div', { class: 'kb-sizes', 'data-testid': 'board-sizes' }, sizes) : null,
         stop('map-pin', dropText(o), times.deliver, 'board-deliver-time')),
-      el('div', { class: 'kb-card__foot' }, boardDriver(o, s, ctx), stepButton(o, s)));
+      el('div', { class: 'kb-card__foot' }, boardDriver(o, s, ctx), stepButton(o, s),
+        // A new order can be cancelled from its card, before anyone is assigned (client, 12/11/2026 evening) or before it is dispatched.
+        s.col === 'new' ? el('button', { type: 'button', class: 'kb-cancel', 'data-testid': 'board-cancel', 'aria-label': 'Cancel ' + o.code, on: { click: () => act(() => cancelOrder(o)) } }, 'Cancel order') : null));
   }
   // The slim column: the order, who, when and where it stands; at the office it can go out for delivery from here.
   function miniCard(o, s) {
@@ -2223,16 +2351,43 @@
   }
   const STEP_LABEL = { new: 'New order', confirmed: 'Confirmed', assigned: 'Assigned', failed: 'Failed', dispatched: 'Dispatched', on_the_way: 'On the way', arrived: 'Arrived', collected: 'Collected',
     advance: 'Advance', office: 'At the office', return: 'Return', out: 'Out for delivery', delivered: 'Delivered', due: 'Due', received: 'Slip received', requested: 'Payment requested', paid: 'Paid' };
+  const STEP_TONE = { new: 'red', confirmed: 'red', assigned: 'yellow', failed: 'red', dispatched: 'blue', on_the_way: 'yellow', arrived: 'yellow', collected: 'green',
+    advance: 'grey', office: 'yellow', return: 'red', out: 'yellow', delivered: 'green', due: 'red', received: 'blue', requested: 'yellow', paid: 'green' };
+  // Each column's own status filter (client, 12/11/2026 evening: "filter it from this part", one status or several, in each column
+  // separately): the counts under a column's title are buttons. One press shows that status only, more presses add statuses, "All"
+  // or pressing them off shows the whole column again. The choice is kept for the browser session, per column.
+  const PICK_KEY = 'mdm:orders-board-steps';
+  function boardPicks() {
+    if (!state.boardPicks) { try { const v = JSON.parse(sessionStorage.getItem(PICK_KEY) || '{}'); state.boardPicks = v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch (e) { state.boardPicks = {}; } }
+    return state.boardPicks;
+  }
+  function pickStep(col, key) {
+    const picks = boardPicks(), cur = Array.isArray(picks[col]) ? picks[col] : [];
+    const next = key == null ? [] : cur.indexOf(key) >= 0 ? cur.filter(k => k !== key) : cur.concat([key]);
+    if (next.length) picks[col] = next; else delete picks[col];
+    try { sessionStorage.setItem(PICK_KEY, JSON.stringify(picks)); } catch (e) { /* storage blocked: the choice lasts until the page is left */ }
+    state.boardFocus = { col, key: key == null ? 'all' : key };
+    render().catch(() => {});
+  }
   function boardColumn(c, items, ctx) {
-    const n = {}, tone = {};
-    items.forEach(x => { n[x.s.key] = (n[x.s.key] || 0) + (x.group ? x.items.length : 1); tone[x.s.key] = x.s.tone; });
-    const legend = c.steps.filter(k => n[k]).map(k => el('span', { class: 'kb-legend kb-legend--' + tone[k] }, STEP_LABEL[k] + ' ' + n[k]));
-    return el('section', { class: ['kb-col', c.slim ? 'kb-col--slim' : null], 'data-testid': 'board-col-' + c.key, 'aria-labelledby': 'kb-h-' + c.key },
+    const n = {}, size = list => list.reduce((t, x) => t + (x.group ? x.items.length : 1), 0);
+    items.forEach(x => { n[x.s.key] = (n[x.s.key] || 0) + (x.group ? x.items.length : 1); });
+    const chosen = boardPicks()[c.key];
+    const picked = (Array.isArray(chosen) ? chosen : []).filter(k => c.steps.indexOf(k) >= 0);
+    const shown = picked.length ? items.filter(x => picked.indexOf(x.s.key) >= 0) : items;
+    const keys = c.steps.filter(k => n[k] || picked.indexOf(k) >= 0);
+    const chip = (key, text, count, on) => el('button', { type: 'button', class: ['kb-chip', key ? 'kb-legend--' + STEP_TONE[key] : 'kb-chip--all', on ? 'is-on' : null], 'aria-pressed': on ? 'true' : 'false', 'data-testid': 'board-filter', 'data-step': key || 'all',
+      'aria-label': key ? text + ', ' + plural(count, 'order') + (on ? ', shown' : '') : 'All statuses in ' + c.title, on: { click: () => pickStep(c.key, key) } }, text, count != null ? el('span', { class: 'kb-chip__n' }, String(count)) : null);
+    // One status in the column is nothing to choose between: it stays a plain count.
+    const legend = keys.length > 1 || picked.length ? [chip(null, 'All', null, !picked.length)].concat(keys.map(k => chip(k, STEP_LABEL[k], n[k] || 0, picked.indexOf(k) >= 0)))
+      : keys.map(k => el('span', { class: 'kb-legend kb-legend--' + STEP_TONE[k] }, STEP_LABEL[k] + ' ' + n[k]));
+    return el('section', { class: ['kb-col', c.slim ? 'kb-col--slim' : null, picked.length ? 'is-filtered' : null], 'data-testid': 'board-col-' + c.key, 'aria-labelledby': 'kb-h-' + c.key },
       el('div', { class: 'kb-col__head' },
         el('h2', { class: 'kb-col__title', id: 'kb-h-' + c.key, title: c.long || null }, c.title, c.long ? el('span', { class: 'sr-only' }, ': ' + c.long) : null),
-        el('span', { class: 'kb-col__count', 'data-testid': 'board-count-' + c.key }, String(items.reduce((t, x) => t + (x.group ? x.items.length : 1), 0))),
-        legend.length && !c.slim ? el('div', { class: 'kb-col__legend' }, legend) : null),
-      el('div', { class: 'kb-col__body' }, items.length ? items.map(x => (x.group ? bulkCard(x, ctx) : c.slim ? miniCard(x.o, x.s) : boardCard(x.o, x.s, ctx))) : el('p', { class: 'kb-col__empty' }, 'Nothing here')));
+        el('span', { class: 'kb-col__count', 'data-testid': 'board-count-' + c.key }, picked.length ? size(shown) + ' of ' + size(items) : String(size(items))),
+        legend.length ? el('div', { class: 'kb-col__legend', role: keys.length > 1 || picked.length ? 'group' : null, 'aria-label': keys.length > 1 || picked.length ? 'Show in ' + c.title : null, 'data-testid': 'board-filters-' + c.key }, legend) : null),
+      el('div', { class: 'kb-col__body' }, shown.length ? shown.map(x => (x.group ? bulkCard(x, ctx) : c.slim ? miniCard(x.o, x.s) : boardCard(x.o, x.s, ctx)))
+        : el('p', { class: 'kb-col__empty' }, picked.length && items.length ? 'Nothing with ' + (picked.length > 1 ? 'these statuses' : 'this status') : 'Nothing here')));
   }
   function renderBoard(orders, ctx) {
     const host = state.slots.board;
@@ -2259,6 +2414,9 @@
     const was = active && host.contains(active) ? active.closest('[data-order-id]') : null;
     host.replaceChildren(el('div', { class: 'kb', 'data-testid': 'board' }, BOARD_COLS.map(c => boardColumn(c, cols[c.key], ctx))));
     if (was) { const back = host.querySelector('[data-order-id="' + was.dataset.orderId + '"] [data-testid="board-step"]') || host.querySelector('[data-order-id="' + was.dataset.orderId + '"] a'); if (back) { try { back.focus({ preventScroll: true }); } catch (e) { /* gone */ } } }
+    // A status filter just pressed keeps the keyboard on it.
+    const f = state.boardFocus; state.boardFocus = null;
+    if (f) { const chip = host.querySelector('[data-testid="board-col-' + f.col + '"] [data-testid="board-filter"][data-step="' + f.key + '"]') || host.querySelector('[data-testid="board-col-' + f.col + '"] [data-testid="board-filter"]'); if (chip) { try { chip.focus({ preventScroll: true }); } catch (e) { /* gone */ } } }
   }
 
   // ---- View registration ---------------------------------------------------------------------------------------------------

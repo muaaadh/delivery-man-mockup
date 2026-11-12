@@ -684,6 +684,65 @@
   // Shopping (round 4, 26/10/2026): the customer sends a list without a budget and our team calls to agree the items and their cost
   // before buying. q.itemCosts { main | <collection id>: MVR } records that cost on each shop (shop.budget: what we spend; the receipt
   // replaces it later), the shopping fee follows it, and q.delivery (or q.total, the whole price) sets the rest.
+  //
+  // The price as an item table (client, 12/11/2026 evening: "editable and add row style"): q.items { packages: { packageId: MVR },
+  // rows: [{ id, preset, description, qty, rate }] } is the whole table as the office left it. Each package's difference from its
+  // listed price goes into one confirmation (its split, which MDM.pricing.packageAmounts reads back into the package rows). rows are
+  // the other lines: one with an id is a row already on the order (changed when its figures differ, taken off when it is missing
+  // from the list), one without is new. Rows that come from Charges (a billed naalu or packing charge) are left as they are, and so
+  // is a row the table never showed (items.known lists the ones it did: a colleague may add a row while the table is open).
+  function setPriceItems(o, items, q) {
+    const P = MDM.pricing, by = q.by || 'admin', whole = v => Math.round(Number(v) || 0), notes = [];
+    const shown = P.packageAmounts(o);
+    let adjs = (o.fees.adjustments || []).slice();
+    if (Array.isArray(items.rows)) {
+      const rowIn = r => {
+        const preset = MDM.ADJUSTMENT_PRESETS.some(p => p.value === r.preset && p.value !== 'quote') ? r.preset : 'other';
+        const qty = Math.max(1, whole(r.qty) || 1), rate = whole(r.rate);
+        return { preset, description: String(r.description || '').trim(), qty, rate: preset === 'discount' && rate > 0 ? -rate : rate };
+      };
+      const fields = f => {
+        const listed = MDM.ADJUSTMENT_PRESETS.find(p => p.value === f.preset).label;
+        return { preset: f.preset, label: f.preset === 'other' ? (f.description || 'Other') : listed, description: f.preset === 'other' ? '' : f.description, qty: f.qty, rate: f.rate, amount: f.qty * f.rate };
+      };
+      const byId = {}; items.rows.forEach(r => { if (r && r.id) byId[r.id] = r; });
+      adjs = adjs.map(a => {
+        if (a.chargeId || shown.folded[a.id]) return a;
+        if (!byId[a.id]) { if (Array.isArray(items.known) && items.known.indexOf(a.id) < 0) return a; notes.push('removed ' + a.label + ' ' + fmt(a.amount)); return null; }
+        const was = P.rowForm(a), f = rowIn(byId[a.id]);
+        const same = was.preset === f.preset && was.description === f.description && was.qty === f.qty && was.rate === f.rate;
+        // An older confirmation the packages could not take was a row in the table: it stays that row, whatever the packages now cost.
+        const loose = a.preset === 'quote' || (a.confirm && a.preset !== 'vehicle');
+        if (same && !loose) return a;
+        const next = Object.assign({}, a, same ? { preset: was.preset } : fields(f), same ? null : { editedAt: now(), editedBy: by });
+        delete next.confirm; delete next.split;
+        if (!same) notes.push(next.amount === a.amount ? 'changed ' + next.label : next.label + ' ' + fmt(a.amount) + ' to ' + fmt(next.amount));
+        return next;
+      }).filter(Boolean);
+      items.rows.filter(r => r && !r.id).forEach(r => {
+        const f = rowIn(r); if (!f.rate) return;
+        const adj = Object.assign({ id: MDM.id('adj') }, fields(f), { at: now(), by, remarks: '' });
+        adjs.push(adj); notes.push('added ' + adj.label + ' ' + fmt(adj.amount));
+      });
+      const vehicle = adjs.some(a => a.preset === 'vehicle');
+      if (vehicle || o.vehicleCharged) o.vehicleCharged = vehicle;
+    }
+    const want = (o.packages || []).map((p, i) => { const v = (items.packages || {})[p.id]; return v == null || v === '' ? shown.amounts[i] : Math.max(0, whole(v)); });
+    if (want.some((v, i) => v !== shown.amounts[i])) {
+      const split = {}, moved = {}; let diff = 0;
+      o.packages.forEach((p, i) => {
+        const d = want[i] - whole(p.price && p.price.lineTotal);
+        if (d) { split[p.id] = d; diff += d; }
+        if (want[i] !== shown.amounts[i]) { const k = fmt(shown.amounts[i]) + ' to ' + fmt(want[i]); moved[k] = (moved[k] || 0) + 1; }
+      });
+      adjs = adjs.filter(a => !shown.folded[a.id]);
+      if (Object.keys(split).length) adjs.push({ id: MDM.id('adj'), preset: 'quote', label: 'Price confirmation', amount: diff, at: now(), by, remarks: q.remarks || '', confirm: true, split });
+      Object.keys(moved).forEach(k => notes.unshift((moved[k] > 1 ? moved[k] + ' packages ' : 'package ') + k + (moved[k] > 1 ? ' each' : '')));
+    }
+    o.fees.adjustments = adjs;
+    recalc(o);
+    return notes.join('; ');
+  }
   function confirmPrice(orderId, q) {
     const o = orderOrThrow(orderId);
     const before = o.totals.total;
@@ -691,14 +750,19 @@
       shopsOf(o).forEach(x => { const v = q.itemCosts[x.key]; if (v != null && v !== '') x.shop.budget = Math.max(0, Math.round(Number(v) || 0)); });
       recalc(o);
     }
-    const now0 = o.totals.total, shopping = (o.totals.budget || 0) + ((o.fees && o.fees.shopping) || 0);
-    const total = q.delivery != null && q.delivery !== '' ? Math.round(Number(q.delivery)) + shopping : q.total == null || q.total === '' ? now0 : Math.round(Number(q.total));
-    if (total !== now0) {
-      o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: MDM.id('adj'), preset: q.preset || 'quote', label: q.label || 'Price confirmation', amount: total - now0, at: now(), by: q.by || 'admin', remarks: q.remarks || '', confirm: true }]);
-      recalc(o);
+    o.fees = o.fees || { cargo: 0, airport: 0, shopping: 0, adjustments: [] };
+    let rowNotes = '';
+    if (q.items) rowNotes = setPriceItems(o, q.items, q);
+    else {
+      const now0 = o.totals.total, shopping = (o.totals.budget || 0) + ((o.fees && o.fees.shopping) || 0);
+      const total = q.delivery != null && q.delivery !== '' ? Math.round(Number(q.delivery)) + shopping : q.total == null || q.total === '' ? now0 : Math.round(Number(q.total));
+      if (total !== now0) {
+        o.fees.adjustments = (o.fees.adjustments || []).concat([{ id: MDM.id('adj'), preset: q.preset || 'quote', label: q.label || 'Price confirmation', amount: total - now0, at: now(), by: q.by || 'admin', remarks: q.remarks || '', confirm: true }]);
+        recalc(o);
+      }
     }
     const fromProof = MDM.priceToFinalise(o);
-    priceHistory(o, before, o.totals.total, 'Final price confirmed' + (fromProof ? ' from the proof of collection' : '') + (q.remarks ? ': ' + q.remarks : ''), q.by);
+    priceHistory(o, before, o.totals.total, 'Final price confirmed' + (fromProof ? ' from the proof of collection' : '') + (q.remarks ? ': ' + q.remarks : '') + (rowNotes ? ' (' + rowNotes + ')' : ''), q.by);
     o.pricing = Object.assign({}, o.pricing, { status: 'confirmed', confirmedAt: now(), confirmedBy: q.by || 'admin', remarks: q.remarks || '' });
     o.totals.quoteRequired = false;
     pushEvent(o, makeEvent('price_confirmed', 'Price confirmed: ' + fmt(o.totals.total) + (q.remarks ? ' (' + q.remarks + ')' : ''), q.by, 'public'));
@@ -1727,7 +1791,7 @@
       });
       if (o.fees && o.fees.cargo) lines.push({ kind: 'cargo', date: at, orderCode: o.code, recipient: '', description: 'Maldivian Cargo fee', packages: 0, rate: o.fees.cargo, amount: o.fees.cargo });
       if (o.fees && o.fees.airport) lines.push({ kind: 'airport', date: at, orderCode: o.code, recipient: '', description: 'Airport fee', packages: 0, rate: o.fees.airport, amount: o.fees.airport });
-      (o.fees && o.fees.adjustments || []).filter(a => !shown.folded[a.id]).forEach(a => lines.push({ kind: 'adjustment', preset: a.preset || null, date: at, orderCode: o.code, recipient: '', description: a.label, packages: 0, rate: a.amount, amount: a.amount }));
+      (o.fees && o.fees.adjustments || []).filter(a => !shown.folded[a.id]).forEach(a => lines.push({ kind: 'adjustment', preset: a.preset || null, date: at, orderCode: o.code, recipient: '', description: [a.label, a.description].filter(Boolean).join(': '), packages: 0, rate: a.amount, amount: a.amount }));
     });
     const subtotal = lines.reduce((n, l) => n + l.amount, 0);
     const gstPercent = Number(s.gstPercent) || 0;

@@ -27,7 +27,7 @@
       if (ch && (ch.void || !ch.billable)) return null;
       if (ch && ch.type === 'cargo') { const ref = String(ch.description || '').replace(/^maldivian cargo bill\s*/i, '').trim(); return Object.assign({}, f, { key: 'charge-cargo', reason: 'From the Maldivian Cargo bill' + (ref ? ', ' + ref : '') }); }
       if (ch) return Object.assign({}, f, { key: 'charge-' + ch.type, reason: [ch.type !== 'other' ? ch.description : '', CHARGE_STAGE[ch.stage]].filter(Boolean).join(', ') });
-      if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: a.remarks || '' });
+      if (a.preset === 'vehicle') return Object.assign({}, f, { key: 'vehicle', reason: f.reason || a.remarks || '' });
       return f;
     }).filter(Boolean);
   }
