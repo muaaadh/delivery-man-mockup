@@ -289,6 +289,15 @@
     return [count('box') ? plural(count('box'), 'box', 'boxes') : '', count('xl') ? plural(count('xl'), 'XL-size package') : ''].filter(Boolean).join(' and ');
   }
   const chargeTitle = c => c.type === 'other' ? (c.description || 'Other charge') : label(MDM.CHARGE_TYPES, c.type);
+  // A shop's receipts (client, 14/11/2026: more than one at a shop): 'receipt MVR 465', or 'receipts MVR 465 + MVR 190' once the
+  // office added another in the price table. stopShop finds the shop a shopping stop belongs to.
+  const moreReceipts = sh => ((sh && sh.extraReceipts) || []).filter(r => r && r.amount > 0);
+  const receiptsText = (first, sh) => (moreReceipts(sh).length ? 'receipts ' : 'receipt ') + [first].concat(moreReceipts(sh).map(r => r.amount)).map(v => money(v)).join(' + ');
+  function stopShop(o, s) {
+    if (!s.shop) return null;
+    const pkg = (o.packages || []).find(k => k.id === s.packageId), extra = s.collectionId ? (o.extraCollections || []).find(c => c.id === s.collectionId) : null;
+    return pkg && pkg.shop ? pkg.shop : extra && extra.shop ? extra.shop : null;
+  }
   // Runs `fn(dialogEl)` on the dialog MDM.ui.dialog just opened (it mounts synchronously), to link one field to another.
   function withDialog(promise, fn) {
     const dlg = Array.from(document.querySelectorAll('dialog[open]')).pop();
@@ -523,7 +532,7 @@
       el('div', { class: 'addr__meta' }, [MDM.geo.zoneLabel(c.zone), c.landmark].filter(Boolean).join(' · ')),
       shop ? (sh.phone ? el('div', { class: 'addr__meta' }, 'Shop phone ' + phone.format(sh.phone)) : null) : el('div', { class: 'addr__meta' }, person(c.contactName, c.contactPhone)),
       shop && sh.list ? el('div', { class: 'addr__note wrap-anywhere' }, 'To buy: ' + sh.list) : null,
-      shop ? el('div', { class: 'addr__meta mono' }, (sh.budget ? 'Items agreed ' + money(sh.budget) : 'Items not agreed yet') + (sh.receiptTotal > 0 ? ' · receipt ' + money(sh.receiptTotal) : '')) : null,
+      shop ? el('div', { class: 'addr__meta mono' }, (sh.budget ? 'Items agreed ' + money(sh.budget) : 'Items not agreed yet') + (sh.receiptTotal > 0 ? ' · ' + receiptsText(sh.receiptTotal, sh) : '')) : null,
       shop && sh.unavailable ? el('div', { class: 'addr__meta' }, 'If not available: ' + ({ call: 'call the customer', skip: 'skip it', closest: 'buy the closest match' }[sh.unavailable] || sh.unavailable)) : null,
       c.instructions ? el('div', { class: 'addr__note' }, c.instructions) : null);
   }
@@ -629,7 +638,7 @@
       const lines = [];
       if (o.service === 'shop' && pkg.shop) {
         if (pkg.shop.list) lines.push('List: ' + pkg.shop.list);
-        lines.push((pkg.shop.budget ? 'Items agreed ' + money(pkg.shop.budget) : 'Items not agreed yet') + ' · if unavailable: ' + ({ call: 'call the customer', skip: 'skip it', closest: 'buy the closest match' }[pkg.shop.unavailable] || pkg.shop.unavailable) + (pkg.shop.receiptTotal ? ' · receipt ' + money(pkg.shop.receiptTotal) : ''));
+        lines.push((pkg.shop.budget ? 'Items agreed ' + money(pkg.shop.budget) : 'Items not agreed yet') + ' · if unavailable: ' + ({ call: 'call the customer', skip: 'skip it', closest: 'buy the closest match' }[pkg.shop.unavailable] || pkg.shop.unavailable) + (pkg.shop.receiptTotal ? ' · ' + receiptsText(pkg.shop.receiptTotal, pkg.shop) : ''));
       } else if (pkg.dropoff && (o.packages || []).length > 1) lines.push('To ' + person(pkg.dropoff.recipient && pkg.dropoff.recipient.name, pkg.dropoff.recipient && pkg.dropoff.recipient.phone) + ' · ' + (pkg.dropoff.address || ''));
       if (pkg.tier) {
         // The store moves a re-categorised business package to the matching size category at the account's rate (§5.2), so the tier on
@@ -703,12 +712,14 @@
       if (s.type === 'pickup' && (s.packageIds || []).length) { const n = {}; (o.packages || []).forEach(p => { if (s.packageIds.indexOf(p.id) >= 0) n[p.size] = (n[p.size] || 0) + 1; }); meta.push(['bag', 'box', 'xl'].filter(k => n[k]).map(k => n[k] + ' × ' + MDM.pricing.sizeLabel(k)).join(', ')); }
       else if ((s.packageIds || []).length > 1) meta.push(plural(s.packageIds.length, 'package'));
       if (s.status === 'done' && s.type !== 'pickup') { const h = MDM.HANDED_TO.find(x => x.value === s.handedTo); const note = h && h.value !== 'recipient' ? h.label.toLowerCase() : ''; if (s.recipientName || note) meta.push((s.recipientName ? 'Received by ' + s.recipientName : '') + (note ? (s.recipientName ? ' (' + note + ')' : note.charAt(0).toUpperCase() + note.slice(1)) : '')); }
-      if (s.status === 'done' && s.receiptTotal != null) meta.push('Receipt ' + money(s.receiptTotal));
+      const more = s.status === 'done' && s.receiptTotal != null ? moreReceipts(stopShop(o, s)) : [];
+      if (s.status === 'done' && s.receiptTotal != null) meta.push((more.length ? 'Receipts ' : 'Receipt ') + [s.receiptTotal].concat(more.map(r => r.amount)).map(v => money(v)).join(' + '));
       if (s.status === 'failed') { const why = MDM.failReasonLabel(s); meta.push(why && s.remarks ? why + ': ' + s.remarks : why || s.remarks || 'Could not complete'); }
       else if (s.remarks) meta.push('Remark: ' + s.remarks);
       if (s.attempts > 0) meta.push('Attempt ' + (s.attempts + 1));
       const aside = s.status === 'done' ? fmtDate(s.at) : s.status === 'failed' ? 'Failed ' + fmtDate(s.failedAt) : s.status === 'arrived' ? 'Arrived ' + fmtDate(s.arrivedAt) : s.status === 'skipped' ? 'Skipped' : 'Pending';
-      const photos = [...(s.proofPhotoIds || [s.proofPhotoId]).map(id => thumbButton(ctx.fileById[id], 'proof of collection')), thumbButton(ctx.fileById[s.photoId], 'proof of delivery'), thumbButton(ctx.fileById[s.receiptPhotoId], 'shop receipt'), thumbButton(ctx.fileById[s.failPhotoId], 'photo from the failed attempt')].filter(Boolean);
+      const photos = [...(s.proofPhotoIds || [s.proofPhotoId]).map(id => thumbButton(ctx.fileById[id], 'proof of collection')), thumbButton(ctx.fileById[s.photoId], 'proof of delivery'), thumbButton(ctx.fileById[s.receiptPhotoId], 'shop receipt'),
+        ...more.map((r, k) => thumbButton(ctx.fileById[r.photoId], 'shop receipt ' + (k + 2) + (r.note ? ', ' + r.note : ''))), thumbButton(ctx.fileById[s.failPhotoId], 'photo from the failed attempt')].filter(Boolean);
       return el('div', { class: cls.filter(Boolean).join(' '), 'data-testid': 'drawer-stop', 'data-stop-id': s.id, 'data-status': s.status },
         el('div', { class: 'stop__marker' }, s.status === 'done' ? html(MDM.icon('check', 14)) : String(i + 1)),
         el('div', null, el('div', { class: 'stop__title' }, s.label + ' · ' + s.address), el('div', { class: 'stop__meta' }, meta.join(' · ')), photos.length ? el('div', { class: 'thumbs' }, photos) : null,
@@ -765,7 +776,7 @@
       vehicleBtn, smallBtn('Add adjustment', 'drawer-add-adjustment', () => addAdjustment(o))) : (vehicleBtn ? el('div', { class: 'row row--wrap' }, vehicleBtn) : null);
     return sec('Pricing', 'drawer-pricing', el('div', { class: 'stack-3' }, status, vehicleNote, summary, est, reasons, hist, actions));
   }
-  // ---- Charges on proof of collection / delivery (§6): naalu, packing and other charges, billed to the customer or not ----------
+  // ---- Charges on proof of collection / delivery (§6): naalu, packing and other charges, billed to the customer unless stopped ---
   function chargesSection(o, ctx) {
     const list = o.charges || [];
     const live = list.filter(c => !c.void);
@@ -784,8 +795,13 @@
       owed ? rowNode('To pay back to the driver', el('span', { class: 'mono', 'data-testid': 'drawer-charges-owed' }, money(owed))) : null,
       owed && MDM.admin.kit.payBack && MDM.admin.can('petty') ? el('div', { class: 'row row--wrap' }, payBackButtons(o, live)) : null,
       repaid ? row('Paid back to the driver', money(repaid), { mono: true }) : null) : null;
+    // Every charge is billed unless the office stops it (client, 14/11/2026). What was paid for an extra vehicle is the one that is
+    // not billed by itself: the customer pays the vehicle row of the price, so billing it too would charge the vehicle twice.
+    const vehicleRow = vehicleCharges(o).some(a => !a.chargeId);
     const items = list.slice().reverse().map(c => {
-      const kind = c.void ? badgeNode('neutral', 'Voided', { 'data-testid': 'drawer-charge-state' }) : c.billable ? badgeNode('ok', 'Billed to the customer', { 'data-testid': 'drawer-charge-state' }) : badgeNode('neutral', 'Not billed', { 'data-testid': 'drawer-charge-state' });
+      const covered = !c.void && !c.billable && c.type === 'vehicle' && vehicleRow;
+      const kind = c.void ? badgeNode('neutral', 'Voided', { 'data-testid': 'drawer-charge-state' }) : c.billable ? badgeNode('ok', 'Billed to the customer', { 'data-testid': 'drawer-charge-state' })
+        : covered ? badgeNode('info', 'In the extra vehicle charge', { 'data-testid': 'drawer-charge-state' }) : badgeNode('neutral', 'Not billed', { 'data-testid': 'drawer-charge-state' });
       const where = c.stage === 'collection' || c.stage === 'delivery' ? STAGE[c.stage] : STAGE.office;
       return el('div', { class: 'list__item charge' + (c.void ? ' is-void' : ''), 'data-testid': 'drawer-charge', 'data-charge-id': c.id, 'data-type': c.type, 'data-stage': c.stage, 'data-billable': c.billable ? 'true' : 'false', 'data-void': c.void ? 'true' : 'false' },
         el('div', { class: 'list__main' },
@@ -797,7 +813,7 @@
           c.photoId && ctx.fileById[c.photoId] ? el('div', { class: 'thumbs' }, thumbButton(ctx.fileById[c.photoId], c.type === 'cargo' ? 'Maldivian Cargo bill' : 'bill or receipt')) : null),
         el('div', { class: 'list__aside' }, el('span', { class: 'mono charge__amount' }, money(c.amount)), el('div', null, kind)),
         c.void ? null : el('div', { class: 'row row--wrap charge__actions' },
-          rowBtn(c.billable ? 'Stop billing the customer' : 'Bill to the customer', 'drawer-charge-bill', () => toggleChargeBilling(o, c), 'btn--secondary', { 'data-charge-id': c.id }),
+          covered ? null : rowBtn(c.billable ? 'Stop billing the customer' : 'Bill to the customer', 'drawer-charge-bill', () => toggleChargeBilling(o, c), 'btn--secondary', { 'data-charge-id': c.id }),
           rowBtn('Void', 'drawer-charge-void', () => voidCharge(o, c), 'btn--ghost', { 'data-charge-id': c.id })));
     });
     return sec('Charges', 'drawer-charges',
@@ -1115,11 +1131,16 @@
     const m = {
       pkgs: base.filter(r => r.kind === 'package').map(r => ({ ids: r.ids.slice(), label: r.label, sub: r.sub, rate: r.rate })),
       shops: MDM.orderShops(o).map(x => ({ key: x.key, name: MDM.shopName(x.shop), list: x.shop.list || '', receipt: x.shop.receiptTotal > 0 ? Math.round(x.shop.receiptTotal) : null, cost: x.shop.budget || '' })),
+      // More receipts at a shop (client, 14/11/2026): each its own row under the shop's first receipt; the shopping fee follows them.
+      receipts: [].concat(...MDM.orderShops(o).map(x => (x.shop.extraReceipts || []).map(r => ({ id: r.id, shop: x.key, amount: r.amount, note: r.note || '', photoId: r.photoId || null, file: null })))),
       fixed: base.filter(r => r.kind === 'goods' || (r.kind === 'fee' && r.key !== 'shopping') || (r.kind === 'row' && r.chargeId)),
       rows: base.filter(r => r.kind === 'row' && !r.chargeId).map(r => ({ id: r.id, preset: r.preset, description: r.description, qty: r.qty, rate: r.rate })),
     };
     // The rows this table shows: saving takes off only the ones removed here, never a row a colleague added meanwhile.
-    const known = m.rows.map(r => r.id);
+    const known = m.rows.map(r => r.id), knownReceipts = m.receipts.map(r => r.id);
+    const withReceipt = () => m.shops.filter(x => x.receipt != null);
+    const receiptsAt = x => m.receipts.filter(r => r.shop === x.key);
+    const shopCost = x => (x.receipt != null ? x.receipt : Math.max(0, Math.round(Number(x.cost) || 0))) + receiptsAt(x).reduce((n, r) => n + Math.max(0, Math.round(Number(r.amount) || 0)), 0);
     const num = c => { const t = trim(c.value); return t === '' || (c.validity && c.validity.badInput) ? NaN : Number(t); };
     const whole = c => { const v = num(c); return isNaN(v) ? 0 : Math.round(v); };
     const cell = (cls, ...kids) => el('div', { class: 'pedit__' + cls }, kids);
@@ -1159,6 +1180,28 @@
           cell('item', el('span', { class: 'pedit__name' }, 'Items at ' + x.name), el('span', { class: 'summary__sub' }, x.list ? 'To buy: ' + x.list : 'As agreed with the customer on the call')),
           cell('qty mono', el('span', { class: 'ptable__k' }, 'Qty '), '1'), cell('rate', cost), out, cell('x')) };
     }
+    // Another receipt at a shop: what it is for, its total and, when the office has it, its photo.
+    function receiptRow(r) {
+      const shops = withReceipt(), shop = m.shops.find(x => x.key === r.shop) || shops[0];
+      const where = shops.length > 1 ? el('select', { class: 'select select--sm', 'aria-label': 'Shop', 'data-testid': 'price-receipt-shop' }, shops.map(x => el('option', { value: x.key }, 'Receipt at ' + x.name)))
+        : el('span', { class: 'pedit__name' }, 'Receipt ' + (receiptsAt(shop).indexOf(r) + 2) + ' at ' + shop.name);
+      if (shops.length > 1) { where.value = shop.key; where.addEventListener('change', () => { r.shop = where.value; paint(); const made = live.find(x => x.r === r); if (made) made.first.focus(); }); }
+      const note = el('input', { class: 'input input--sm', type: 'text', placeholder: 'What it is for', 'aria-label': 'What this receipt is for', maxlength: 120, value: r.note || '', 'data-testid': 'price-receipt-note' });
+      const amount = numberInput(r.amount, 'Receipt total, MVR', 'price-receipt-amount', 1), out = amountCell();
+      note.addEventListener('input', () => { r.note = note.value; });
+      amount.addEventListener('input', () => { r.amount = amount.value; tally(); });
+      const file = el('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': 'Photo of the receipt', 'data-testid': 'price-receipt-file' });
+      const pick = el('button', { type: 'button', class: 'pedit__link', 'data-testid': 'price-receipt-photo', on: { click: () => file.click() } });
+      const said = () => { pick.textContent = r.file ? 'Photo: ' + r.file.name + ' (change)' : r.photoId ? 'Photo attached (replace)' : 'Add a photo of the receipt'; };
+      file.addEventListener('change', () => { if (file.files && file.files[0]) { r.file = file.files[0]; said(); } });
+      said();
+      const remove = el('button', { type: 'button', class: 'btn btn--ghost btn--icon btn--sm', 'aria-label': 'Remove this receipt', title: 'Remove this receipt', 'data-testid': 'price-row-remove',
+        on: { click: () => { m.receipts.splice(m.receipts.indexOf(r), 1); paint(); (receiptBtn || addBtn).focus(); } } }, html(MDM.icon('x', 16)));
+      return { out, r, first: shops.length > 1 ? where : note, amount: () => Math.max(0, whole(amount)),
+        check: () => (isNaN(num(amount)) || !(num(amount) > 0) ? [amount, 'Enter the total of each receipt, or remove the row'] : null),
+        node: el('div', { class: 'pedit__row pedit__row--receipt', 'data-testid': 'price-row', 'data-kind': 'receipt-extra', 'data-shop': shop.key, 'data-receipt-id': r.id || null },
+          cell('item', el('div', { class: 'pedit__pair' }, where, note), pick, file), cell('qty mono'), cell('rate', amount), out, cell('x', remove)) };
+    }
     function fixedRow(r, amount) {
       const out = amountCell();
       return { out, amount: amount || (() => r.amount), check: () => null, node: el('div', { class: 'pedit__row pedit__row--auto', 'data-testid': 'price-row', 'data-kind': r.chargeId ? 'charge' : r.kind },
@@ -1182,8 +1225,9 @@
         node: el('div', { class: 'pedit__row pedit__row--edit', 'data-testid': 'price-row', 'data-kind': 'row', 'data-row-id': r.id || null }, cell('item', type, text), cell('qty', qty), cell('rate', rate), out, cell('x', remove)) };
     }
     function paint() {
-      live = m.pkgs.map(pkgRow).concat(m.shops.map(shopRow));
-      if (m.shops.length) live.push(fixedRow({ kind: 'fee', label: 'Shopping fee ' + pct + '%', sub: 'of the items' }, () => m.shops.reduce((n, x) => n + Math.round((x.receipt != null ? x.receipt : Math.max(0, Math.round(Number(x.cost) || 0))) * pct / 100), 0)));
+      live = m.pkgs.map(pkgRow);
+      m.shops.forEach(x => { live.push(shopRow(x)); receiptsAt(x).forEach(r => live.push(receiptRow(r))); });
+      if (m.shops.length) live.push(fixedRow({ kind: 'fee', key: 'shopping', label: 'Shopping fee ' + pct + '%', sub: m.receipts.length ? 'of the receipts' : 'of the items' }, () => m.shops.reduce((n, x) => n + Math.round(shopCost(x) * pct / 100), 0)));
       live = live.concat(m.fixed.map(r => fixedRow(r)), m.rows.map(extraRow));
       list.replaceChildren(...live.map(r => r.node));
       vehicleBtn.hidden = !wantsVehicle || m.rows.some(r => r.preset === 'vehicle');
@@ -1191,6 +1235,12 @@
     }
     const addRow = r => { m.rows.push(r); paint(); const made = live[live.length - 1]; (r.preset ? made.node.querySelector('[data-testid="price-rate"]') : made.first).focus(); };
     const addBtn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'price-add-row', on: { click: () => addRow({ id: null, preset: '', description: '', qty: 1, rate: '' }) } }, html(MDM.icon('plus', 16)), 'Add row');
+    // A second receipt from the shop (client, 14/11/2026): its own row, counted as items bought, so the shopping fee follows it and
+    // nobody works the percentage out by hand. Offered once the shop's first receipt is in.
+    const receiptBtn = withReceipt().length ? el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'price-add-receipt', on: { click: () => {
+      const r = { id: null, shop: withReceipt()[0].key, amount: '', note: '', photoId: null, file: null };
+      m.receipts.push(r); paint(); live.find(x => x.r === r).first.focus();
+    } } }, html(MDM.icon('plus', 16)), 'Add receipt') : null;
     // An extra vehicle the customer asked for, or a package that needs one: one press adds the row at the rate card's vehicle rate.
     const wantsVehicle = !!o.extraVehicle || (o.packages || []).some(p => p.needsVehicle);
     const vehicleBtn = el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'price-add-vehicle', hidden: true, on: { click: () => addRow({ id: null, preset: 'vehicle', description: '', qty: 1, rate: vehicleRate() || '' }) } },
@@ -1203,13 +1253,14 @@
     const form = el('form', { method: 'dialog', class: 'dialog__form', novalidate: true },
       el('h2', { class: 'dialog__title', id: 'price-title' }, (finalise ? 'Finalise the price for ' : confirmed ? 'Change the price of ' : 'Confirm the price for ') + o.code),
       el('p', { class: 'dialog__message' }, 'Now ' + money(o.totals.total) + (confirmed ? '' : ', estimate ' + est) + '. ' + (finalise ? 'Set it from the collection photo. ' : '') + 'Type the rate of each row. "Add row" adds a vehicle, naalu or any other line.' +
+        (receiptBtn ? ' "Add receipt" adds another receipt from the shop; the ' + pct + '% shopping fee follows it.' : '') +
         (m.shops.some(x => x.receipt == null) ? ' Enter the items as agreed with the customer on the call; the ' + pct + '% shopping fee follows them.' : '') +
         (finalise && delivered && o.payment && o.payment.status === 'pending' ? ' The invoice goes out once you confirm.' : '') + correctionNote(o)),
       el('div', { class: 'dialog__fields' },
         el('div', { class: 'pedit' },
           el('div', { class: 'pedit__head', 'aria-hidden': 'true' }, ['Item', 'Qty', 'Rate (MVR)', 'Amount', ''].map(h => el('span', null, h))),
           list,
-          el('div', { class: 'pedit__foot' }, el('div', { class: 'row row--wrap' }, addBtn, vehicleBtn), el('div', { class: 'pedit__total' }, el('span', null, 'Total'), totalEl))),
+          el('div', { class: 'pedit__foot' }, el('div', { class: 'row row--wrap' }, addBtn, receiptBtn, vehicleBtn), el('div', { class: 'pedit__total' }, el('span', null, 'Total'), totalEl))),
         el('div', { class: 'field' }, el('label', { for: 'price-remarks' }, 'Remarks', el('span', { class: 'optional' }, ' (optional)')), remarks),
         ask ? el('div', { class: 'field' }, el('label', { class: 'checkbox', for: 'price-ask' }, ask, el('span', null, 'Ask the customer to pay now', el('span', { class: 'hint' }, 'Otherwise the invoice goes out after delivery')))) : null,
         formError),
@@ -1223,7 +1274,8 @@
         if (bad) { formError.textContent = bad[1]; formError.hidden = false; try { bad[0].focus({ preventScroll: false }); } catch (x) { bad[0].focus(); } return; }
         const packages = {}; m.pkgs.forEach(g => g.ids.forEach(id => { packages[id] = Math.round(Number(g.rate) || 0); }));
         const open = m.shops.filter(x => x.receipt == null);
-        result = { items: { packages, known, rows: m.rows.map(r => ({ id: r.id || null, preset: r.preset, description: trim(r.description), qty: Math.max(1, Math.round(Number(r.qty) || 1)), rate: Math.round(Number(r.rate) || 0) })) },
+        result = { items: Object.assign({ packages, known, rows: m.rows.map(r => ({ id: r.id || null, preset: r.preset, description: trim(r.description), qty: Math.max(1, Math.round(Number(r.qty) || 1)), rate: Math.round(Number(r.rate) || 0) })) },
+            m.shops.length ? { knownReceipts, receipts: m.receipts.map(r => ({ id: r.id || null, shop: r.shop, amount: Math.round(Number(r.amount) || 0), note: trim(r.note), photoId: r.photoId || null, file: r.file || null })) } : null),
           itemCosts: open.length ? open.reduce((x, s) => { x[s.key] = Math.max(0, Math.round(Number(s.cost) || 0)); return x; }, {}) : null,
           remarks: trim(remarks.value), requestPayment: !!(ask && ask.checked), total: tally() };
         dlg.close();
@@ -1248,6 +1300,12 @@
     const delivered = o.status === 'delivered';
     const v = await priceEditor(o);
     if (!v) return;
+    // A photo chosen for an added receipt is stored first; the price then carries its id.
+    if (v.items.receipts) {
+      const receipts = [];
+      for (const r of v.items.receipts) receipts.push({ id: r.id, shop: r.shop, amount: r.amount, note: r.note, photoId: r.file ? await storePhoto(r.file, o.id, 'receipt') : r.photoId });
+      v.items.receipts = receipts;
+    }
     const upd = await MDM.store.confirmPrice(o.id, { items: v.items, itemCosts: v.itemCosts, remarks: v.remarks, requestPayment: v.requestPayment, by: by() });
     toast('Price confirmed: ' + money(upd.totals.total) + (upd.payment.status === 'requested' ? (delivered ? ', invoice sent' : ', payment requested') : ''), 'ok');
   }
@@ -1404,11 +1462,15 @@
     const upd = await MDM.store.changeDeliveryMethod(o.id, delivery, { by: by(), remarks: v.remarks });
     toast('Delivery changed to ' + said(m) + (upd.totals.total !== before ? ', total now ' + money(upd.totals.total) : '') + (upd.driverId ? ', the driver is told' : ''), 'ok');
   }
-  // §6: charges recorded by the office. Packing is normally billed, naalu only when the rules say so; the checkbox follows the type until touched.
+  // §6: charges recorded by the office. Every charge is billed to the customer unless the box is cleared (client, 14/11/2026: "keep
+  // all charges billing to customer as default and option to stop billing"). Money paid to a vehicle is the exception while the price
+  // already has an extra vehicle charge, which is what the customer pays: the box follows the type until it is touched.
   async function addCharge(o) {
-    const naaluBilled = !!(((state.settings || {}).rules) || {}).naaluBillable;
+    const vehicleRow = sum(vehicleCharges(o).filter(a => !a.chargeId), a => a.amount);
+    const billedFor = type => !(type === 'vehicle' && vehicleRow > 0);
     const p = dialog({ title: 'Add a charge · ' + o.code, okLabel: 'Add charge',
-      message: 'Money paid out for this order. Billed charges are added to the customer\'s price.',
+      message: 'Money paid out for this order. It is added to the customer\'s price unless you untick "Bill to the customer".' +
+        (vehicleRow > 0 ? ' The price already has an extra vehicle charge of ' + money(vehicleRow) + ': what was paid for the vehicle is not billed again.' : ''),
       fields: [
         { name: 'type', label: 'Charge', type: 'segmented', required: true, options: MDM.CHARGE_TYPES, value: 'naalu' },
         { name: 'stage', label: 'When it was paid', type: 'segmented', required: true, options: STAGE_OPTIONS, value: 'delivery', hint: 'Cargo charges are paid on delivery',
@@ -1416,7 +1478,7 @@
         { name: 'amount', label: 'Amount (MVR)', type: 'number', required: true, min: 1, step: 1 },
         { name: 'description', label: 'Description', type: 'text', placeholder: 'Porter at North Harbour', hint: 'Required for an other charge', validate: (val, all) => all.type === 'other' && !val ? 'Describe the charge' : null },
         { name: 'paidBy', label: 'Paid by', type: 'segmented', required: true, options: PAID_BY, value: 'driver' },
-        { name: 'billable', label: 'Bill to the customer', type: 'checkbox', value: naaluBilled, hint: 'Adds the amount to the order price' },
+        { name: 'billable', label: 'Bill to the customer', type: 'checkbox', value: true, hint: 'Adds the amount to the order price' },
         { name: 'photo', label: 'Bill or receipt photo', type: 'file', accept: 'image/*' }] });
     const v = await withDialog(p, dlg => {
       const box = dlg.querySelector('[data-testid="dialog-billable"]');
@@ -1426,7 +1488,7 @@
       dlg.querySelector('[data-testid="dialog-type"]').addEventListener('change', e => {
         if (optional) optional.hidden = e.target.value === 'other';
         if (touched) return;
-        box.checked = e.target.value === 'packing' || e.target.value === 'cargo' ? true : e.target.value === 'naalu' ? naaluBilled : false;
+        box.checked = billedFor(e.target.value);
       });
     });
     if (!v) return;
@@ -1598,9 +1660,10 @@
     await MDM.store.setStop(o.id, s.id, { status: 'arrived', by: by() });
     toast('Arrived for collection', 'ok');
   }
-  // Naalu paid by the driver at a boat (§6.1), optional on both proofs; the store records it against the stage.
+  // Naalu paid by the driver at a boat (§6.1), optional on both proofs; the store records it against the stage and bills it to the
+  // customer like every charge (14/11/2026), until someone stops that under Charges.
   const naaluFields = (stage, o) => [
-    { name: 'naalu', label: 'Naalu paid at ' + stage + ' (MVR)', type: 'number', min: 0, step: 1, hint: methodOf(o) === 'boat' || stage === 'collection' ? 'Paid by the driver when ' + (stage === 'collection' ? 'collecting from' : 'handing it to') + ' a boat' : null },
+    { name: 'naalu', label: 'Naalu paid at ' + stage + ' (MVR)', type: 'number', min: 0, step: 1, hint: (methodOf(o) === 'boat' || stage === 'collection' ? 'Paid by the driver when ' + (stage === 'collection' ? 'collecting from' : 'handing it to') + ' a boat. ' : '') + 'Billed to the customer' },
     { name: 'naaluNote', label: 'Naalu note', type: 'text', placeholder: stage === 'collection' ? 'Porter at the cargo boat' : 'Porter at North Harbour' }];
   // Collected: proof of collection photo, the category of each package (no measurements, §2.2), naalu and remarks (§3 step 4, §13).
   async function collected(o) {

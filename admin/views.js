@@ -1393,7 +1393,8 @@
         field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, invoice sent automatically' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping: always upfront. Businesses: weekly invoice.' }),
         checkbox('upfrontOptional', rules.upfrontOptional !== false, 'Customers may pay upfront', 'Shows "Pay now" once the price is confirmed'),
         field('Express handling fee, MVR', numInput('expressFee', (s.rates || {}).express || 0), { hint: 'Suggested on express orders' }),
-        checkbox('naaluBillable', !!rules.naaluBillable, 'Charge naalu to the customer by default', 'When off, only the driver is reimbursed'),
+        // Every charge (naalu, vehicle, packing, Maldivian Cargo, other) is billed to the customer by default since 14/11/2026, and
+        // stopped per charge under the order's Charges: the "Charge naalu to the customer by default" box is gone with that.
         saveBtn('settings-save-payment', 'Save payment settings'));
       const notifyForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-notify-form', on: { submit: saveNotify, input: () => { dirty = true; } } },
         checkbox('notifEnabled', notif.enabled !== false, 'Send customer notifications', 'On every status, payment and cancellation'),
@@ -1468,7 +1469,7 @@
       const form = e.currentTarget;
       const r = MDM.ui.validate(form, { expressFee: v => /^\d+$/.test(v) ? null : 'Enter a whole number, 0 or more' });
       if (!r.ok) { MDM.ui.focusFirstInvalid(form); return; }
-      await saveSection({ rules: { paymentTiming: val(form, 'paymentTiming'), upfrontOptional: val(form, 'upfrontOptional'), naaluBillable: val(form, 'naaluBillable') }, rates: { express: Number(r.values.expressFee) } }, 'Payment settings saved');
+      await saveSection({ rules: { paymentTiming: val(form, 'paymentTiming'), upfrontOptional: val(form, 'upfrontOptional') }, rates: { express: Number(r.values.expressFee) } }, 'Payment settings saved');
     }
     async function saveNotify(e) {
       e.preventDefault();

@@ -189,6 +189,11 @@ body.page-admin .pedit__row--edit .pedit__item { flex-direction: row; gap: 6px; 
 body.page-admin .pedit__row--edit .pedit__item .select { flex: 0 0 200px; min-width: 0; width: auto; }
 body.page-admin .pedit__row--edit .pedit__item .input { flex: 1 1 120px; min-width: 0; }
 body.page-admin .pedit__name { font-weight: 500; }
+/* Another receipt from a shop (client, 14/11/2026): its name, or the shop to choose, beside what it is for; the photo link under them. */
+body.page-admin .pedit__pair { display: flex; align-items: center; gap: 8px; min-width: 0; }
+body.page-admin .pedit__pair .pedit__name { flex: 0 1 auto; min-width: 0; max-width: 55%; }
+body.page-admin .pedit__pair .select { flex: 0 1 220px; min-width: 0; width: auto; }
+body.page-admin .pedit__pair .input { flex: 1 1 120px; min-width: 0; }
 body.page-admin .pedit__num { width: 100%; padding: 0 8px; text-align: right; font-variant-numeric: tabular-nums; }
 body.page-admin .pedit__amount { padding-top: 0; }
 body.page-admin .pedit__link { align-self: flex-start; margin-top: 2px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
@@ -212,6 +217,9 @@ body.page-admin .dialog--price { width: min(860px, calc(100vw - 32px)); }
   body.page-admin .pedit__amount { grid-column: 3 / 5; }
   body.page-admin .pedit__row--edit .pedit__item { flex-direction: column; }
   body.page-admin .pedit__row--edit .pedit__item .select, body.page-admin .pedit__row--edit .pedit__item .input { flex: none; width: 100%; }
+  body.page-admin .pedit__pair { flex-direction: column; align-items: stretch; gap: 6px; }
+  body.page-admin .pedit__pair .pedit__name { max-width: none; }
+  body.page-admin .pedit__pair .select, body.page-admin .pedit__pair .input { flex: none; width: 100%; }
   body.page-admin .pedit__total { padding-right: 0; }
 }
 

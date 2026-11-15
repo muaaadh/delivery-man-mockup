@@ -104,7 +104,7 @@
     return (o.changes || []).map(c => { const m = /^package (.+) size$/.exec(c.field || ''); return m && c.from !== c.to ? { n: idx[m[1]], pkgId: m[1], from: c.from, to: c.to, at: c.at, by: c.by } : null; }).filter(Boolean);
   }
   // Fee rows the customer sees: airport, cargo and shopping fees, then price adjustments (extra vehicle, billable charges). A charge is on
-  // the price only while it is billable; a voided or non-billable charge (naalu the driver paid, by default) is never listed (§6).
+  // the price only while it is billable; a voided charge, or one the office stopped billing, is never listed (§6).
   function feeRows(o) {
     const adjs = {}, charges = o.charges || [];
     ((o.fees || {}).adjustments || []).forEach(a => { adjs[a.id] = a; });
@@ -818,7 +818,8 @@
         [p.description, p.price && p.price.businessRate && p.tier ? tierLabel(p.tier) + ' business rate' : null,
           firstFrom[p.id] && firstFrom[p.id] !== p.size ? 'changed from ' + MDM.pricing.sizeLabel(firstFrom[p.id]) + ' by our team' : null].filter(Boolean).join(' · '),
         p.price ? shown[i] : 0, { testid: 'track-package-line' })));
-      if (budget) lines.push(budgetLine(null));
+      // More than one receipt at a shop: the row says what it is made of ('2 receipts: MVR 465 + MVR 190').
+      if (budget) lines.push(budgetLine(MDM.pricing.receiptsNote(o) || null));
     } else {
       // The delivery part of the estimate is what is left once the budget and the fixed fees are taken out.
       const fixed = fees.reduce((n, f) => n + (Number(f.amount) || 0), 0) + budget;

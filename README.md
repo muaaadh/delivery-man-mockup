@@ -65,7 +65,7 @@ Shown to customers as ranges: Bag MVR 35 to 45 · Box MVR 45 to 60 · XL MVR 60+
 "across the bridge"). Shopping fee 10% · Maldivian Cargo fee MVR 20, charged once and only when that delivery method is chosen ·
 airport fee MVR 40. Business accounts are priced by size category (Small / Medium / Large, starting at MVR 25 / 35 / 60) and each
 business can have its own agreed rates (Kandu and Fonu are seeded with different ones). Naalu paid by drivers is reimbursed to
-them and not billed to the customer unless the office marks it billable. XL, extra vehicle and Villimalé jobs are "quote first".
+them and, like every charge, billed to the customer unless the office stops billing it (order → Charges). XL, extra vehicle and Villimalé jobs are "quote first".
 All of it is editable in Admin → Rates and labelled as an assumption to confirm with the client.
 
 ## Running locally

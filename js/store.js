@@ -216,7 +216,7 @@
   };
   // Extra collection points on one order (updates 17/10/2026): collect from an address or buy at a shop, all packed together and
   // delivered to the one delivery address. order.extraCollections = [{ id, kind: 'collect'|'shop', address, zone, landmark,
-  // contactName, contactPhone, instructions, shop: { name, phone, list, budget, unavailable, receiptTotal, receiptPhotoId } }]. Since round 4
+  // contactName, contactPhone, instructions, shop: { name, phone, list, budget, unavailable, receiptTotal, receiptPhotoId, extraReceipts } }]. Since round 4
   // (26/10/2026) shop.budget is the items' cost our team agrees with the customer on a call (confirmPrice), not a customer budget.
   MDM.EXTRA_COLLECTION_KINDS = [{ value: 'collect', label: 'Collect an item' }, { value: 'shop', label: 'Buy from a shop' }];
   MDM.MAX_EXTRA_COLLECTIONS = 4;
@@ -743,6 +743,36 @@
     recalc(o);
     return notes.join('; ');
   }
+  // More receipts at a shop (client, 14/11/2026: "additional shopping item receipt can add to the total?"). items.receipts
+  // [{ id, shop: 'main' | <collection id>, amount, note, photoId }] is every additional receipt as the price table left it: one with
+  // an id is already on the order (changed when it differs, taken off when it is missing and the table had shown it, which
+  // items.knownReceipts says), one without is new. Only a shop whose first receipt is in takes more. They are kept on the shop
+  // (shop.extraReceipts) and count as items bought, so the shopping fee follows them (MDM.pricing.recalc).
+  function setExtraReceipts(o, items, by) {
+    const whole = v => Math.round(Number(v) || 0), notes = [];
+    const known = Array.isArray(items.knownReceipts) ? items.knownReceipts : null;
+    shopsOf(o).forEach(x => {
+      const at = ' at ' + MDM.shopName(x.shop), mine = items.receipts.filter(r => r && (r.shop || 'main') === x.key);
+      const byId = {}; mine.forEach(r => { if (r.id) byId[r.id] = r; });
+      const next = (x.shop.extraReceipts || []).map(r => {
+        const w = byId[r.id];
+        if (!w) { if (known && known.indexOf(r.id) < 0) return r; notes.push('removed receipt ' + fmt(r.amount) + at); return null; }
+        const amount = whole(w.amount), note = String(w.note || '').trim(), photoId = w.photoId || r.photoId || null;
+        if (!(amount > 0)) { notes.push('removed receipt ' + fmt(r.amount) + at); return null; }
+        if (amount === r.amount && note === (r.note || '') && photoId === (r.photoId || null)) return r;
+        if (amount !== r.amount) notes.push('receipt' + at + ' ' + fmt(r.amount) + ' to ' + fmt(amount));
+        return Object.assign({}, r, { amount, note, photoId, editedAt: now(), editedBy: by });
+      }).filter(Boolean);
+      if (x.shop.receiptTotal > 0) mine.filter(r => !r.id).forEach(r => {
+        const amount = whole(r.amount); if (!(amount > 0)) return;
+        next.push({ id: MDM.id('rcp'), amount, note: String(r.note || '').trim(), photoId: r.photoId || null, at: now(), by });
+        notes.push('added receipt ' + fmt(amount) + at);
+      });
+      if (next.length || (x.shop.extraReceipts || []).length) x.shop.extraReceipts = next;
+    });
+    recalc(o);
+    return notes;
+  }
   function confirmPrice(orderId, q) {
     const o = orderOrThrow(orderId);
     const before = o.totals.total;
@@ -752,7 +782,8 @@
     }
     o.fees = o.fees || { cargo: 0, airport: 0, shopping: 0, adjustments: [] };
     let rowNotes = '';
-    if (q.items) rowNotes = setPriceItems(o, q.items, q);
+    const receiptNotes = q.items && Array.isArray(q.items.receipts) ? setExtraReceipts(o, q.items, q.by || 'admin') : [];
+    if (q.items) rowNotes = receiptNotes.concat(setPriceItems(o, q.items, q) || []).filter(Boolean).join('; ');
     else {
       const now0 = o.totals.total, shopping = (o.totals.budget || 0) + ((o.fees && o.fees.shopping) || 0);
       const total = q.delivery != null && q.delivery !== '' ? Math.round(Number(q.delivery)) + shopping : q.total == null || q.total === '' ? now0 : Math.round(Number(q.total));
@@ -772,6 +803,9 @@
     // A slip the customer already sent stays to verify: a corrected price does not ask them to pay again.
     else if ((q.requestPayment || o.payment.upfrontRequired) && ['received', 'paid', 'refunded'].indexOf(o.payment.status) < 0) requestPaymentOn(o, q.by, o.status !== 'delivered');
     else invoiceFollows(o, before, q.by);
+    // A shopping order paid upfront and already delivered (a receipt added afterwards): what is left to refund or to collect follows
+    // the new total, unless the office already settled a balance by hand.
+    if (o.status === 'delivered' && o.totals.total !== before && o.settlement && (o.settlement.status !== 'settled' || !o.settlement.balance)) settleShop(o);
     return save(o);
   }
 
@@ -1403,7 +1437,8 @@
       if (s.shop) {
         const pkg = o.packages.find(k => k.id === s.packageId), extra = s.collectionId ? (o.extraCollections || []).find(c => c.id === s.collectionId) : null;
         const sh = pkg && pkg.shop ? pkg.shop : extra && extra.shop ? extra.shop : null;
-        if (sh) { sh.receiptTotal = null; sh.receiptPhotoId = null; recalc(o); }
+        // The receipts added in the price table go with the one they were added to: the shopping is to be recorded again.
+        if (sh) { sh.receiptTotal = null; sh.receiptPhotoId = null; if (sh.extraReceipts) sh.extraReceipts = []; recalc(o); }
         s.receiptTotal = null; s.receiptPhotoId = null;
       }
       if (['collected', 'out_for_delivery', 'arrived'].indexOf(o.status) >= 0) next = 'on_the_way';
@@ -1833,7 +1868,10 @@
 
   // ---- Charges on proof of collection / delivery (web app updates §6) ---------------------------------------------------
   // A charge records money paid out for an order (naalu to boat porters, packing, anything else). Billable charges are also added to the
-  // customer's price as an adjustment, linked both ways so un-billing or voiding removes exactly that line.
+  // customer's price as an adjustment, linked both ways so un-billing or voiding removes exactly that line. Every charge is billed
+  // to the customer unless the one recording it says otherwise (client, 14/11/2026: "keep all charges billing to customer as default
+  // and option to stop billing to customer"; before, packing and Maldivian Cargo charges were and naalu followed a setting). What
+  // was paid for an extra vehicle is recorded unbilled by addVehicleCharge: the customer pays the vehicle row of the price.
   function chargeLabel(ch) { const t = (MDM.CHARGE_TYPES.find(x => x.value === ch.type) || {}).label || 'Charge'; return ch.type === 'other' && ch.description ? ch.description : t; }
   function billCharge(o, ch, by) {
     const before = o.totals.total;
@@ -1857,8 +1895,7 @@
     if (!(amount > 0)) throw new StoreError('validation', 'Enter an amount');
     if (type === 'other' && !String(c.description || '').trim()) throw new StoreError('validation', 'Describe the charge');
     const by = c.by || 'admin';
-    const rules = settings().rules || {};
-    const billable = c.billable != null ? !!c.billable : type === 'packing' || type === 'cargo' ? true : type === 'naalu' ? !!rules.naaluBillable : false;
+    const billable = c.billable != null ? !!c.billable : true;
     const ch = { id: MDM.id('chg'), type, stage: c.stage || 'office', amount, description: String(c.description || '').trim(), paidBy: c.paidBy || (by.indexOf('driver:') === 0 ? 'driver' : 'office'), billable: false, adjustmentId: null, photoId: c.photoId || null, by, at: now(), void: false };
     o.charges = (o.charges || []).concat([ch]);
     if (billable) billCharge(o, ch, by);

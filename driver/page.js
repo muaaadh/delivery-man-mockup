@@ -1110,7 +1110,7 @@
     // Naalu and remarks fold into one line (client, 01/11/2026): most collections have neither, and the button stays in reach.
     const fold = 'Naalu paid, or a remark';
     fields.push({ name: 'naalu', label: 'Naalu paid at collection (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
-      hint: 'Only if you paid a crew or porters.', fold });
+      hint: 'Only if you paid a crew or porters. Added to the customer\'s bill.', fold });
     fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Dhoni crew, North Harbour', fold });
     fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2, fold });
     const p = MDM.ui.dialog({ title: stop.shop ? 'Shopping done' : 'Collected', message: o.code + ' · ' + addressText(o, stop), fields,
@@ -1167,7 +1167,7 @@
       fields.push({ name: 'cargoNote', label: 'Cargo note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Bill MC-204517', fold });
     }
     fields.push({ name: 'naalu', label: 'Naalu paid at delivery (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
-      hint: 'Only if you paid a crew or porters.', fold });
+      hint: 'Only if you paid a crew or porters. Added to the customer\'s bill.', fold });
     fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Speedboat crew', fold });
     if (!isReturn) {
       fields.push({ name: 'packing', label: 'Packing charge (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('packing'), hint: 'Added to the customer\'s bill.', fold });

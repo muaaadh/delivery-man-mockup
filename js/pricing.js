@@ -48,7 +48,24 @@
   // Shops on a multi-collection order (extraCollections of kind 'shop'): the items' cost agreed on the confirmation call (shop.budget),
   // then the receipt, is bought for the customer and carries the shopping fee the same way a Shop & Deliver order does.
   function extraShops(list) { return (list || []).filter(c => c && c.kind === 'shop' && c.shop).map(c => c.shop); }
-  function shopBase(sh) { return sh.receiptTotal != null && sh.receiptTotal > 0 ? round(sh.receiptTotal) : round(sh.budget); }
+  // More than one receipt at a shop (client, 14/11/2026: "additional shopping item receipt can add to the total?"): the office adds
+  // the others in the price table (shop.extraReceipts: [{ id, amount, note, photoId }]). They count with the first receipt, so the
+  // shopping fee follows the whole of what was bought.
+  function moreReceipts(sh) { return ((sh && sh.extraReceipts) || []).filter(r => r && round(r.amount) > 0); }
+  function shopBase(sh) { return (sh.receiptTotal != null && sh.receiptTotal > 0 ? round(sh.receiptTotal) : round(sh.budget)) + moreReceipts(sh).reduce((n, r) => n + round(r.amount), 0); }
+  function orderShops(order) { return (order.service === 'shop' ? (order.packages || []).filter(p => p.shop).map(p => p.shop) : []).concat(extraShops(order.extraCollections)); }
+  // receiptsNote(order) → '2 receipts: MVR 465 + MVR 190' once a shop has more than one receipt ('' otherwise): what the one
+  // "Shopping receipt" row of the price is made of, wherever that row is listed.
+  function receiptsNote(order) {
+    const shops = orderShops(order || {});
+    if (!shops.some(sh => moreReceipts(sh).length)) return '';
+    const parts = []; let count = 0, agreed = false;
+    shops.forEach(sh => {
+      if (sh.receiptTotal > 0) { parts.push(format(sh.receiptTotal)); count++; } else if (round(sh.budget)) { parts.push(format(sh.budget) + ' agreed'); agreed = true; }
+      moreReceipts(sh).forEach(r => { parts.push(format(r.amount)); count++; });
+    });
+    return (agreed ? '' : count + ' receipts: ') + parts.join(' + ');
+  }
   function cargoLabel(count, rules) { return 'Maldivian Cargo fee' + (count > 1 && rules.cargoFeePer !== 'order' ? ' × ' + count : ''); }
   function shoppingLabel(rates) { const pct = Number(rates.shoppingPct) || 0; return 'Shopping fee' + (pct ? ' ' + pct + '%' : ''); }
 
@@ -80,7 +97,7 @@
       if (!businessRate && (island(pz) === 'villimale' || island(dz) === 'villimale')) reasons.add('villimale');
       if (!businessRate && (pz === 'other' || dz === 'other')) reasons.add('other_zone');
       if (service === 'shop' && pkg.shop) {
-        const base = pkg.shop.receiptTotal != null && pkg.shop.receiptTotal > 0 ? round(pkg.shop.receiptTotal) : round(pkg.shop.budget);
+        const base = shopBase(pkg.shop);
         budget += base;
         shopping += round(base * (Number(rates.shoppingPct) || 0) / 100);
       }
@@ -108,7 +125,7 @@
     const s = settings || {}; const rates = s.rates || {};
     order.fees = order.fees || { cargo: 0, airport: 0, shopping: 0, adjustments: [] };
     let budget = 0, shopping = 0;
-    const shops = (order.service === 'shop' ? (order.packages || []).filter(p => p.shop).map(p => p.shop) : []).concat(extraShops(order.extraCollections));
+    const shops = orderShops(order);
     if (order.service === 'shop' || shops.length) {
       shops.forEach(sh => { const base = shopBase(sh); budget += base; shopping += round(base * (Number(rates.shoppingPct) || 10) / 100); });
       order.fees.shopping = shopping;
@@ -134,7 +151,7 @@
     if (f.cargo) out.push({ key: 'cargo', label: cargoLabel(ctx.cargoCount, rules), amount: f.cargo, reason: ctx.cargoPlaces[0] || ctx.cargoReasons[0] || '' });
     if (f.shopping) {
       const receipt = (order.packages || []).some(p => p.shop && p.shop.receiptTotal > 0) || extraShops(order.extraCollections).some(sh => sh.receiptTotal > 0);
-      out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? 'of the receipt' : 'of the items' });
+      out.push({ key: 'shopping', label: shoppingLabel(rates), amount: f.shopping, reason: receipt ? (receiptsNote(order) ? 'of the receipts' : 'of the receipt') : 'of the items' });
     }
     const folded = packageAmounts(order).folded;
     // A row the office added in the price table carries what it is for (description) and, when there is more than one, how many at
@@ -204,10 +221,7 @@
     });
     rows.forEach(r => { if (r.kind === 'package') { r.sub = r.notes.join(', '); delete r.notes; } });
     const t = o.totals || {};
-    if (t.budget) {
-      const shops = (o.service === 'shop' ? (o.packages || []).filter(p => p.shop).map(p => p.shop) : []).concat(extraShops(o.extraCollections));
-      rows.push({ kind: 'items', label: shops.some(sh => sh.receiptTotal > 0) ? 'Receipt total' : 'Items agreed', sub: '', qty: 1, rate: round(t.budget), amount: round(t.budget) });
-    }
+    if (t.budget) rows.push({ kind: 'items', label: orderShops(o).some(sh => sh.receiptTotal > 0) ? 'Receipt total' : 'Items agreed', sub: receiptsNote(o), qty: 1, rate: round(t.budget), amount: round(t.budget) });
     const adjById = {}; ((o.fees || {}).adjustments || []).forEach(a => { adjById[a.id] = a; });
     feeLines(o, settings).forEach(f => {
       const a = f.id ? adjById[f.id] : null;
@@ -283,5 +297,5 @@
     if (size === 'xl') return 'MVR ' + round(cell.same) + '++';
     return round(cell.same) === round(cell.cross) ? format(cell.same) : 'MVR ' + round(cell.same) + '–' + round(cell.cross);
   }
-  MDM.pricing = { estimateRange, countsRange, businessTiers, businessRate, accountTiers, rangeLabel, quote, recalc, feeLines, packageAmounts, priceRows, rowForm, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
+  MDM.pricing = { estimateRange, countsRange, businessTiers, businessRate, accountTiers, rangeLabel, quote, recalc, feeLines, packageAmounts, priceRows, rowForm, receiptsNote, format, sizeLabel, lineLabel, reasonText, sizePriceLabel, isCross, SIZES };
 })(window.MDM);
