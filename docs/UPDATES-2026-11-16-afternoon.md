@@ -49,4 +49,10 @@ In the data: `store.createBatch({ …, schedule, separate: true, rows: [{ …, f
 fragile }] }] })`; `batch.schedule` is copied to each order of the bulk; the orders have `requestType: 'bulk'` and the source the
 office chose (`MDM.OFFICE_SOURCES`: phone, WhatsApp, Viber, walk-in), which is also what keeps their emails on.
 
-Tests: demo `tools/_scratch/r18-footer.js`, `tools/_scratch/r18-bulk.js`.
+On the live service: the emails of one call go out eight at a time, a second apart (a bulk order of up to 20 orders has one email
+per order, and the mail service takes 10 a second), and one refused for the rate is tried once more. A bulk order from before the
+page's 60 days still loads, with all its orders, while one of them is open (an advance bulk order booked far ahead, or one never
+collected). A bulk order sent through the business portal ignores the form's extras (timing, a card per order, extra vehicle).
+
+Tests: demo `tools/_scratch/r18-footer.js`, `tools/_scratch/r18-bulk.js`; live `tools/supabase/test-live.js` (section 18),
+`test-api.js`, `test-r10.js` (the mailer).
