@@ -117,6 +117,15 @@
     async function update(params) { id = params && params.id || null; account = queryOf(params).get('account') || ''; await render(); }
     function unmount() { if (ctx) ctx.dispose(); ctx = null; root = null; }
     function render() { return id ? renderDetail() : renderList(); }
+    // When a bulk order booked on the office's order form is wanted (its schedule, client 16/11/2026): an advance order's collection
+    // day and time ('Collect Tomorrow 10:00'), a delivery time ('Deliver by 15:00'). '' for a bulk order without either: the
+    // preferred collection time is its own row.
+    function whenText(b) {
+      const s = b.schedule;
+      if (!s) return '';
+      const t = MDM.orderTimes({ schedule: s, collection: b.collection, createdAt: b.createdAt });
+      return [s.type === 'advance' && t.collect ? 'Collect ' + MDM.ui.timeText(t.collect) : '', t.deliver && t.deliver.time ? 'Deliver by ' + MDM.ui.timeText(t.deliver) : ''].filter(Boolean).join(' · ');
+    }
     // Cash on delivery of a set of child orders: amount to collect, collected so far, orders carrying cash.
     function codTotals(kids) {
       const withCod = kids.filter(o => codOf(o) && o.status !== 'cancelled');
@@ -131,7 +140,7 @@
       const pointOf = b => { const a = accounts.find(x => x.id === b.accountId); return ((a && a.collectionPoints) || []).find(p => p.id === b.collectionPointId) || null; };
       const cols = [
         { label: 'Bulk order', primary: true, render: b => el('a', { href: '#/bulk/' + encodeURIComponent(b.id), class: 'mono', 'data-testid': 'bulk-row-link' }, b.code) },
-        { label: 'Business', render: b => { const p = pointOf(b); return el('span', null, b.name, el('span', { class: 'table__sub' }, [F.SOURCE[b.source] || b.source || '', p ? 'from ' + p.label : '', b.preferredTime ? 'at ' + b.preferredTime : ''].filter(Boolean).join(' · '))); } },
+        { label: 'Business', render: b => { const p = pointOf(b); return el('span', null, b.name, el('span', { class: 'table__sub' }, [b.serviceLevel === 'express' ? 'Express' : '', F.SOURCE[b.source] || b.source || '', p ? 'from ' + p.label : '', b.preferredTime && (b.schedule || {}).type !== 'advance' ? 'at ' + b.preferredTime : '', whenText(b)].filter(Boolean).join(' · '))); } },
         { label: 'Progress', render: b => progress(stats[b.id].delivered, stats[b.id].total, [stats[b.id].failed ? stats[b.id].failed + ' failed' : '', stats[b.id].cancelled ? stats[b.id].cancelled + ' cancelled' : ''].filter(Boolean).join(', ')) },
         { label: 'Status', primary: true, render: b => { const s = BATCH_STATUS[stats[b.id].status] || ['neutral', stats[b.id].status]; return badge(s[0], s[1], { 'data-status': stats[b.id].status }); } },
         { label: 'Amount', num: true, render: b => money(stats[b.id].amount) },
@@ -169,9 +178,11 @@
       return (await MDM.store.insert('files', { kind: 'proof_collection', orderId: null, name: file.name || 'collection.jpg', type: img.type, size: img.size, dataUrl: img.dataUrl, at: new Date().toISOString() })).id;
     }
     // The driver who collects the bulk order from the business (client, 02/11/2026): it shows on their phone with a checklist.
-    async function chooseCollector(b, drivers) {
+    async function chooseCollector(b, drivers, kids) {
       const options = drivers.slice().sort((a, x) => a.name.localeCompare(x.name)).map(d => ({ value: d.id, label: d.name + (d.status === 'offline' ? ' · offline' : '') }));
-      const v = await MDM.ui.dialog({ title: 'Collector for ' + b.code, message: 'They collect it from ' + b.name + ', tick each package off on their phone and take a photo. The packages then wait at the hub for a driver by zone.',
+      // An extra vehicle asked for when booking matters for who is sent to collect.
+      const vehicle = (kids || []).filter(o => o.status === 'confirmed' && o.extraVehicle).length;
+      const v = await MDM.ui.dialog({ title: 'Collector for ' + b.code, message: 'They collect it from ' + b.name + ', tick each package off on their phone and take a photo. The packages then wait at the hub for a driver by zone.' + (vehicle ? ' ' + plural(vehicle, 'order') + ' asked for an extra vehicle.' : ''),
         okLabel: 'Assign collector', fields: [{ name: 'driverId', label: 'Driver', type: 'select', options, value: b.collectorId || (options[0] || {}).value, required: true }] });
       if (!v) return;
       await MDM.store.assignCollector(b.id, v.driverId, { by: by() });
@@ -209,7 +220,7 @@
       const preferred = b.preferredTime || c.preferredTime || '';
       const actions = [
         el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?batch=' + encodeURIComponent(b.id)), target: '_blank', rel: 'noopener', 'data-testid': 'bulk-labels' }, icon('printer'), 'Print labels'),
-        kids.some(o => o.status === 'confirmed') ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-collector', on: { click: () => run(() => chooseCollector(b, drivers)) } }, b.collectorId ? 'Change collector' : 'Assign collector') : null,
+        kids.some(o => o.status === 'confirmed') ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-collector', on: { click: () => run(() => chooseCollector(b, drivers, kids)) } }, b.collectorId ? 'Change collector' : 'Assign collector') : null,
         b.status === 'confirmed' ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-collected', on: { click: () => run(() => markCollected(b, kids, settings)) } }, 'Mark collected') : null,
         kids.some(o => DONE.indexOf(o.status) < 0 && o.driverId) ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-change-driver', on: { click: () => run(() => changeDriver(kids, drivers)) } }, 'Change driver') : null,
         unassigned.length ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'bulk-assign-zone', on: { click: () => run(async () => { const r = await MDM.store.assignByZone(b.id, { by: by() }); toast(plural(r.assigned, 'package') + ' assigned by zone' + (r.unmatched ? ', ' + r.unmatched + ' with no zone driver' : ''), r.unmatched ? 'warn' : 'ok'); }) } }, 'Assign by zone') : null,
@@ -222,6 +233,7 @@
         rowNode('Collection point', el('span', { 'data-testid': 'bulk-point' }, point ? point.label : 'Address on the order', point && point.isDefault ? el('small', null, 'Default') : null)),
         rowNode('Collect from', el('span', null, c.address || '', el('small', null, [MDM.geo.zoneLabel(c.zone), c.landmark, [c.contactName, c.contactPhone ? phone.format(c.contactPhone) : ''].filter(Boolean).join(' · '), c.instructions].filter(Boolean).join(' · ')))),
         rowNode('Preferred time', el('span', { 'data-testid': 'bulk-preferred' }, preferred || 'Any time')),
+        whenText(b) ? rowNode('When', el('span', { 'data-testid': 'bulk-when' }, whenText(b))) : null,
         rowNode('Collector', el('span', { 'data-testid': 'bulk-collector' }, b.collectorId ? F.driverName(b.collectorId, drivers) : 'Not assigned', b.collectedBy ? el('small', null, 'Collected by ' + F.byLabel(b.collectedBy)) : null)),
         proof ? rowNode('Proof of collection', MDM.admin.kit.photoThumb(proof, b.code + ' proof of collection', { testid: 'bulk-proof' })) : null,
         rowNode('Service', F.LEVEL[b.serviceLevel] || 'Normal'),
@@ -253,7 +265,7 @@
             (o.details || {}).reference ? el('span', { class: 'table__sub mono' }, 'Ref ' + o.details.reference) : null) },
           { label: 'Delivery', render: o => { const d = deliveryText(o.delivery); const m = (o.delivery || {}).method || 'home'; return el('span', { class: 'bulk-delivery', 'data-method': m, 'data-testid': 'bulk-delivery' }, el('span', { class: m === 'home' ? 'table__address' : null }, d.title), el('span', { class: 'table__sub' }, d.sub + (d.changed ? ' · boat changed ' + (d.changed === 1 ? 'once' : d.changed + ' times') : '')),
             m === 'boat' && DONE.indexOf(o.status) < 0 ? el('span', { class: 'bulk-delivery__action' }, smallBtn('Change boat', 'bulk-row-boat', () => editBoat(o))) : null); } },
-          { label: 'Size and rate', render: o => { const pk = o.packages || [], p = pk[0] || {}; const rate = pk.reduce((n, x) => n + (x.tierRate != null ? x.tierRate : (x.price || {}).lineTotal || 0), 0); return el('span', { class: 'bulk-tier', 'data-testid': 'bulk-tier', 'data-tier': p.tier || '' }, el('span', { class: 'nowrap' }, sizesText(o, settings) + ' · ' + money(rate)), el('span', { class: 'table__sub' }, [pk.length > 1 ? null : MDM.pricing.sizeLabel(p.size)].concat(pk.map(x => x.description).filter((v, j, a) => v && a.indexOf(v) === j)).filter(Boolean).join(' · '))); } },
+          { label: 'Size and rate', render: o => { const pk = o.packages || [], p = pk[0] || {}; const rate = pk.reduce((n, x) => n + (x.tierRate != null ? x.tierRate : (x.price || {}).lineTotal || 0), 0); return el('span', { class: 'bulk-tier', 'data-testid': 'bulk-tier', 'data-tier': p.tier || '' }, el('span', { class: 'nowrap' }, sizesText(o, settings) + ' · ' + money(rate)), el('span', { class: 'table__sub' }, [pk.length > 1 ? null : MDM.pricing.sizeLabel(p.size)].concat(pk.map(x => x.description).filter((v, j, a) => v && a.indexOf(v) === j), [pk.some(x => x.fragile) ? 'Fragile' : null]).filter(Boolean).join(' · '))); } },
           { label: 'Cash', nowrap: true, render: o => { const cd = codOf(o); if (!cd) return el('span', { class: 'subtle' }, 'No cash'); return el('span', { 'data-testid': 'bulk-cod', 'data-cod': cd.status }, el('span', { class: 'mono' }, money(cd.amount)), el('span', { class: 'table__sub' }, codBadge(cd.status)), cd.collectedAmount != null && cd.collectedAmount !== cd.amount && cd.status !== 'not_collected' ? el('span', { class: 'table__sub' }, 'collected ' + money(cd.collectedAmount)) : null); } },
           { label: 'Status', primary: true, render: o => statusCell(o, drivers) },
           { label: 'Actions', actions: true, render: o => el('div', { class: 'table__actions-row bulk-actions' }, rowActions(o, drivers, zones)) },
@@ -284,6 +296,7 @@
       const cn = o.cancellation || {};
       const ret = cn.returnStatus === 'pending' ? badge('warn', 'Return pending', { 'data-return': 'pending' }) : cn.returnStatus === 'done' ? badge('ok', 'Returned to the business', { 'data-return': 'done' }) : null;
       return el('span', { class: 'bulk-status' }, html(MDM.badgeFor(o.status)),
+        o.extraVehicle && DONE.indexOf(o.status) < 0 ? el('span', { class: 'table__sub', 'data-testid': 'bulk-vehicle' }, badge('info', 'Extra vehicle', { 'data-flag': 'extra-vehicle' })) : null,
         cn.byBusiness ? el('span', { class: 'table__sub bulk-status__note', 'data-testid': 'bulk-cancel-note', title: cn.reason || null }, 'By the business' + (cn.reason ? ': ' + cn.reason : '')) : null,
         ret ? el('span', { class: 'table__sub', 'data-testid': 'bulk-return' }, ret) : null,
         el('span', { class: 'table__sub' }, F.driverName(o.driverId, drivers) || (o.status === 'cancelled' ? '' : 'Unassigned')));

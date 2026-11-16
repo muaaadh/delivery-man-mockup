@@ -1428,7 +1428,7 @@
             MDM.ui.rateRow('Packages', plural(p.st.packages, 'package') + (p.st.packages > p.st.total ? ' for ' + plural(p.st.total, 'receiver') : ''), { sub: parts.join(' · '), valueSub: Object.keys(counts).map(k => MDM.deliveryMethodLabel(k) + ' ' + counts[k]).join(' · ') }),
             MDM.ui.rateRow('Amount', money(p.st.amount), { mono: true, sub: live.length < kids.length ? 'Excluding cancelled orders' : null }),
             MDM.ui.rateRow('Cash on delivery', money(codTotal), { mono: true, sub: 'Excluding cancelled orders', valueSub: money(codPending) + ' still to collect' }),
-            MDM.ui.rateRow('Submitted', fmtDate(b.createdAt), { valueSub: b.source === 'excel' ? 'Excel import' : b.source === 'csv' ? 'Spreadsheet' : 'Typed in the portal' })),
+            MDM.ui.rateRow('Submitted', fmtDate(b.createdAt), { valueSub: b.source === 'excel' ? 'Excel import' : b.source === 'csv' ? 'Spreadsheet' : (MDM.OFFICE_SOURCES || []).indexOf(b.source) >= 0 ? 'Booked by our team' : 'Typed in the portal' })),
           p.bar,
           live.length ? el('div', { class: 'row row--wrap' }, el('a', { class: 'btn btn--secondary', href: labelsHref('batch=' + encodeURIComponent(b.id)), 'data-testid': 'biz-batch-print' }, html(MDM.icon('printer', 16)), 'Print ' + plural(labels, 'label')),
             live.length < kids.length ? el('span', { class: 'small muted' }, 'No labels for cancelled packages.') : null) : null)),

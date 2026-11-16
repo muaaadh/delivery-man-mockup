@@ -1404,7 +1404,7 @@
         // Emails to customers (client, 05/11/2026), each update on or off; not set is on (store.js notifyEmail).
         el('div', { class: 'stack-2', role: 'group', 'aria-labelledby': 'notif-emails-label', 'data-testid': 'notif-emails' }, el('span', { class: 'field__label', id: 'notif-emails-label' }, 'Emails to customers'),
           el('div', { class: 'checkbox-row' }, (MDM.EMAIL_UPDATES || []).map(u => { const c = checkbox('email_' + u.value, (notif.emails || {})[u.value] !== false, u.label); c.querySelector('input').setAttribute('data-testid', 'notif-email-' + u.value); return c; })),
-          el('p', { class: 'field__hint' }, 'Sent to the email on the order, from noreply@mrdeliveryman.com. Bulk packages send none.')),
+          el('p', { class: 'field__hint' }, 'Sent to the email on the order, from noreply@mrdeliveryman.com. A bulk order from the business portal or a spreadsheet sends none.')),
         saveBtn('settings-save-notify', 'Save notification settings'));
       const hrForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-hr-form', on: { submit: saveHr, input: () => { dirty = true; } } },
         el('div', { class: 'grid-2' }, field('Shift starts', input('shiftStart', hr.shiftStart || '08:00', { inputmode: 'numeric', placeholder: '08:00' })), field('Shift ends', input('shiftEnd', hr.shiftEnd || '17:00', { inputmode: 'numeric', placeholder: '17:00' }))),

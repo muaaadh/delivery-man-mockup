@@ -600,7 +600,11 @@
   }
   // Emails to the customer (client, 05/11/2026, in place of automatic WhatsApp messages): order confirmed, collected, delivered and
   // payment due, each one on or off in Settings (notifications.emails; all on when not set). Bulk packages send none (the business
-  // follows them in its portal). On the live service the row is 'queued' and the API sends it (api/store.js), then marks it sent.
+  // follows them in its portal), except orders our own team booked together on the office's order form (16/11/2026): they are a bulk
+  // order for the collection only, the business typed none of it, and it got these emails for the same orders before they were one.
+  // On the live service the row is 'queued' and the API sends it (api/store.js), then marks it sent.
+  MDM.OFFICE_SOURCES = ['phone', 'whatsapp', 'viber', 'walkin'];
+  const bulkSilent = order => !!order.batchId && MDM.OFFICE_SOURCES.indexOf(order.source) < 0;
   MDM.EMAIL_UPDATES = [
     { value: 'confirmed', label: 'Order confirmed', subject: 'is confirmed' }, { value: 'collected', label: 'Collected', subject: 'is collected' },
     { value: 'delivered', label: 'Delivered', subject: 'is delivered' }, { value: 'payment_due', label: 'Payment due', subject: ': payment due' },
@@ -614,7 +618,7 @@
   function notifyEmail(order, ev, cfg) {
     const kind = MDM.emailUpdateOf(order, ev);
     const email = String(((order.customer || {}).email) || '').trim().toLowerCase();
-    if (!kind || order.batchId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+    if (!kind || bulkSilent(order) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
     if ((cfg.channels || {}).email === false || (cfg.emails || {})[kind] === false) return;
     // One email per update: a price confirmed on an order that also turns confirmed is one "confirmed" email.
     if (readCol('notifications').some(n => n.orderId === order.id && n.channel === 'email' && n.update === kind && (kind !== 'payment_due' || n.at === ev.at))) return;
@@ -1492,6 +1496,10 @@
   // A batch is one collection from the business and one child order per receiver, so every delivery stays trackable on its own. A
   // receiver's packages are one order (client, 09/11/2026: a receiver with more bags had to be entered again as a new receiver): the
   // row's other packages (row.more), and the lines of a spreadsheet for the same receiver (sameReceiver).
+  // The office's own order form makes one too when it books two or more orders at once (client, 16/11/2026: "submitted as bulk from
+  // backend", to be assigned and collected like a bulk order of the business portal). Its rows carry what its cards carry: fragile on
+  // every package (row.fragile, more[].fragile), the extra vehicle (row.extraVehicle), and the timing of the form (b.schedule). Each
+  // of its cards stays an order of its own (b.separate), as the form lists and prices them: rows for the same receiver are not merged.
   const pkgCount = list => list.reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0);
   function sameReceiver(rows) {
     const out = [], seen = {};
@@ -1500,18 +1508,32 @@
     rows.filter(Boolean).forEach(r => {
       const k = key(r), g = seen[k];
       if (!g) { out.push(seen[k] = Object.assign({}, r, { more: Array.isArray(r.more) ? r.more.slice() : [] })); return; }
-      g.more.push({ tier: r.tier, description: r.description || '' }, ...(Array.isArray(r.more) ? r.more : []));
+      g.more.push({ tier: r.tier, description: r.description || '', fragile: !!r.fragile }, ...(Array.isArray(r.more) ? r.more : []));
+      if (r.extraVehicle) g.extraVehicle = true;
       g.cod = Math.round(Number(g.cod) || 0) + Math.round(Number(r.cod) || 0);
       ['reference', 'instructions'].forEach(f => { const v = String(r[f] || '').trim(); if (v && String(g[f] || '').split(', ').indexOf(v) < 0) g[f] = g[f] ? g[f] + ', ' + v : v; });
     });
     return out;
   }
+  // batchSchedule(s) → the timing a bulk order was booked with, or null for "as soon as possible": an advance collection date and time
+  // ({ type: 'advance', collectDate, collectTime, deliverDate, deliverTime }) or times for a day ({ type: 'asap', day, deliverTime }),
+  // as createOrder takes them. Every order of the bulk gets it, so MDM.orderTimes sorts and shows them like single orders.
+  function batchSchedule(s) {
+    if (!s || typeof s !== 'object') return null;
+    const out = { type: s.type === 'advance' ? 'advance' : 'asap' };
+    ['collectDate', 'deliverDate', 'day'].forEach(k => { if (/^\d{4}-\d{2}-\d{2}$/.test(String(s[k] || ''))) out[k] = s[k]; });
+    ['collectTime', 'deliverTime'].forEach(k => { if (/^\d{1,2}:\d{2}$/.test(String(s[k] || ''))) out[k] = s[k]; });
+    return out.type === 'advance' || Object.keys(out).length > 1 ? out : null;
+  }
   function createBatch(b) {
     const acc = readCol('business_accounts').find(a => a.id === b.accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
     const s = settings();
     const col = Object.assign({}, b.collection || {});
-    const batch = insert('batches', { accountId: acc.id, name: acc.name, serviceLevel: b.serviceLevel || 'normal', collection: col, collectionPointId: col.pointId || null, preferredTime: col.preferredTime || '', notes: b.notes || '', status: 'confirmed', orderIds: [], source: b.source || 'portal', by: b.by || ('business:' + acc.id) });
-    const ids = sameReceiver(b.rows || []).map((r, i) => batchOrder(acc, batch, r, i + 1, b.source || 'business', b.by || ('business:' + acc.id), s).id);
+    const schedule = batchSchedule(b.schedule);
+    const batch = insert('batches', Object.assign({ accountId: acc.id, name: acc.name, serviceLevel: b.serviceLevel || 'normal', collection: col, collectionPointId: col.pointId || null, preferredTime: col.preferredTime || '', notes: b.notes || '', status: 'confirmed', orderIds: [], source: b.source || 'portal', by: b.by || ('business:' + acc.id) },
+      schedule ? { schedule } : {}));
+    const rows = b.separate ? (b.rows || []).filter(Boolean) : sameReceiver(b.rows || []);
+    const ids = rows.map((r, i) => batchOrder(acc, batch, r, i + 1, b.source || 'business', b.by || ('business:' + acc.id), s).id);
     const saved = update('batches', batch.id, { orderIds: ids });
     let pkgs = 0;
     readCol('orders').filter(o => ids.indexOf(o.id) >= 0).forEach(o => {
@@ -1529,10 +1551,12 @@
     const tier = r.tier || (acc.tiers && acc.tiers[0]) || 'small';
     const delivery = { method: r.method || 'home', address: r.address || '', zone: r.zone || 'male', landmark: r.landmark || '', recipientName: r.name || '', recipientPhone: r.phone || '', instructions: r.instructions || '', meetAt: 'door', boat: r.boat || null, cargo: r.cargo || null, airport: r.airport || null };
     const end = deliveryEndpoint(delivery);
-    const list = [{ tier, size: r.size, description: r.description, fragile: r.fragile }].concat((Array.isArray(r.more) ? r.more : []).slice(0, 49).map(m => ({ tier: (m && m.tier) || tier, description: m && m.description })));
+    const list = [{ tier, size: r.size, description: r.description, fragile: r.fragile }].concat((Array.isArray(r.more) ? r.more : []).slice(0, 49).map(m => ({ tier: (m && m.tier) || tier, description: m && m.description, fragile: m && m.fragile })));
+    // The extra vehicle asked for when booking (as createOrder marks it): the boxes and XL packages need one; its charge is added
+    // when the office confirms it.
     const pkgs = list.map(p => {
       const size = p.size || (tiers.find(t => t.value === p.tier) || {}).size || 'bag';
-      return { id: MDM.id('pkg'), size, tier: p.tier, tierRate: MDM.pricing.businessRate(acc, p.tier, s), description: String(p.description || '').trim(), underOneFt: size === 'bag', fragile: !!p.fragile, needsVehicle: false,
+      return { id: MDM.id('pkg'), size, tier: p.tier, tierRate: MDM.pricing.businessRate(acc, p.tier, s), description: String(p.description || '').trim(), underOneFt: size === 'bag', fragile: !!p.fragile, needsVehicle: !!r.extraVehicle && (size === 'box' || size === 'xl'),
         pickup: { address: col.address, zone: col.zone, landmark: col.landmark || '', contact: { name: col.contactName, phone: col.contactPhone } }, dropoff: end };
     });
     const q = MDM.pricing.quote({ service: 'business', packages: pkgs }, s);
@@ -1544,7 +1568,8 @@
       collection: col, delivery: Object.assign({}, delivery, { address: delivery.method === 'home' ? delivery.address : (r.address || end.address), zone: end.zone }),
       details: { reference: r.reference || '' }, documents: [], packages: q.packages, fees: q.fees, totals: q.totals,
       estimate: { min: q.totals.total, max: q.totals.total }, pricing: { status: 'confirmed', confirmedAt: now(), confirmedBy: 'system', remarks: 'Business rate' + (rateNames.length > 1 ? 's' : '') + ': ' + rateNames.join(', '), history: [] },
-      schedule: { type: 'asap' }, payment: { method: 'invoice', status: 'invoiced' }, cod: cod > 0 ? { amount: cod, status: 'pending', collectedAmount: null } : null, charges: [],
+      schedule: batch.schedule ? Object.assign({}, batch.schedule) : { type: 'asap' }, payment: { method: 'invoice', status: 'invoiced' }, cod: cod > 0 ? { amount: cod, status: 'pending', collectedAmount: null } : null, charges: [],
+      extraVehicle: pkgs.some(p => p.needsVehicle),
       priority: { level: 'normal', status: 'none', requests: [] }, cancellation: { status: 'none' }, changes: [], statusHistory: [{ at: now(), from: null, to: 'confirmed', by }],
       status: 'confirmed', driverId: null, collectorId: batch.collectorId || null, route: { stops: [], polyline: [] }, events: [], notes: [], trackToken: trackSecret() });
   }

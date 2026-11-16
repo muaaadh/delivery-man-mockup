@@ -450,7 +450,7 @@
       group('cashBusiness', 'Cash to pay businesses', cashRows(q.cashToBusinesses, o => o.accountId, k => accountName(k), 'cod-business',
         k => cashPage ? '#/cash' : '#/orders?account=' + encodeURIComponent(k)));
       if (can('bulk')) group('bulk', 'Bulk orders to collect', batches.map(b => el('a', { class: 'list__item list__item--link', href: '#/bulk/' + encodeURIComponent(b.id), 'data-testid': 'attention-item', 'data-status': 'batch' },
-        el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, el('span', { class: 'mono' }, b.code), ' · ' + b.name), el('div', { class: 'list__meta' }, plural((b.orderIds || []).length, 'package') + ' · ' + (b.collection ? b.collection.address : ''))),
+        el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, el('span', { class: 'mono' }, b.code), ' · ' + b.name), el('div', { class: 'list__meta' }, plural(orders.filter(o => o.batchId === b.id && o.status !== 'cancelled').reduce((n, o) => n + Math.max(1, (o.packages || []).length), 0) || (b.orderIds || []).length, 'package') + ' · ' + (b.collection ? b.collection.address : ''))),
         el('div', { class: 'list__aside' }, MDM.ui.timeAgo(b.createdAt)))));
       if (can('team')) group('leave', 'Leave requests', leaves.map(l => el('a', { class: 'list__item list__item--link', href: '#/team?tab=leave', 'data-testid': 'attention-item', 'data-status': 'leave' },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, l.staffName || 'Employee'), el('div', { class: 'list__meta' }, ((MDM.LEAVE_TYPES.find(t => t.value === l.type) || {}).label || 'Leave') + ' · ' + plural(l.days, 'day') + ' from ' + fmtDay(l.from))),

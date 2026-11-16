@@ -987,22 +987,31 @@
 
   // ---- Drawer footer: the next step for this status ---------------------------------------------------------------------------
   function btn(text, testid, cls, fn, attrs) { return el('button', Object.assign({ type: 'button', class: 'btn ' + cls, 'data-testid': testid, on: { click: () => act(fn) } }, attrs || {}), text); }
+  // The payment step of a delivered order (client, 31/10/2026: "Request payment" beside Labels; 16/11/2026: a button for every payment
+  // stage): the price still to finalise, then Request payment, then Mark as paid, or Verify payment once a slip is in. The same steps as
+  // the board's cards (boardStep). An order on the weekly invoice is paid with its invoice, a paid one has nothing left to do.
+  function paymentStep(o) {
+    if (o.status !== 'delivered') return null;
+    if (MDM.priceToFinalise(o)) return { key: 'price', label: 'Finalise price', testid: 'drawer-footer-finalise', run: () => confirmPrice(o) };
+    const p = o.payment || {};
+    if (p.method === 'invoice' || p.status === 'invoiced') return null;
+    if (p.status === 'pending') return { key: 'request', label: 'Request payment', testid: 'drawer-footer-request-payment', run: () => requestPayment(o) };
+    if (p.status === 'requested') return { key: 'paid', label: 'Mark as paid', testid: 'drawer-footer-mark-paid', run: () => markPaid(o) };
+    if (p.status === 'received') return { key: 'verify', label: 'Verify payment', testid: 'drawer-footer-verify', run: () => verify(o) };
+    return null;
+  }
   function footerFor(o, ctx) {
     const st = o.status, items = [];
     const cancelBtn = () => btn('Cancel order', 'drawer-cancel', 'btn--ghost', () => cancelOrder(o));
     const labels = el('a', { class: 'btn btn--ghost', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), target: '_blank', rel: 'noopener', 'data-testid': 'drawer-labels' }, html(MDM.icon('printer', 16)), 'Labels');
     items.push(labels);
     if (open(o) || st === 'delivered') items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
-    // Delivered and not paid yet (client, 31/10/2026): the payment step sits here too, next to Labels, not only in the Payment section.
-    const pay = (o.payment || {}).status;
     // A step marked done by mistake (client, 01/11/2026): the last delivery, or the collection while nothing is delivered yet.
     const doneStops = ((o.route && o.route.stops) || []).filter(x => x.status === 'done' && x.type !== 'return');
     if (st === 'delivered' || (doneStops.some(x => x.type !== 'pickup') && st === 'out_for_delivery')) items.push(btn('Undo delivered', 'drawer-undo-delivered', 'btn--ghost', () => undoLast(o, 'Delivered')));
     else if (['collected', 'out_for_delivery'].indexOf(st) >= 0 && doneStops.length) items.push(btn('Undo collected', 'drawer-undo-collected', 'btn--ghost', () => undoLast(o, 'Collected')));
-    if (st === 'delivered' && o.payment && o.payment.method !== 'invoice') {
-      if (pay === 'pending') items.push(btn('Request payment', 'drawer-footer-request-payment', 'btn--primary', () => requestPayment(o)));
-      else if (pay === 'received') items.push(btn('Verify payment', 'drawer-footer-verify', 'btn--primary', () => verify(o)));
-    }
+    const payStep = paymentStep(o);
+    if (payStep) items.push(btn(payStep.label, payStep.testid, 'btn--primary', payStep.run, { 'data-pay-step': payStep.key }));
     // Cancel order (client, 12/11/2026 evening: customers cancel before anyone is assigned, and after): on every order that is not
     // collected yet, with or without a driver. Once collected it goes through "Report failed", which brings the package back.
     if (MDM.CANCELLABLE.indexOf(st) >= 0) items.push(cancelBtn());
@@ -2031,8 +2040,15 @@
       const first = c.node.querySelector('[data-key="name"]') || c.node.querySelector('input, select');
       if (first) { MDM.ui.scrollIntoViewIfNeeded(first); first.focus(); }
     } } }, html(MDM.icon('plus', 16)), 'Add another order');
-    const addOrderRow = el('div', { class: 'row row--wrap' }, addOrderBtn, el('span', { class: 'small muted' }, 'Another receiver, as an order of its own'));
+    // Two or more orders booked together are one bulk order (client, 16/11/2026: "submitted as bulk from backend", yet assigned one
+    // by one): one driver is named to collect them all and ticks each off, then they go out by zone, as with a bulk order from the
+    // business portal. A role without the Bulk orders page keeps booking separate orders, which it can assign itself.
+    const canBulk = MDM.admin.can('bulk');
+    const asBulk = () => canBulk && cards.length > 1;
+    const addOrderNote = el('span', { class: 'small muted', 'data-testid': 'neworder-add-note' });
+    const addOrderRow = el('div', { class: 'row row--wrap' }, addOrderBtn, addOrderNote);
     const estimate = el('div', { 'data-testid': 'neworder-estimate' });
+    const createLabel = el('span', null, 'Create order');
     let tried = false, cardSeq = 0;
     const ctx = () => ({ tiers: tierChoices() });
     const tierNow = c => tierChoices().find(t => t.value === c.row.tier) || null;
@@ -2081,6 +2097,8 @@
     function numberCards() {
       cards.forEach((c, i) => { c.title.textContent = cards.length > 1 ? 'Order ' + (i + 1) : 'Package'; c.remove.hidden = cards.length < 2; c.remove.setAttribute('aria-label', 'Remove order ' + (i + 1)); });
       addOrderBtn.hidden = cards.length >= MAX_ORDERS;
+      addOrderNote.textContent = asBulk() ? cards.length + ' orders, booked as one bulk order: one driver collects them together' : canBulk ? 'Another receiver. Two or more are one bulk order, collected together' : 'Another receiver, as an order of its own';
+      createLabel.textContent = asBulk() ? 'Create bulk order' : 'Create order';
     }
     function showErrors(c, only) {
       const errs = K.validateRow(c.row, ctx());
@@ -2175,7 +2193,7 @@
       sec('Package', 'neworder-packages-section', el('div', { class: 'stack-4' }, cardHost, addOrderRow)),
       sec('Price', 'neworder-estimate-section', estimate),
     ];
-    const createBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'neworder-create', on: { click: () => act(createOrder) } }, 'Create order');
+    const createBtn = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'neworder-create', on: { click: () => act(createOrder) } }, createLabel);
     const footer = [el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'neworder-cancel', on: { click: () => drawer.close() } }, 'Cancel'), createBtn];
     syncTiers(); syncPoints(); addCard(null);
     drawer.open({ title: 'New business order', body, footer, size: 'lg', onClose: () => onDrawerClosed('new') });
@@ -2194,6 +2212,13 @@
         extraVehicle: !!(c.evInput.checked && MDM.extraVehicleEligible(packages)),
         cod: K.parseMoney(c.row.cod) || 0,
         payment: { method: 'invoice', status: 'invoiced' }, status: 'confirmed' };
+    }
+    // The same card as a row of a bulk order (store.createBatch): its packages are the first one and row.more.
+    function batchRowFor(c) {
+      const d = deliveryFor(c), row = c.row, fragile = c.fragileIn.checked, description = trim(row.description);
+      return { name: d.recipientName, phone: d.recipientPhone, method: row.method, address: d.address, zone: d.zone || 'male', landmark: d.landmark, instructions: d.instructions, boat: d.boat, cargo: d.cargo, airport: d.airport,
+        tier: row.tier, description, fragile, reference: trim(row.reference), cod: K.parseMoney(row.cod) || 0, extraVehicle: !!(c.evInput.checked && MDM.extraVehicleEligible(packagesFor(c))),
+        more: Array.from({ length: qtyNow(c) - 1 }, () => ({ tier: row.tier, description, fragile })) };
     }
     async function createOrder() {
       if (!state.neworder) return;
@@ -2217,6 +2242,14 @@
         const collection = collectionFor();
         const schedule = n.level === 'advance' ? { type: 'advance', collectDate: dateIn.value, collectTime: timeIn.value, deliverDate: dateIn.value, deliverTime: '' }
           : Object.assign({ type: 'asap' }, deliverIn.value || cTime.value ? { day: dayKey(new Date()) } : {}, deliverIn.value ? { deliverTime: deliverIn.value } : {});
+        if (asBulk()) {
+          const b = await MDM.store.createBatch({ accountId: acc.id, collection, serviceLevel: n.level, schedule, notes: '', source: n.source, by: by(), separate: true, rows: cards.map(batchRowFor) });
+          const count = (b.orderIds || []).length;
+          toast('Bulk order ' + b.code + ' created with ' + plural(count, 'order') + '. Assign the driver who collects them', 'ok');
+          state.drawer.silent = true; drawer.close(); state.drawer.silent = false;
+          MDM.admin.navigate('#/bulk/' + encodeURIComponent(b.id));
+          return;
+        }
         for (const c of cards.slice()) {
           made.push(await MDM.store.createOrder(orderFor(c, acc, collection, schedule)));
           // A booked order leaves the form, so trying again after a failure does not book it twice.
@@ -2400,14 +2433,19 @@
   function bulkCard(g, ctx) {
     const b = ctx.batchById[g.batchId] || {}, c = b.collection || {}, first = g.items[0].o, slim = g.s.col === 'later';
     const open = () => { if (MDM.admin.can('bulk')) MDM.admin.navigate('#/bulk/' + encodeURIComponent(g.batchId)); else setFilters({ view: 'list', batch: g.batchId }); };
-    const t = MDM.nextTime(first);
-    const what = plural(g.items.length, 'package') + (slim ? ' at the office' : ' to collect');
+    const t = MDM.nextTime(first), later = g.s.key === 'advance';
+    // Express and an extra vehicle show on the bulk order's card as on a single order's (a bulk order of the office's form may carry both).
+    const express = (b.serviceLevel || first.serviceLevel) === 'express', vehicle = g.items.some(x => x.o.extraVehicle);
+    const tags = [express ? html(MDM.ui.badge('danger', 'Express', { 'data-flag': 'express' })) : null, vehicle ? html(MDM.ui.badge('info', 'Extra vehicle', { 'data-flag': 'extra-vehicle' })) : null].filter(Boolean);
+    const what = plural(g.items.reduce((n, x) => n + Math.max(1, (x.o.packages || []).length), 0), 'package') + (slim && !later ? ' at the office' : ' to collect');
     const go = el('button', { type: 'button', class: slim ? 'btn btn--secondary btn--sm kb-mini__go' : 'kb-step kb-step--' + g.s.tone, 'data-testid': 'board-step', 'data-step': g.s.key, 'data-next': 'bulk', 'aria-label': (b.code || 'Bulk order') + ': open the bulk order', on: { click: open } },
       slim ? ['Open bulk order', html(MDM.icon('chevron-right', 14))] : [el('span', { class: 'kb-step__state' }, g.s.label), el('span', { class: 'kb-step__next' }, 'Open bulk order', html(MDM.icon('chevron-right', 14)))]);
     return el('article', { class: ['kb-card', 'kb-card--bulk', slim ? 'kb-card--mini' : null, 'kb-card--' + g.s.tone], 'data-testid': 'board-bulk', 'data-batch-id': g.batchId, 'data-count': String(g.items.length),
       on: { click: e => { if (!e.target.closest('a, button')) open(); } } },
       el('div', { class: 'kb-card__head' }, el('span', { class: 'kb-card__code mono' }, b.code || 'Bulk order'), !slim && t ? dueBox(first) : null),
       el('div', { class: 'kb-card__name' }, b.name || ctx.accountName[first.accountId] || ''),
+      tags.length ? el('div', { class: 'kb-card__tags', 'data-testid': 'board-bulk-tags' }, tags) : null,
+      later && t ? el('div', { class: 'kb-mini__when', 'data-testid': 'board-mini-when' }, html(MDM.icon('calendar', 12)), MDM.ui.timeText(t)) : null,
       el('div', { class: slim ? 'kb-mini__state' : 'kb-sizes kb-sizes--flush', 'data-testid': 'board-bulk-count' }, (slim ? '' : 'Business bulk · ') + what),
       slim ? null : el('div', { class: 'kb-card__route' }, el('div', { class: 'kb-stop' }, html(MDM.icon('circle-dot', 14)), el('span', { class: 'kb-stop__text' }, [c.address, MDM.geo.zoneShort(c.zone || 'male')].filter(Boolean).join(' · ') || pickupText(first)))),
       slim ? go : el('div', { class: 'kb-card__foot' }, go));
@@ -2462,7 +2500,7 @@
     orders.forEach(o => {
       const s = boardStep(o, ctx);
       if (!s) return;
-      if (o.batchId && (s.key === 'confirmed' || s.key === 'office')) {
+      if (o.batchId && (s.key === 'confirmed' || s.key === 'office' || (s.key === 'advance' && o.status === 'confirmed'))) {
         const k = o.batchId + ':' + s.key;
         if (!bulks[k]) cols[s.col].push(bulks[k] = { group: true, batchId: o.batchId, s, o, items: [] });
         bulks[k].items.push({ o, s });

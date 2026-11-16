@@ -194,7 +194,8 @@
     const parts = [];
     if (s.type === 'advance') {
       if (s.collectDate) parts.push('Collect ' + MDM.ui.fmtDate(s.collectDate + 'T00:00', { time: false }) + (s.collectTime ? ' at ' + s.collectTime : ''));
-      if (s.deliverDate) parts.push('deliver by ' + (s.deliverDate !== s.collectDate ? MDM.ui.fmtDate(s.deliverDate + 'T00:00', { time: false }) + ' ' : '') + (s.deliverTime || ''));
+      // The office's form gives an advance order the collection's day as its delivery day and no time: nothing to say then.
+      if (s.deliverDate && (s.deliverTime || s.deliverDate !== s.collectDate)) parts.push(('deliver by ' + (s.deliverDate !== s.collectDate ? MDM.ui.fmtDate(s.deliverDate + 'T00:00', { time: false }) + ' ' : '') + (s.deliverTime || '')).trim());
     } else if (s.type === 'slot' && s.date) parts.push('Slot ' + MDM.ui.fmtDate(s.date + 'T00:00', { time: false }) + (s.window ? ' ' + s.window : ''));
     else {
       // A normal or express order's optional times (client, 12/11/2026) and a business's preferred collection time.
@@ -558,20 +559,30 @@
   }
   // A bulk order to collect from a business (client, 02/11/2026): where, who, and the packages to tick off with one photo.
   function collectionCard(c) {
-    const b = c.batch, col = b.collection || {};
+    const b = c.batch, col = b.collection || {}, first = c.kids[0];
+    // A bulk order booked with a time (the office's order form, 16/11/2026: an advance date, a delivery time, express) says so, as a
+    // single job does; one without keeps "at 10:00", the business's preferred time.
+    const when = b.schedule && first ? scheduleLine(first) : '';
+    // Fragile and the extra vehicle asked for when booking, as a single job shows them: whoever collects needs to know before going.
+    const fragile = o => (o.packages || []).some(p => p.fragile), needsVehicle = o => !!o.extraVehicle || (o.packages || []).some(p => p.needsVehicle);
+    const tags = [b.serviceLevel === 'express' ? el('span', { class: 'tag tag--hot', 'data-testid': 'driver-collection-priority' }, 'Express') : null, when && first ? dueTag(first) : null,
+      c.kids.some(needsVehicle) ? el('span', { class: 'tag', 'data-testid': 'driver-collection-vehicle' }, 'Needs a vehicle') : null,
+      c.kids.some(fragile) ? el('span', { class: 'tag', 'data-testid': 'driver-collection-fragile' }, 'Fragile') : null].filter(Boolean);
     return el('article', { class: 'card job job--collection', 'data-testid': 'driver-collection', 'data-batch-id': b.id, 'data-code': b.code },
       el('div', { class: 'card__body job__top' },
         el('div', { class: 'job__head' }, el('h3', { class: 'mono mono--code job__code' }, b.code), el('span', { class: 'job__count' }, plural(pkgCount(c.kids), 'package'))),
-        el('div', { class: 'job__meta' }, [b.name, b.preferredTime ? 'at ' + b.preferredTime : ''].filter(Boolean).join(' · '))),
+        tags.length ? el('div', { class: 'job__tags' }, tags) : null,
+        el('div', { class: 'job__meta', 'data-testid': 'driver-collection-meta' }, [b.name, when || (b.preferredTime ? 'at ' + b.preferredTime : '')].filter(Boolean).join(' · '))),
       el('div', { class: 'card__body job__body' },
         el('div', { class: 'job__stop' },
           el('div', { class: 'job__label' }, 'Collect from'),
           el('div', { class: 'job__address' }, col.address || b.name),
           col.zone || col.landmark ? el('div', { class: 'job__line' }, [col.zone ? MDM.geo.zoneLabel(col.zone) : '', col.landmark].filter(Boolean).join(' · ')) : null,
-          contactRow(col.contactName || '', col.contactPhone || '', 'driver-collection-contact')),
+          contactRow(col.contactName || '', col.contactPhone || '', 'driver-collection-contact'),
+          col.instructions ? el('div', { class: 'job__note', 'data-testid': 'driver-collection-note' }, icon('info', 14), el('span', null, col.instructions)) : null),
         el('div', { class: 'job__pkgs' },
           el('div', { class: 'job__label' }, 'Packages'),
-          el('ul', { class: 'job__pkglist' }, c.kids.map(o => el('li', null, el('span', { class: 'job__pkgsize' }, String(o.batchIndex || '')), el('span', { class: 'job__pkgtext' }, [(o.delivery || {}).recipientName, sizesText(o)].filter(Boolean).join(' · '))))))),
+          el('ul', { class: 'job__pkglist' }, c.kids.map(o => el('li', null, el('span', { class: 'job__pkgsize' }, String(o.batchIndex || '')), el('span', { class: 'job__pkgtext' }, [(o.delivery || {}).recipientName, sizesText(o), fragile(o) ? 'Fragile' : '', needsVehicle(o) ? 'Needs a vehicle' : ''].filter(Boolean).join(' · '))))))),
       el('div', { class: 'card__body job__actions' },
         el('button', { type: 'button', class: 'btn btn--primary btn--xl btn--block job__primary--go', 'data-testid': 'driver-collection-collect', on: { click: e => onBatchCollect(e.currentTarget, c) } }, 'Collect ' + plural(pkgCount(c.kids), 'package'))));
   }
