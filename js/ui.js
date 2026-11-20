@@ -90,12 +90,12 @@
   // store.js owns MDM.badgeFor (it loads earlier in the fixed order, SPEC §4.1); this only forwards to it.
   const statusBadge = (status, opts) => MDM.badgeFor(status, opts);
   // The two non-order status badges, so pages share one wording. Payment has an admin label and a customer one ({ customer: true }).
-  const INVOICE_STATUS = { draft: ['neutral', 'Draft'], sent: ['info', 'Sent'], paid: ['ok', 'Paid'] };
+  const INVOICE_STATUS = { draft: ['neutral', 'Draft'], sent: ['info', 'Sent'], received: ['warn', 'Slip received'], paid: ['ok', 'Paid'] };
   // Payment statuses (client requirements §4): pay after delivery by default, or upfront once the price is confirmed.
   const PAYMENT_STATUS = {
     pending: ['neutral', 'Payment pending', 'Pay after delivery'], requested: ['warn', 'Payment requested', 'Payment due'],
     received: ['info', 'Payment received', 'Checking your transfer'], paid: ['ok', 'Paid', 'Paid'], refunded: ['neutral', 'Refunded', 'Refunded'],
-    invoiced: ['neutral', 'Weekly invoice', 'On your weekly invoice'],
+    invoiced: ['neutral', 'On account', 'On your account'],
   };
   // invoiceBadge(status) / paymentBadge(status, { customer }) → HTML string like badge(); unknown values render neutral with the raw status.
   function invoiceBadge(status) { const s = INVOICE_STATUS[status] || ['neutral', String(status == null ? '' : status)]; return badge(s[0], s[1], { 'data-status': status }); }
@@ -630,6 +630,119 @@
     return { dataUrl, size: blob.size, type: 'image/jpeg', width: w, height: h, blob };
   }
 
+  // storeSlip(file, orderId?) → { fileId, name, type, size }: a transfer slip (a picture, made smaller, or a PDF) saved as a file.
+  async function storeSlip(file, orderId) {
+    if (!file) return null;
+    if ((file.size || 0) > 8 * 1024 * 1024) throw new Error('The slip is larger than 8 MB');
+    const pic = /^image\//.test(file.type || '');
+    const img = pic ? await imageToJpeg(file, { maxEdge: 1400, quality: 0.82 }) : null;
+    const doc = await MDM.store.insert('files', { kind: 'slip', orderId: orderId || null, name: file.name || 'slip', type: img ? img.type : file.type || 'application/pdf', size: img ? img.size : file.size || 0,
+      dataUrl: img ? img.dataUrl : await fileToDataUrl(file), at: new Date().toISOString() });
+    return { fileId: doc.id, name: doc.name, type: doc.type, size: doc.size };
+  }
+  MDM.storeSlip = storeSlip;
+  // slipDialog({ title, amount, reference, banks, message }) → { slip, payerName, reference, paidAmount } or null: where to transfer,
+  // then who paid, how much, the reference and the slip itself. For a business invoice (the business, or the office for it).
+  async function slipDialog(o) {
+    o = o || {};
+    const banks = (o.banks || []).map(b => b.name + ' ' + b.accountNo + (b.accountName ? ' (' + b.accountName + ')' : '')).join(' · ');
+    const v = await dialog({ title: o.title || 'Upload the transfer slip', okLabel: 'Send slip',
+      message: (o.message ? o.message + ' ' : '') + (banks ? 'Transfer to ' + banks + '.' : ''),
+      fields: [{ name: 'paidAmount', label: 'Amount transferred (MVR)', type: 'number', required: true, min: 1, step: 'any', value: o.amount != null ? String(o.amount) : '' },
+        { name: 'payerName', label: 'Account holder who paid', type: 'text', required: true, autocomplete: 'off' },
+        { name: 'reference', label: 'Transfer reference', type: 'text', required: false, value: o.reference || '', autocomplete: 'off' },
+        { name: 'slip', label: 'Transfer slip', type: 'file', accept: 'image/*,application/pdf', required: true, requiredMessage: 'Attach the transfer slip', hint: 'A photo, a screenshot or the PDF from your bank' }] });
+    if (!v) return null;
+    const slip = await storeSlip(v.slip);
+    return { slip, payerName: v.payerName, reference: v.reference || '', paidAmount: Number(v.paidAmount) };
+  }
+  MDM.slipDialog = slipDialog;
+
+  // ---- QR scanner (client, 20/11/2026: scan a label to go to its order, for drivers and the office) -----------------------------
+  // The label's QR code is its tracking link (labels/page.js). html5-qrcode (cdnjs, docs/CDN.md) reads it from the camera or from a
+  // photo; it is loaded when the scanner first opens.
+  const QR_LIB = { src: 'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js', integrity: 'sha512-r6rDA7W6ZeQhvl8S7yRVQUKVHdexq+GAlNkNNqVC7YyIV+NwqCTJe2hDWCiffTyRNOeGEzRRJ9ifvRm/HCzGYg==' };
+  let qrLib = null;
+  function loadQrLib() {
+    if (window.Html5Qrcode) return Promise.resolve(window.Html5Qrcode);
+    if (!qrLib) qrLib = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = QR_LIB.src; s.integrity = QR_LIB.integrity; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
+      s.onload = () => (window.Html5Qrcode ? resolve(window.Html5Qrcode) : reject(new Error('scanner')));
+      s.onerror = () => { qrLib = null; reject(new Error('scanner')); };
+      document.head.appendChild(s);
+    });
+    return qrLib;
+  }
+  // orderCodeFrom(text) → 'MDM-2063' (or 'BLK-1004') from a label's link ('…/track/?code=MDM-2063&t=…'), a code or a bare order
+  // number; '' when the text holds none.
+  function orderCodeFrom(text) {
+    const t = String(text || '').trim();
+    let m = /[?&]code=([^&#\s]+)/i.exec(t), c = t;
+    if (m) { try { c = decodeURIComponent(m[1]); } catch (e) { c = m[1]; } }
+    m = /(MDM|BLK)[-\s]?(\d{3,7})/i.exec(c);
+    if (m) return m[1].toUpperCase() + '-' + m[2];
+    return /^\d{3,7}$/.test(c) ? 'MDM-' + c : '';
+  }
+  // scanCode({ title, hint }) → Promise<'MDM-2063' | null>: the order number read with the camera from a label's QR code, from a photo
+  // of the label, or typed. null when the scanner is closed.
+  let scanSeq = 0;
+  function scanCode(opts) {
+    opts = opts || {};
+    return new Promise(resolve => {
+      const regionId = 'mdm-scan-' + (++scanSeq), inputId = regionId + '-code';
+      let reader = null, running = false, done = false;
+      const status = el('p', { class: 'scan__status small muted', role: 'status', 'data-testid': 'scan-status' }, 'Starting the camera…');
+      const region = el('div', { class: 'scan__view', id: regionId, 'data-testid': 'scan-view' });
+      // A photo is read in its own box, off the screen but with a size (the library draws the picture into it).
+      const photoBox = el('div', { class: 'scan__photo', id: regionId + '-photo', 'aria-hidden': 'true' });
+      const input = el('input', { class: 'input', id: inputId, type: 'text', inputmode: 'numeric', autocomplete: 'off', placeholder: 'For example 2063', 'data-testid': 'scan-code' });
+      const file = el('input', { class: 'sr-only', type: 'file', accept: 'image/*', capture: 'environment', tabindex: '-1', 'aria-label': 'Photo of the label', 'data-testid': 'scan-file' });
+      const err = el('div', { class: 'field__error', role: 'alert', hidden: true, 'data-testid': 'scan-error' });
+      const say = text => { err.hidden = !text; err.textContent = text || ''; };
+      const stop = () => { const r = reader; reader = null; if (!r) return Promise.resolve(); const was = running; running = false; return (was ? r.stop().catch(() => {}) : Promise.resolve()).then(() => { try { r.clear(); } catch (e) { /* nothing drawn */ } }); };
+      const finish = code => { if (done) return; done = true; stop().then(() => { if (dlg.open) dlg.close(); else dlg.remove(); resolve(code); }); };
+      const take = text => {
+        const code = orderCodeFrom(text);
+        if (!code) { say('That code is not one of our labels'); return; }
+        if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) { /* not allowed */ } }
+        finish(code);
+      };
+      const form = el('form', { class: 'row scan__form', novalidate: true, on: { submit: e => { e.preventDefault(); const code = orderCodeFrom(input.value); if (!code) { say('Enter the order number, for example 2063'); input.focus(); return; } finish(code); } } },
+        input, el('button', { type: 'submit', class: 'btn btn--secondary', 'data-testid': 'scan-go' }, 'Open'));
+      file.addEventListener('change', async () => {
+        const f = file.files && file.files[0]; file.value = '';
+        if (!f) return;
+        say('');
+        try {
+          const Lib = await loadQrLib();
+          const fromPhoto = new Lib(photoBox.id, { verbose: false });
+          let text = '';
+          try { text = await fromPhoto.scanFile(f, false); } finally { try { fromPhoto.clear(); } catch (e2) { /* nothing drawn */ } }
+          take(text);
+        } catch (e) { say('No QR code found in that photo. Try again, closer and in good light.'); }
+      });
+      const dlg = el('dialog', { class: 'dialog scan', 'aria-labelledby': regionId + '-title', 'data-testid': 'scan-dialog' },
+        el('div', { class: 'dialog__body stack-4' },
+          el('h2', { class: 'dialog__title', id: regionId + '-title' }, opts.title || 'Scan a label'),
+          region, photoBox, status,
+          el('div', { class: 'field' }, el('label', { for: inputId }, 'Or type the order number'), form, err),
+          el('div', null, el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'scan-photo', on: { click: () => file.click() } }, html(MDM.icon('camera', 16)), 'Use a photo of the label'), file)),
+        el('div', { class: 'dialog__footer' }, el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'scan-close', on: { click: () => finish(null) } }, 'Close')));
+      dlg.addEventListener('cancel', e => { e.preventDefault(); finish(null); });
+      dlg.addEventListener('close', () => { dlg.remove(); if (!done) { done = true; stop(); resolve(null); } });
+      document.body.appendChild(dlg);
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+      const noCamera = () => { region.hidden = true; status.textContent = 'The camera is not available here. Type the order number, or use a photo of the label.'; input.focus(); };
+      loadQrLib().then(Lib => {
+        if (done) return null;
+        reader = new Lib(regionId, { verbose: false });
+        return reader.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => { const side = Math.max(120, Math.floor(Math.min(w, h) * 0.75)); return { width: side, height: side }; } }, text => take(text), () => {})
+          .then(() => { if (done) { stop(); return; } running = true; status.textContent = opts.hint || 'Point the camera at the QR code on the label.'; });
+      }).catch(noCamera);
+    });
+  }
+
   // ---- Shared component markup (SPEC §2.5): pages never re-implement these ----
   // plural(n, word, pluralForm?) → '1 package' | '2 packages' | '2 deliveries' (consonant + y → ies; pass pluralForm for anything else)
   function plural(n, word, pluralForm) {
@@ -690,6 +803,6 @@
     badge, statusBadge, statusLabel, invoiceBadge, paymentBadge, paymentLabel, setError, validate, focusFirstInvalid, setLoading,
     plural, field, alert: alertBox, notice: alertBox, mapFallback, rateRow,
     phone, fmtDate, fmtTime, timeAgo, dayKey, timeText, monthKey, window: windowLabel, minutesToHHMM, parseHHMM, hours, closedWindowsFor,
-    money, formatBytes, copy, fileToDataUrl, imageToJpeg,
+    money, formatBytes, copy, fileToDataUrl, imageToJpeg, scanCode, orderCodeFrom,
   };
 })(window.MDM);

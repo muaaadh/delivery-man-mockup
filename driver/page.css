@@ -256,3 +256,5 @@ body.page-driver .driver-cash-warn { margin-top: 6px; font-size: 13px; line-heig
   body.page-driver .job__wa { padding: 0 10px; }
 }
 html[data-theme="dark"] body.page-driver .driver-duty .segmented { background: var(--card); }
+
+body.page-driver .driver-scan { margin-bottom: 16px; }

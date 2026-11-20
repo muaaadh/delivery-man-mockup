@@ -417,14 +417,22 @@
       const cod = order.cod && order.cod.amount > 0 && order.cod.status === 'pending' && ['delivered', 'returned'].indexOf(order.status) < 0 ? order.cod : null;
       // Only the order's owner sees who arranged it (privacy, 24/10/2026).
       const by = MDM.ownsOrder && !MDM.ownsOrder(order) ? 'This delivery is billed to the sender.' : 'This delivery is arranged by ' + name + ' and billed to them.';
-      const text = biz && biz.accountId && biz.accountId === order.accountId ? 'No payment needed now. This order goes on your weekly business invoice.'
+      const own = !!(biz && biz.accountId && biz.accountId === order.accountId);
+      // Once our team has finalised the charges of a delivery the business may pay it here, like any order (client, 20/11/2026:
+      // "they can pay after each delivery"); the form, the slip check and the paid notice below are the same.
+      const payable = own && ['requested', 'received', 'paid'].indexOf(pay.status) >= 0;
+      const text = own ? 'Nothing to pay yet. The amount shows here once we finalise the charges after the delivery; it is then due on the next 14th or 28th.'
         : 'Nothing to pay online. ' + by + (cod ? ' Pay the driver ' + MDM.pricing.format(cod.amount) + ' in cash when the package arrives.' : '');
-      show(el('div', { 'data-testid': 'checkout-business' }, notice('info', 'info', text, trackAction(order))), '');
-      return;
+      if (!payable) {
+        show(el('div', { 'data-testid': 'checkout-business' }, notice('info', 'info', text, trackAction(order))), '');
+        return;
+      }
     }
     if (pay.status === 'paid') { show(el('div', { class: 'stack-4', 'data-testid': 'checkout-paid' }, notice('ok', 'check-circle', 'Paid, thank you. Verified ' + MDM.ui.fmtDate(pay.verifiedAt) + '.', invoiceLink(order)), orderSection(order, settings)), ''); return; }
-    if (pay.status === 'pending' && !(order.pricing && order.pricing.status === 'confirmed')) {
-      show(notice('info', 'info', "We're confirming your price. We'll message you " + channelOf(order.customer) + ' when you can pay.', trackAction(order)), '');
+    // Nothing is paid before our team asks for it (client, 20/11/2026: a customer paid before the naalu was entered): after delivery
+    // once the charges are complete, or upfront when we request it (shopping, as soon as its price is confirmed).
+    if (pay.status === 'pending') {
+      show(el('div', { 'data-testid': 'checkout-not-yet' }, notice('info', 'info', (order.pricing && order.pricing.status === 'confirmed' ? 'Nothing to pay yet. We send the final amount once your order is delivered and its charges are complete.' : "We're confirming your price.") + " We'll message you " + channelOf(order.customer) + ' when you can pay.', trackAction(order))), '');
       return;
     }
     if (pay.status === 'received' || state.linkSent) {

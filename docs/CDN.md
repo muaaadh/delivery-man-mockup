@@ -29,6 +29,14 @@ QR codes on shipping labels (`labels/` only), qrcode-generator 1.4.4 from cdnjs;
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1" crossorigin="anonymous"></script>
 ```
 
+Scanning a label's QR code (the driver's "Scan a label", the office's "Scan" on Orders, since 20/11/2026), html5-qrcode 2.3.8 from
+cdnjs. `js/ui.js` (`MDM.ui.scanCode`) injects the tag when the scanner first opens, so no page pays for it otherwise; it exposes
+`window.Html5Qrcode`. Without it, or without a camera, the dialog still takes the order number typed in:
+
+```html
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" integrity="sha512-r6rDA7W6ZeQhvl8S7yRVQUKVHdexq+GAlNkNNqVC7YyIV+NwqCTJe2hDWCiffTyRNOeGEzRRJ9ifvRm/HCzGYg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+```
+
 Excel import and the downloadable template (business bulk orders, `business/` only), SheetJS 0.18.5 from cdnjs. Load it only when
 the Excel step opens (inject the tag on demand) so the portal stays light; it exposes `window.XLSX`:
 

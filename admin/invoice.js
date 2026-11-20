@@ -12,7 +12,16 @@
   const fmtDate = (iso, o) => MDM.ui.fmtDate(iso, Object.assign({ dateOnly: true, year: true }, o || {}));
   // 'in the week 19–25 Oct 2026', or 'in October 2026' for an invoice from the monthly days.
   const during = inv => (inv.period ? 'in the week ' : 'in ') + MDM.periodLabel(inv);
-  const STATUS = { draft: { label: 'Draft', kind: 'neutral' }, sent: { label: 'Sent', kind: 'info' }, paid: { label: 'Paid', kind: 'ok' } };
+  const STATUS = { draft: { label: 'Draft', kind: 'neutral' }, sent: { label: 'Sent', kind: 'info' }, received: { label: 'Slip received', kind: 'warn' }, paid: { label: 'Paid', kind: 'ok' } };
+  // Who is looking (20/11/2026: the business uploads its transfer slip here, and so can the office for it): the business account
+  // signed in on this browser when it is the invoice's own, or an office sign-in.
+  function viewerOf(inv) {
+    const read = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+    const biz = read('mdm:business'), s = read('mdm:session');
+    if (biz && biz.accountId && biz.accountId === inv.accountId) return { can: true, by: 'business:' + biz.accountId };
+    if (s && (MDM.OFFICE_ROLES || ['admin', 'operator', 'office', 'cs']).indexOf(s.role || 'admin') >= 0) return { can: true, office: true, by: !s.role || s.role === 'admin' ? 'admin' : 'operator:' + (s.staffId || s.user) };
+    return { can: false };
+  }
   // Line kinds: a package, the Maldivian Cargo fee (once per cargo order), the airport fee, or another charge (price adjustments, packing,
   // naalu billed, extra vehicle). createInvoice stamps l.kind ('package' | 'cargo' | 'airport' | 'adjustment'); invoices issued before
   // that carry no kind, so they fall back to the package count and the fee description.
@@ -56,7 +65,7 @@
       rateRow(inv.period ? 'Week' : 'Period', el('span', { 'data-testid': 'invoice-period' }, MDM.periodLabel(inv))),
       rateRow('Issued', fmtDate(inv.issuedAt)),
       rateRow('Due', inv.status === 'paid' ? 'Paid ' + fmtDate(inv.paidAt) : fmtDate(inv.dueAt)),
-      rateRow('Status', html(MDM.ui.badge((STATUS[inv.status] || STATUS.draft).kind, (STATUS[inv.status] || STATUS.draft).label, { 'data-status': inv.status, 'data-testid': 'invoice-status' }))));
+      rateRow('Status', html(MDM.ui.badge((STATUS[MDM.invoiceState(inv)] || STATUS.draft).kind, (STATUS[MDM.invoiceState(inv)] || STATUS.draft).label, { 'data-status': MDM.invoiceState(inv), 'data-testid': 'invoice-status' }))));
     const billTo = el('div', { class: 'rate-table', 'data-testid': 'invoice-bill-to' });
     if (account) {
       billTo.append(...[
@@ -68,6 +77,8 @@
         account.email ? rateRow('Email', account.email) : null].filter(Boolean));
     } else billTo.append(rateRow('Business', 'Account no longer on file'));
 
+    const viewer = viewerOf(inv), paid = inv.payment || {}, state = MDM.invoiceState(inv);
+    const slipFile = viewer.office && paid.slip && paid.slip.fileId ? await MDM.store.get('files', paid.slip.fileId) : null;
     const lines = inv.lines || [];
     // The agreed size category of a package line: stamped on the line (l.tier, l.size) since the 11/10/2026 update; for older invoices it is
     // read from the order it came from (one package per bulk order; else matched by description and recipient).
@@ -84,7 +95,7 @@
       return el('tr', { 'data-testid': 'invoice-line', 'data-kind': kind, class: kind === 'package' ? null : 'invoice-line--fee' },
         el('td', { 'data-label': 'Date' }, MDM.ui.fmtDate(l.date, { dateOnly: true })),
         el('td', { 'data-label': 'Order', class: 'mono' }, l.orderCode || ''),
-        el('td', { 'data-label': 'Details' }, kind === 'package' ? el('span', null, l.recipient || l.description || '', l.recipient && l.description ? el('span', { class: 'table__sub' }, l.description) : null)
+        el('td', { 'data-label': 'Details' }, kind === 'package' ? el('span', null, l.recipient || l.description || '', l.recipient && l.description ? el('span', { class: 'table__sub' }, l.description) : null, l.returned ? el('span', { class: 'table__sub', 'data-testid': 'invoice-line-returned' }, 'Returned to you, charged once') : null)
           : el('span', null, l.description || 'Charge', el('span', { class: 'table__sub' }, kind === 'cargo' ? 'Delivered through Maldivian Cargo' : kind === 'airport' ? 'Airport delivery' : 'Added to this order'))),
         el('td', { 'data-label': 'Packages', class: 'num mono' }, kind === 'package' ? String(l.packages || 1) : KIND_LABEL[kind]),
         el('td', { 'data-label': 'Rate', class: 'num mono' + (kind === 'package' ? '' : ' invoice-cell--empty') }, kind === 'package' ? el('span', null, money(l.rate), tier ? el('span', { class: 'table__sub', 'data-testid': 'invoice-line-tier' }, tier) : null) : ''),
@@ -111,9 +122,16 @@
       banks.map(b => rateRow(b.name, el('span', null, el('span', { class: 'mono' }, b.accountNo), el('small', null, b.accountName)), { mono: false })));
     const payBlock = el('section', { 'aria-labelledby': 'inv-pay' },
       el('div', { class: 'section-head' }, el('h2', { id: 'inv-pay' }, 'Pay by bank transfer'),
-        el('p', { class: 'section-head__desc' }, inv.status === 'paid' ? 'Received with thanks' + (inv.reference ? ', reference ' + inv.reference : '') + '.' : 'Due by ' + fmtDate(inv.dueAt) + '. Use the invoice number as the transfer reference.')),
+        el('p', { class: 'section-head__desc' }, inv.status === 'paid' ? 'Received with thanks' + (inv.reference ? ', reference ' + inv.reference : '') + '.' : 'Due by ' + fmtDate(inv.dueAt) + '. Use the invoice number as the transfer reference, then upload the slip below.')),
       bankTable,
-      el('p', { class: 'invoice-reference' }, 'Reference: ', el('span', { class: 'mono', 'data-testid': 'invoice-reference' }, inv.number)));
+      el('p', { class: 'invoice-reference' }, 'Reference: ', el('span', { class: 'mono', 'data-testid': 'invoice-reference' }, inv.number)),
+      // The transfer slip (20/11/2026): uploaded here by the business, or by the office for it; we check it, then the invoice is paid.
+      inv.status === 'paid' ? null : el('div', { class: 'stack-3 no-print', 'data-testid': 'invoice-pay' },
+        state === 'received' ? MDM.ui.notice('info', 'Transfer slip received' + (paid.submittedAt ? ' ' + fmtDate(paid.submittedAt, { dateOnly: false }) : '') + '. We check it against our account, then mark this invoice paid.', { testid: 'invoice-slip-received' }) : null,
+        state !== 'received' && paid.rejectReason ? MDM.ui.notice('danger', paid.rejectReason + '. Upload the slip again.', { title: 'We could not match the transfer', testid: 'invoice-slip-rejected' }) : null,
+        slipFile && slipFile.dataUrl ? el('p', null, el('a', { href: slipFile.dataUrl, target: '_blank', rel: 'noopener', 'data-testid': 'invoice-slip-open' }, 'Open the transfer slip')) : null,
+        state === 'received' ? null : viewer.can ? el('div', null, el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'invoice-upload-slip', on: { click: () => uploadSlip(inv, banks, viewer) } }, 'Upload transfer slip'))
+          : el('p', { class: 'small muted' }, el('a', { href: MDM.href('login/?as=business&next=' + encodeURIComponent('admin/invoice.html?id=' + inv.id)), 'data-testid': 'invoice-signin' }, 'Sign in to your business account'), ' to upload the transfer slip.')));
     const codBlock = codSummary(orders, inv);
 
     slot.replaceChildren(head,
@@ -127,6 +145,15 @@
           el('div', { class: 'stack-6' }, table, summary)),
         codBlock,
         payBlock));
+  }
+
+  async function uploadSlip(inv, banks, viewer) {
+    try {
+      const v = await MDM.slipDialog({ title: 'Transfer slip for ' + inv.number, amount: inv.total, reference: inv.number, banks, message: money(inv.total) + ' for ' + MDM.periodLabel(inv) + '.' });
+      if (!v) return;
+      await MDM.store.submitInvoicePayment(inv.id, Object.assign({ by: viewer.by }, v));
+      MDM.ui.toast('Slip sent. We check it and mark the invoice paid.', 'ok');
+    } catch (e) { MDM.ui.toast((e && e.message) || 'We could not send the slip', 'danger'); }
   }
 
   // Cash on delivery for the invoice's week (or month) (§5.6): cash our drivers collected from the business's customers. Orders count

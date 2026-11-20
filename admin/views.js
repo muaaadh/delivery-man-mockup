@@ -20,7 +20,7 @@
   const VEHICLES = { bike: 'Bike', car: 'Car', pickup: 'Pickup' };
   const DRIVER_STATUS = { online: { label: 'Online', kind: 'ok' }, on_route: { label: 'On route', kind: 'info' }, offline: { label: 'Offline', kind: 'neutral' } };
   const REQUEST_STATUS = { pending: { label: 'Pending', kind: 'warn' }, approved: { label: 'Approved', kind: 'ok' }, declined: { label: 'Declined', kind: 'danger' } };
-  const INVOICE_STATUS = { draft: { label: 'Draft', kind: 'neutral' }, sent: { label: 'Sent', kind: 'info' }, paid: { label: 'Paid', kind: 'ok' } };
+  const INVOICE_STATUS = { draft: { label: 'Draft', kind: 'neutral' }, sent: { label: 'Sent', kind: 'info' }, received: { label: 'Slip received', kind: 'warn' }, paid: { label: 'Paid', kind: 'ok' } };
   const VOLUMES = { '1-10': '1 to 10 a week', '11-30': '11 to 30 a week', '31-100': '31 to 100 a week', '100+': 'More than 100 a week' };
   const WINDOWS = {}; (MDM.PICKUP_WINDOWS || []).forEach(w => { WINDOWS[w.value] = w.label; });
   const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -233,11 +233,14 @@
       const cb = el('input', { type: 'checkbox', id: id + '-on', checked: !!opts.picked(t), 'data-testid': 'tier-check-' + t.value });
       const rate = el('input', { class: 'input', type: 'number', inputmode: 'numeric', min: '1', step: '1', id: id + '-rate', value: opts.rate(t) == null ? '' : String(opts.rate(t)), 'data-testid': 'tier-rate-' + t.value, disabled: !cb.checked });
       cb.addEventListener('change', () => { rate.disabled = !cb.checked; MDM.ui.setError(rate.closest('.field'), null); if (cb.checked) rate.focus(); });
+      // What the size means for this business, in the office's words (client, 20/11/2026): only where the caller keeps one (opts.note).
+      const note = opts.note ? el('input', { class: 'input', type: 'text', maxlength: '160', id: id + '-note', value: opts.note(t) || '', placeholder: 'For example: mailer bags up to A4', 'data-testid': 'tier-note-' + t.value }) : null;
       const wrap = el('div', { class: 'tier-row', 'data-tier': t.value },
         // Just the name: package sizes differ per business, so no Bag/Box or size description here (24/10/2026).
         el('label', { class: 'checkbox', for: cb.id }, cb, el('span', null, t.label)),
-        el('div', { class: 'field tier-row__rate' }, el('label', { for: rate.id }, 'Rate per package, MVR'), rate));
-      return { t, cb, rate, wrap };
+        el('div', { class: 'field tier-row__rate' }, el('label', { for: rate.id }, 'Rate per package, MVR'), rate),
+        note ? el('div', { class: 'field tier-row__note' }, el('label', { for: note.id }, 'Description', el('span', { class: 'optional' }, ' (optional)')), note) : null);
+      return { t, cb, rate, note, wrap };
     });
     const error = el('div', { class: 'field__error', role: 'alert', hidden: true, 'data-testid': 'tier-error' });
     function read() {
@@ -255,13 +258,19 @@
       if (!Object.keys(out).length) { error.textContent = 'Pick at least one package size and agree its rate'; error.hidden = false; (rows[0] && rows[0].cb).focus(); return null; }
       return out;
     }
-    return { el: el('div', { class: 'tier-editor', 'data-testid': 'tier-editor' }, rows.map(r => r.wrap), error), read };
+    // readNotes() → { tier: description } of the sizes kept.
+    const readNotes = () => { const out = {}; rows.forEach(r => { if (r.cb.checked && r.note && r.note.value.trim()) out[r.t.value] = r.note.value.trim(); }); return out; };
+    return { el: el('div', { class: 'tier-editor', 'data-testid': 'tier-editor' }, rows.map(r => r.wrap), error), read, readNotes };
   }
   MDM.admin.kit = Object.assign(MDM.admin.kit || {}, { formDialog, loadFiles, photoThumb, showPhoto, tierEditor, tierName, ratesText });
 
   // Delivered business orders of one account in a billing week (the same rule createInvoice uses: the delivered event's local day).
   function periodOrders(orders, accountId, period) {
     return orders.filter(o => o.accountId === accountId && o.service === 'business' && o.status === 'delivered' && MDM.inPeriod(period, deliveredAt(o)));
+  }
+  // What an invoice for the period would list (store.createInvoice): deliveries done in it, also returned ones, not paid yet.
+  function billable(orders, accountId, period) {
+    return orders.filter(o => o.accountId === accountId && MDM.completedAt(o) && ['paid', 'refunded'].indexOf((o.payment || {}).status) < 0 && MDM.inPeriod(period, MDM.completedAt(o)));
   }
   const packageCount = orders => orders.reduce((n, o) => n + (o.packages || []).length, 0);
   const orderTotal = orders => orders.reduce((n, o) => n + ((o.totals && o.totals.total) || 0), 0);
@@ -851,7 +860,7 @@
     }
     async function renderAccount() {
       const [account, orders, invoices, settings] = await Promise.all([MDM.store.get('business_accounts', accountId), MDM.store.list('orders'), MDM.store.list('invoices', { where: { accountId } }), MDM.store.settings()]);
-      const files = account ? await loadFiles(MDM.requestPhotos(account).map(p => p.fileId)) : {};
+      const files = account ? await loadFiles(MDM.requestPhotos(account).map(p => p.fileId).concat(invoices.map(i => i.payment && i.payment.slip && i.payment.slip.fileId))) : {};
       if (!ctx || !ctx.alive) return;
       if (!account) {
         root.replaceChildren(pageHead('Business account', null, null, BACK), card(null, empty('No account with this link.', 'It may have gone with a demo reset.')));
@@ -861,7 +870,7 @@
       const generate = el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'business-generate-invoice', on: { click: () => generateInvoice(account, orders, invoices) } }, icon('receipt'), 'Generate invoice');
       const allOrders = el('a', { class: 'btn btn--secondary', href: '#/orders?account=' + encodeURIComponent(account.id), 'data-testid': 'business-all-orders' }, 'Order history');
       const bulk = canView('bulk') ? el('a', { class: 'btn btn--secondary', href: '#/bulk?account=' + encodeURIComponent(account.id), 'data-testid': 'business-bulk' }, 'Bulk orders') : null;
-      const head = pageHead(account.name, 'Since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · invoiced weekly' + (account.priorityAllowed ? ' · may request priority' : ''), [allOrders, bulk, generate].filter(Boolean), BACK);
+      const head = pageHead(account.name, 'Since ' + fmtDate(account.approvedAt || account.createdAt, { dateOnly: true }) + ' · pays after delivery or by the 14th and 28th' + (account.priorityAllowed ? ' · may request priority' : ''), [allOrders, bulk, generate].filter(Boolean), BACK);
       ui.head.replaceWith(head); ui.head = head;
       renderRates(account, settings, files);
       renderPoints(account);
@@ -878,7 +887,15 @@
         rateRow('Pickup address', wrapValue(account.pickupAddress || '')),
         rateRow('Pickup window', WINDOWS[account.pickupWindow] || account.pickupWindow || ''),
         rateRow('Status', badge({ approved: { label: 'Approved', kind: 'ok' }, paused: { label: 'Paused', kind: 'neutral' } }, account.status)),
-        rateRow('Invoice terms', 'Due in ' + plural(settings.invoiceDueDays, 'day') + (Number(settings.gstPercent) > 0 ? ' · GST ' + settings.gstPercent + '%' : '')));
+        rateRow('Invoice terms', 'Due on the 14th and 28th' + (Number(settings.gstPercent) > 0 ? ' · GST ' + settings.gstPercent + '%' : '')),
+        // What the business has to pay now (20/11/2026): deliveries whose charges are finalised and not paid; and what waits to be finalised.
+        (() => {
+          const own = orders.filter(o => o.accountId === account.id && (o.payment || {}).method === 'invoice');
+          const due = own.filter(o => ['requested', 'received'].indexOf(o.payment.status) >= 0 && MDM.completedAt(o)), open = own.filter(MDM.toFinalise);
+          const next = due.map(o => o.payment.dueAt).filter(Boolean).sort()[0];
+          return rateRow('Amount due', el('span', { 'data-testid': 'business-due' }, el('span', { class: 'mono' }, money(orderTotal(due))),
+            el('small', null, [plural(due.length, 'delivery', 'deliveries'), next ? 'due ' + fmtDate(next, { dateOnly: true }) : '', open.length ? plural(open.length, 'delivery', 'deliveries') + ' to finalise' : ''].filter(Boolean).join(' · '))));
+        })());
       // This billing week's delivered orders (Sunday to Saturday)
       if (!mine.length) ui.orders.replaceChildren(empty('Nothing delivered this week yet.', weekText));
       else {
@@ -894,18 +911,18 @@
           el('div', { class: 'pagination' }, el('span', null, plural(packageCount(mine), 'package') + ' delivered, ' + weekText), el('span', { class: 'mono' }, money(orderTotal(mine)))));
       }
       // Invoices
-      if (!invoices.length) ui.invoices.replaceChildren(empty('No invoices yet.', 'Generate one when the week is done. Weeks run Sunday to Saturday.'));
+      if (!invoices.length) ui.invoices.replaceChildren(empty('No invoices yet.', 'Generate one for a week, or for everything not paid so far. Due on the 14th and 28th.'));
       else {
         const cols = [
           { label: 'Number', primary: true, render: i => el('span', { class: 'mono nowrap' }, i.number) },
           { label: 'Period', nowrap: true, render: i => MDM.periodLabel(i) },
           { label: 'Total', num: true, render: i => money(i.total) },
-          { label: 'Status', primary: true, render: i => badge(INVOICE_STATUS, i.status) },
+          { label: 'Status', primary: true, render: i => badge(INVOICE_STATUS, MDM.invoiceState(i)) },
           { label: 'Issued', nowrap: true, render: i => fmtDate(i.issuedAt, { dateOnly: true }) },
           { label: 'Due', nowrap: true, render: i => i.status === 'paid' ? 'Paid ' + fmtDate(i.paidAt, { dateOnly: true }) : fmtDate(i.dueAt, { dateOnly: true }) },
-          { label: 'Actions', actions: true, render: i => invoiceActions(i, account) },
+          { label: 'Actions', actions: true, render: i => invoiceActions(i, account, files) },
         ];
-        ui.invoices.replaceChildren(table(cols, invoices.map(i => ({ data: i, attrs: { 'data-testid': 'business-invoice-row', 'data-invoice-id': i.id, 'data-status': i.status } })), { testid: 'business-invoices' }));
+        ui.invoices.replaceChildren(table(cols, invoices.map(i => ({ data: i, attrs: { 'data-testid': 'business-invoice-row', 'data-invoice-id': i.id, 'data-status': MDM.invoiceState(i) } })), { testid: 'business-invoices' }));
       }
     }
     // Package photos + assessment and the agreed rate per size category, with "Edit rates" (MDM.store.setBusinessRates).
@@ -914,17 +931,43 @@
       const tiers = MDM.pricing.accountTiers(account, settings);
       const agreed = account.rates && Object.keys(account.rates).length;
       ui.ratesAction.replaceChildren(el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-edit-rates', on: { click: () => editRates(account, settings) } }, 'Edit rates'));
+      const notes = account.rateNotes || {}, sizeName = v => (MDM.pricing.businessTiers(settings).find(t => t.value === v) || {}).label || '';
       const rows = el('div', { class: 'rate-table', 'data-testid': 'business-rates' },
         tiers.map(t => el('div', { class: 'rate-table__row', 'data-tier': t.value },
-          el('div', { class: 'rate-table__label' }, t.label),
+          el('div', { class: 'rate-table__label' }, t.label, notes[t.value] ? el('small', { 'data-testid': 'business-rate-note-' + t.value }, notes[t.value]) : null),
           el('div', { class: 'rate-table__value mono', 'data-testid': 'business-rate-' + t.value }, money(t.rate)))),
         agreed ? null : el('p', { class: 'muted small' }, 'No agreed sizes yet: default rates apply.'));
+      // The business's packages (20/11/2026): each photo with the size it is and its note; the business adds more in its portal, and
+      // so can the office here.
+      const caption = ph => [sizeName(ph.tier), ph.note].filter(Boolean).join(' · ');
+      const gallery = el('div', { class: 'account-packages', 'data-testid': 'business-packages' }, photos.map((ph, i) => el('figure', { class: 'account-packages__item', 'data-testid': 'business-package', 'data-tier': ph.tier || '' },
+        photoThumb(files[ph.fileId], 'Package photo ' + (i + 1) + ' from ' + account.name + (caption(ph) ? ': ' + caption(ph) : ''), { testid: 'business-package-photo' }),
+        el('figcaption', null, caption(ph) || 'No size or note', photos.length > 1 ? el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'business-package-remove', 'aria-label': 'Remove package photo ' + (i + 1),
+          on: { click: () => removePackage(account, ph) } }, 'Remove') : null))));
       ui.rates.replaceChildren(el('div', { class: 'card__body account-rates' },
-        el('div', { class: 'account-rates__photo' },
-          photos.length > 1 ? el('div', { class: 'row-2 row--wrap row--start' }, photos.map((ph, i) => photoThumb(files[ph.fileId], 'Package photo ' + (i + 1) + ' from ' + account.name + (ph.note ? ': ' + ph.note : ''), { testid: 'business-package-photo' })))
-            : photoThumb(photos[0] ? files[photos[0].fileId] : null, 'Typical package from ' + account.name, { large: true, testid: 'business-package-photo' }),
+        el('div', { class: 'stack-4' },
+          photos.length ? gallery : photoThumb(null, 'Typical package from ' + account.name, { large: true, testid: 'business-package-photo' }),
+          el('div', null, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-package-add', on: { click: () => addPackagePhoto(account, settings) } }, icon('plus'), 'Add package photo')),
           el('div', { class: 'account-rates__assess' }, el('div', { class: 'field__label' }, 'Assessment'), el('p', { 'data-testid': 'business-assessment' }, account.assessment || 'No assessment yet.'))),
         rows));
+    }
+    async function addPackagePhoto(account, settings) {
+      const v = await MDM.ui.dialog({ title: 'Package photo for ' + account.name, message: 'A package type this business sends: its photo, the size it counts as, and a note.', okLabel: 'Add photo',
+        fields: [{ name: 'photo', label: 'Photo', type: 'file', accept: 'image/*', required: true, requiredMessage: 'Choose a photo of the package' },
+          { name: 'tier', label: 'Size', type: 'select', required: false, options: [{ value: '', label: 'Not decided' }].concat(MDM.pricing.businessTiers(settings).map(t => ({ value: t.value, label: t.label }))), value: '' },
+          { name: 'note', label: 'Note', type: 'text', required: false, placeholder: 'Gift boxes, 30 cm' }] });
+      if (!v) return;
+      try {
+        const img = await MDM.ui.imageToJpeg(v.photo, { maxEdge: 1200, quality: 0.8 });
+        const f = await MDM.store.insert('files', { kind: 'business_package', orderId: null, name: v.photo.name || 'package.jpg', type: img.type, size: img.size, width: img.width, height: img.height, dataUrl: img.dataUrl, note: v.note || '', at: nowIso() });
+        await MDM.store.addBusinessPackage(account.id, { fileId: f.id, tier: v.tier || '', note: v.note || '', by: actor() });
+        toast('Package photo added');
+      } catch (e) { toast(storeMessage(e), 'danger'); }
+    }
+    async function removePackage(account, ph) {
+      const ok = await MDM.ui.confirm({ title: 'Remove this package photo', message: 'It goes from ' + account.name + '\'s packages. Orders are not affected.', okLabel: 'Remove', danger: true });
+      if (!ok) return;
+      try { await MDM.store.removeBusinessPackage(account.id, ph.fileId, { by: actor() }); toast('Package photo removed'); } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     // Name, contacts and the sign-in email (client, 01/11/2026: "later we give login access to their desired email").
     async function editAccount(account) {
@@ -948,9 +991,9 @@
     async function editRates(account, settings) {
       const tiers = MDM.pricing.businessTiers(settings);
       const has = t => account.rates && account.rates[t.value] != null;
-      const editor = tierEditor(tiers, { picked: t => account.rates && Object.keys(account.rates).length ? has(t) : true, rate: t => has(t) ? account.rates[t.value] : t.rate });
-      const ok = await formDialog({ title: 'Rates for ' + account.name, message: 'New bulk orders use these rates. Existing orders keep their prices.', content: editor.el, wide: true, okLabel: 'Save rates',
-        onOk: async () => { const rates = editor.read(); if (!rates) return false; await MDM.store.setBusinessRates(account.id, rates, actor()); return true; } });
+      const editor = tierEditor(tiers, { picked: t => account.rates && Object.keys(account.rates).length ? has(t) : true, rate: t => has(t) ? account.rates[t.value] : t.rate, note: t => (account.rateNotes || {})[t.value] || '' });
+      const ok = await formDialog({ title: 'Rates for ' + account.name, message: 'New orders use these rates. Existing orders keep their prices. The description says what each size is for this business; they see it in their portal.', content: editor.el, wide: true, okLabel: 'Save rates',
+        onOk: async () => { const rates = editor.read(); if (!rates) return false; await MDM.store.setBusinessRates(account.id, rates, actor(), editor.readNotes()); return true; } });
       if (ok) toast('Rates saved for ' + account.name);
     }
     function renderPoints(account) {
@@ -1009,51 +1052,85 @@
       return names.length ? names.join(', ') : (o.packages || []).map(p => p.description).filter(Boolean).join(', ');
     }
     function invoiceUrl(inv) { return MDM.href('admin/invoice.html?id=' + encodeURIComponent(inv.id)); }
-    function invoiceActions(inv, account) {
+    // An invoice's actions (20/11/2026: slips for invoices, from the business or attached by the office): Open and Send as before;
+    // "Verify payment" and "Reject" once a slip is in; "Mark paid" with the transfer's date, its reference and, if we have it, the slip.
+    function invoiceActions(inv, account, files) {
       const url = invoiceUrl(inv);
-      const text = 'Mr. Delivery Man: invoice ' + inv.number + ' for ' + MDM.periodLabel(inv) + ', ' + money(inv.total) + ', due ' + fmtDate(inv.dueAt, { dateOnly: true }) + '. ' + url;
+      const text = 'Mr. Delivery Man: invoice ' + inv.number + ' for ' + MDM.periodLabel(inv) + ', ' + money(inv.total) + ', due ' + fmtDate(inv.dueAt, { dateOnly: true }) + '. See it and upload your transfer slip here: ' + url;
       const links = phone.links(account.phone, text);
       const markSent = async () => { if (inv.status === 'draft') { try { await MDM.store.update('invoices', inv.id, { status: 'sent', sentAt: nowIso() }); } catch (e) { /* the link still opens */ } } };
+      const slip = inv.payment && inv.payment.slip ? (files || {})[inv.payment.slip.fileId] : null, state = MDM.invoiceState(inv);
       return actionsRow(
+        slip ? photoThumb(slip, 'Transfer slip for ' + inv.number, { testid: 'invoice-slip' }) : null,
         el('a', { class: 'btn btn--secondary btn--sm', href: url, target: '_blank', rel: 'noopener', 'data-testid': 'invoice-open' }, 'Open'),
-        inv.status !== 'paid' ? el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'invoice-mark-paid', on: { click: () => markPaid(inv) } }, 'Mark paid') : null,
-        links ? el('a', { class: 'btn btn--ghost btn--sm', href: links.wa, target: '_blank', rel: 'noopener', title: 'Send on WhatsApp to ' + phone.format(account.phone), 'data-testid': 'invoice-send', on: { click: markSent } }, 'Send') : null);
+        state === 'received' ? el('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-testid': 'invoice-verify', on: { click: () => verifyInvoice(inv) } }, 'Verify payment') : null,
+        state === 'received' ? el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'invoice-reject', on: { click: () => rejectInvoice(inv) } }, 'Reject') : null,
+        state !== 'paid' && state !== 'received' ? el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'invoice-mark-paid', on: { click: () => markPaid(inv) } }, 'Mark paid') : null,
+        links && inv.status !== 'paid' ? el('a', { class: 'btn btn--ghost btn--sm', href: links.wa, target: '_blank', rel: 'noopener', title: 'Send on WhatsApp to ' + phone.format(account.phone), 'data-testid': 'invoice-send', on: { click: markSent } }, 'Send') : null);
+    }
+    async function verifyInvoice(inv) {
+      const pay = inv.payment || {};
+      const v = await MDM.ui.dialog({ title: 'Verify the payment of ' + inv.number, message: 'Declared ' + money(pay.paidAmount != null ? pay.paidAmount : inv.total) + (pay.reference ? ', reference ' + pay.reference : '') + '. Every delivery on the invoice is marked paid with it.', okLabel: 'Verify payment',
+        fields: [{ name: 'received', label: 'The amount is in our account', type: 'checkbox', value: false, hint: 'Check the bank statement first', validate: val => val ? null : 'Tick this once you have checked the statement' }] });
+      if (!v) return;
+      try { await MDM.store.markInvoicePaid(inv.id, { reference: pay.reference || '', by: MDM.admin.by() }); toast(inv.number + ' paid, its deliveries too'); }
+      catch (e) { toast(storeMessage(e), 'danger'); }
+    }
+    async function rejectInvoice(inv) {
+      const v = await MDM.ui.dialog({ title: 'Reject the slip for ' + inv.number, message: 'The business sees the reason on the invoice and uploads another slip.', okLabel: 'Reject slip', danger: true,
+        fields: [{ name: 'reason', label: 'Reason', type: 'text', required: true, placeholder: 'The amount does not match' }] });
+      if (!v) return;
+      try { await MDM.store.rejectInvoicePayment(inv.id, { reason: v.reason, by: MDM.admin.by() }); toast('Slip rejected', 'warn'); }
+      catch (e) { toast(storeMessage(e), 'danger'); }
     }
     // Weekly billing: pick one of the last 8 billing weeks (Sunday to Saturday) with deliveries for this account. The newest finished
     // week with no invoice yet is chosen for you; the current week (still running) only when every finished one is invoiced.
+    // Since 20/11/2026 an invoice lists what is not paid yet (deliveries, and returned packages at one delivery charge), is due on
+    // the next 14th or 28th, and "Everything not paid so far" makes one for all of it, whatever the week.
     async function generateInvoice(account, orders, invoices) {
       const start = MDM.billingWeek(new Date()).from.split('-').map(Number);
       const covering = w => invoices.find(i => { const p = MDM.invoicePeriod(i); return p && p.from <= w.from && p.to >= w.to; }) || null;
       const weeks = [];
       for (let i = 0; i < 8; i++) {
         const w = MDM.billingWeek(new Date(start[0], start[1] - 1, start[2] - 7 * i));
-        const list = periodOrders(orders, account.id, w);
+        const list = billable(orders, account.id, w);
         if (list.length) weeks.push({ w, list, existing: covering(w) });
       }
-      if (!weeks.length) { toast('No delivered business orders in the last 8 weeks to invoice yet', 'warn'); return; }
+      // Everything done and not paid, on no invoice yet.
+      const onInvoice = {}; invoices.forEach(i => (i.lines || []).forEach(l => { if (l.orderCode) onInvoice[l.orderCode] = true; }));
+      const rest = orders.filter(o => o.accountId === account.id && MDM.completedAt(o) && ['paid', 'refunded'].indexOf((o.payment || {}).status) < 0 && !onInvoice[o.code]);
+      if (!weeks.length && !rest.length) { toast('Nothing delivered and unpaid in the last 8 weeks to invoice', 'warn'); return; }
       const today = MDM.localDayKey(new Date());
-      const pick = weeks.find(x => !x.existing && x.w.to < today) || weeks.find(x => !x.existing) || weeks[0];
-      const v = await MDM.ui.dialog({ title: 'Invoice ' + account.name, message: 'Business orders delivered in the week you choose. Weeks run Sunday to Saturday.', okLabel: 'Generate invoice',
-        fields: [{ name: 'week', label: 'Week', type: 'select', required: true, value: pick.w.from,
-          options: weeks.map(x => ({ value: x.w.from, label: MDM.periodLabel(x.w, { year: false }) + (x.w.to >= today ? ' (so far)' : '') + ' · ' + plural(packageCount(x.list), 'package') + ' · ' + money(orderTotal(x.list)) + (x.existing ? ' · invoiced' : '') })) }] });
+      const pick = weeks.find(x => !x.existing && x.w.to < today) || weeks.find(x => !x.existing) || weeks[0] || null;
+      const days = rest.map(o => MDM.localDayKey(MDM.completedAt(o))).sort();
+      const all = rest.length ? { w: { from: days[0], to: today }, list: rest, existing: null } : null;
+      const v = await MDM.ui.dialog({ title: 'Invoice ' + account.name, message: 'What was delivered (or returned to them) and is not paid yet. Due on the next 14th or 28th. Weeks run Sunday to Saturday.', okLabel: 'Generate invoice',
+        fields: [{ name: 'week', label: 'Invoice for', type: 'select', required: true, value: pick ? pick.w.from : 'all',
+          options: (all ? [{ value: 'all', label: 'Everything not paid so far · ' + plural(packageCount(all.list), 'package') + ' · ' + money(orderTotal(all.list)) }] : []).concat(
+            weeks.map(x => ({ value: x.w.from, label: MDM.periodLabel(x.w, { year: false }) + (x.w.to >= today ? ' (so far)' : '') + ' · ' + plural(packageCount(x.list), 'package') + ' · ' + money(orderTotal(x.list)) + (x.existing ? ' · invoiced' : '') }))) }] });
       if (!v) return;
-      const chosen = weeks.find(x => x.w.from === v.week) || pick;
+      const chosen = v.week === 'all' && all ? all : weeks.find(x => x.w.from === v.week) || pick;
       if (chosen.existing) {
         const ok = await MDM.ui.confirm({ title: 'Invoice already exists', message: chosen.existing.number + ' already covers ' + MDM.periodLabel(chosen.w) + '. Create another one for the same week?', okLabel: 'Create invoice' });
         if (!ok) return;
       }
       try {
-        const inv = await MDM.store.createInvoice(account.id, chosen.w);
+        // "Everything not paid so far" leaves out what another invoice already lists, so no delivery is billed twice.
+        const inv = await MDM.store.createInvoice(account.id, chosen.w, Object.assign({ by: MDM.admin.by() }, chosen === all ? { except: Object.keys(onInvoice) } : {}));
         toast('Invoice ' + inv.number + ' for ' + MDM.periodLabel(inv, { year: false }) + ' created, ' + money(inv.total) + ' due ' + fmtDate(inv.dueAt, { dateOnly: true }));
       } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     async function markPaid(inv) {
-      const v = await MDM.ui.dialog({ title: 'Mark ' + inv.number + ' as paid', message: money(inv.total) + ' received by bank transfer.', okLabel: 'Mark paid',
-        fields: [{ name: 'paidAt', label: 'Date received', type: 'date', required: true, value: MDM.ui.dayKey(new Date()) }, { name: 'reference', label: 'Transfer reference', type: 'text', placeholder: 'FAVARA 2291' }] });
+      const v = await MDM.ui.dialog({ title: 'Mark ' + inv.number + ' as paid', message: money(inv.total) + ' received by bank transfer. Every delivery on the invoice is marked paid with it.', okLabel: 'Mark paid',
+        fields: [{ name: 'paidAt', label: 'Date received', type: 'date', required: true, value: MDM.ui.dayKey(new Date()) }, { name: 'reference', label: 'Transfer reference', type: 'text', placeholder: 'FAVARA 2291' },
+          { name: 'slip', label: 'Transfer slip', type: 'file', accept: 'image/*,application/pdf', required: false, hint: 'If the business sent it to you' }] });
       if (!v) return;
       const d = new Date(v.paidAt + 'T12:00:00');
-      try { await MDM.store.update('invoices', inv.id, { status: 'paid', paidAt: isNaN(d) ? nowIso() : d.toISOString(), reference: v.reference || '' }); toast(inv.number + ' marked as paid'); }
-      catch (e) { toast(storeMessage(e), 'danger'); }
+      try {
+        const slip = v.slip ? await MDM.storeSlip(v.slip) : null;
+        await MDM.store.markInvoicePaid(inv.id, Object.assign({ paidAt: isNaN(d) ? nowIso() : d.toISOString(), reference: v.reference || '', by: MDM.admin.by() }, slip ? { slip } : {}));
+        toast(inv.number + ' marked as paid, its deliveries too');
+      } catch (e) { toast(storeMessage(e), 'danger'); }
     }
     return { title: 'Business', mount, unmount };
   })();
@@ -1227,8 +1304,13 @@
         places.carriers[c.value] = input('carrier.' + c.value, addr[c.value] || '', { 'data-testid': 'places-carrier-' + c.value, placeholder: MDM.DEFAULT_CARRIER_ADDRESSES[c.value] || '', maxlength: '120' });
         return field(c.label, places.carriers[c.value], { optional: true });
       });
+      // Where a parcel's owner sends both sides of the ID card when the post office gave no collection code (client, 20/11/2026: two
+      // numbers for now). Shown on the request form and on the order's tracking page.
+      places.postContacts = input('postContacts', ((s.ops || {}).postContacts || []).map(x => phone.format(x)).join(', '), { 'data-testid': 'places-post-contacts', placeholder: '777 1234, 999 1234', maxlength: '120' });
       return lists.concat([el('div', { class: 'stack-3 places-group', 'data-testid': 'places-carriers' }, el('h3', { class: 'places-group__title' }, 'Postal collection addresses'),
-        el('p', { class: 'form-caption' }, 'Empty: the address shown in grey.'), el('div', { class: 'grid-2' }, carriers))]);
+        el('p', { class: 'form-caption' }, 'Empty: the address shown in grey.'), el('div', { class: 'grid-2' }, carriers)),
+        el('div', { class: 'stack-3 places-group' }, el('h3', { class: 'places-group__title' }, 'Post collections numbers'),
+          field('Numbers for the owner\'s ID card', places.postContacts, { optional: true, hint: 'A post office parcel without a collection code: the owner sends both sides of the ID card to these. Separate them with commas. Empty: our contact number.' }))]);
     }
     // → { ops: { jetties, pikpost, postOffices, carrierAddresses } } or { bad: the first field to fix }.
     function readPlaces() {
@@ -1255,6 +1337,12 @@
         ops[list.key] = same ? [] : out;
       });
       Object.keys(places.carriers).forEach(k => { const v = places.carriers[k].value.trim(); ops.carrierAddresses[k] = v === MDM.DEFAULT_CARRIER_ADDRESSES[k] ? '' : v; });
+      ops.postContacts = [];
+      MDM.ui.setError(places.postContacts.closest('.field'), null);
+      places.postContacts.value.split(/[,;\n]+/).map(x => x.trim()).filter(Boolean).forEach(x => {
+        if (!phone.valid(x, { intl: true })) { MDM.ui.setError(places.postContacts.closest('.field'), 'Enter mobile numbers, separated by commas'); bad = bad || places.postContacts; return; }
+        const v = phone.normalize(x) || x; if (ops.postContacts.indexOf(v) < 0) ops.postContacts.push(v);
+      });
       return bad ? { bad } : { ops };
     }
     async function render() {
@@ -1310,7 +1398,9 @@
           field('Account number', input('banks.' + i + '.accountNo', b.accountNo, { class: 'input mono', inputmode: 'numeric' }))))),
         formSection('rates-terms', 'Terms and invoicing', null, [
           field('What we carry', textarea('terms', s.terms), { hint: 'Shown at sign-up and guest checkout' }),
-          el('div', { class: 'grid-2' }, field('Invoices due in, days', numInput('invoiceDueDays', s.invoiceDueDays)), field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides GST on invoices' }))]),
+          // Business invoices are due on the 14th and 28th since 20/11/2026 (the number of days is kept, unused).
+          el('div', { class: 'grid-2' }, el('div', { class: 'field' }, el('span', { class: 'field__label' }, 'Business invoices due'), el('p', { class: 'form-caption', 'data-testid': 'rates-invoice-due' }, 'On the 14th and 28th of each month. A business can pay after each delivery.'), input('invoiceDueDays', s.invoiceDueDays, { type: 'hidden' })),
+            field('GST, %', numInput('gstPercent', s.gstPercent, { max: '100' }), { hint: '0 hides GST on invoices' }))]),
         el('div', { class: 'form-actions save-bar' }, el('span', { class: 'form-caption' }, 'Applies to new requests and quotes.'), el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': 'rates-save' }, 'Save rates')));
       slot.replaceChildren(form);
       drawTiers(); drawCouriers(); PLACE_LISTS.forEach(l => drawPlaces(l.key)); ranges.update();
@@ -1348,7 +1438,7 @@
         ops: { hours: { open: v['hours.open'], close: v['hours.close'] }, days: v.days, asapText: v.asapText, reviewText: v.reviewText, businessReplyText: v.businessReplyText,
           slotStart: v.slotStart, slotEnd: v.slotEnd, slotMinutes: n('slotMinutes'), speedCityKmh: n('speedCityKmh'), speedHighwayKmh: n('speedHighwayKmh'), peakBufferMin: n('peakBufferMin'),
           peakWindows: list('peakWindows'), closedWindows: list('closedWindows'), couriers: k.couriers,
-          jetties: pl.ops.jetties, pikpost: pl.ops.pikpost, postOffices: pl.ops.postOffices, carrierAddresses: pl.ops.carrierAddresses },
+          jetties: pl.ops.jetties, pikpost: pl.ops.pikpost, postOffices: pl.ops.postOffices, carrierAddresses: pl.ops.carrierAddresses, postContacts: pl.ops.postContacts },
         banks: Array.from({ length: bankCount }, (x, i) => i).filter(i => v['banks.' + i + '.name']).map(i => ({ id: (cur.banks && cur.banks[i] && cur.banks[i].id) || ('bank' + (i + 1)), name: v['banks.' + i + '.name'], accountName: v['banks.' + i + '.accountName'], accountNo: v['banks.' + i + '.accountNo'] })),
         terms: v.terms, invoiceDueDays: n('invoiceDueDays'), gstPercent: n('gstPercent'),
       };
@@ -1390,7 +1480,7 @@
       const rules = s.rules || {}, notif = s.notifications || {}, chans = notif.channels || {}, hr = s.hr || {}, st = s.store || {};
       const saveBtn = (testid, text) => el('div', { class: 'form-actions' }, el('button', { type: 'submit', class: 'btn btn--primary', 'data-testid': testid }, text));
       const payForm = el('form', { class: 'form', novalidate: true, 'data-testid': 'settings-payment-form', on: { submit: savePayment, input: () => { dirty = true; } } },
-        field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, invoice sent automatically' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping: always upfront. Businesses: weekly invoice.' }),
+        field('When customers pay', select('paymentTiming', rules.paymentTiming || 'after_delivery', [{ value: 'after_delivery', label: 'After delivery, when the office requests payment' }, { value: 'upfront', label: 'Upfront, once the price is confirmed' }]), { hint: 'Shopping: always upfront. Businesses: weekly invoice.' }),
         checkbox('upfrontOptional', rules.upfrontOptional !== false, 'Customers may pay upfront', 'Shows "Pay now" once the price is confirmed'),
         field('Express handling fee, MVR', numInput('expressFee', (s.rates || {}).express || 0), { hint: 'Suggested on express orders' }),
         // Every charge (naalu, vehicle, packing, Maldivian Cargo, other) is billed to the customer by default since 14/11/2026, and

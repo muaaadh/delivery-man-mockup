@@ -37,7 +37,9 @@
   // ---- Option lists ---------------------------------------------------------------------------------------------------------
   // Home delivery areas. The airport is not one: it is its own delivery method, and an airport-zone home drop would add the airport fee.
   const airportZone = v => !!(MDM.geo.zone(v) || {}).airport;
-  const zoneOptions = () => MDM.geo.zoneOptions().filter(o => o.value !== 'other' && !airportZone(o.value));
+  // The airport is an area too (client, 20/11/2026: "Option: Velana International Airport"): a delivery to someone at the airport,
+  // with the airport fee. The "Airport" delivery method stays for resort counters and speedboats.
+  const zoneOptions = () => MDM.geo.zoneOptions().filter(o => o.value !== 'other');
   const jettyOptions = () => MDM.geo.jetties().map(t => ({ value: t.value, label: t.label }));
   const airportOptions = () => MDM.geo.airportPoints().map(p => ({ value: p.value, label: p.label }));
   const vesselOptions = () => MDM.VESSEL_TYPES.map(v => ({ value: v.value, label: v.label }));
@@ -74,7 +76,7 @@
     const direct = opts.find(o => norm(o.value) === n || norm(o.value.replace(/_/g, ' ')) === n || norm(o.label) === n || norm(MDM.geo.zoneShort(o.value)) === n);
     if (direct) return direct.value;
     if (/villi/.test(n)) return 'villimale';
-    if (AIRPORT_AREA.test(n)) return '';   // not an area: validateRow says to choose Airport as the delivery method
+    if (AIRPORT_AREA.test(n)) return (opts.find(o => airportZone(o.value)) || {}).value || '';
     if (/(phase|ph|p) ?2\b|hm ?2\b/.test(n)) return 'hulhumale_p2';
     if (/(phase|ph|p) ?1\b|hm ?1\b/.test(n) || n === 'hulhumale' || n === 'hulhumalé' || n === 'hm') return 'hulhumale_p1';
     if (/^male\b|^male$|^mal[eé]\b/.test(n)) return 'male';
@@ -234,9 +236,9 @@
     else if (!METHOD_FIELDS[method]) e.method = 'Choose the delivery method';
     if (method === 'home' || !METHOD_FIELDS[method]) {
       if (!String(r.address || '').trim()) e.address = 'Enter the delivery address';
-      if (r.raw && r.raw.zone && !r.zone) e.zone = AIRPORT_AREA.test(norm(r.raw.zone)) ? 'The airport is not an area: choose Airport as the delivery method' : 'Unknown area: ' + r.raw.zone + '. Choose one from the list';
+      if (r.raw && r.raw.zone && !r.zone) e.zone = 'Unknown area: ' + r.raw.zone + '. Choose one from the list';
       else if (!r.zone) e.zone = 'Choose the area';
-      else if (!MDM.geo.zone(r.zone) || airportZone(r.zone)) e.zone = 'Choose an area from the list';
+      else if (!MDM.geo.zone(r.zone)) e.zone = 'Choose an area from the list';
     }
     const sizes = orList(tiers.map(t => t.label));
     if (r.raw && r.raw.tier && !r.tier) e.tier = 'Not one of your agreed sizes: ' + r.raw.tier + '. Use ' + sizes;

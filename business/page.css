@@ -117,6 +117,11 @@ body.page-business .biz-photos[hidden] { display: none; }
 body.page-business .biz-photos__item { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 body.page-business .biz-photos__thumb { width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--card); }
 body.page-business .biz-photos__note { min-width: 0; background: var(--card); }
+body.page-business .biz-photos__fields { display: grid; gap: 6px; min-width: 0; }
+body.page-business .biz-photos__size { background: var(--card); }
+body.page-business .biz-packages { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; }
+body.page-business .biz-packages__item { margin: 0; display: grid; gap: 4px; }
+body.page-business .biz-packages__item .thumb { width: 96px; height: 96px; }
 body.page-business .biz-photos__remove { margin-top: 0; }
 body.page-business .biz-received-photos { display: flex; flex-wrap: wrap; gap: 8px; }
 html[data-theme="dark"] body.page-business .biz-photos__thumb { background: var(--surface); }

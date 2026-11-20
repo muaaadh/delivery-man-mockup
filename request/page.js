@@ -62,7 +62,7 @@
   // type: the collection type of a "Collect an item" stop (client, 02/11/2026), with its details: the boat and the jetty it arrives at,
   // the shop or godown, or the courier and its code. Their address and contact follow from those (extraPlace).
   const blankExtraDetails = () => ({ boatName: '', jetty: '', arrivalDate: '', arrivalTime: '', carrier: '', location: '', code: '', collectBefore: '', orderNo: '' });
-  function blankExtra() { return { id: MDM.id('col'), kind: 'collect', type: 'home', details: blankExtraDetails(), address: '', zone: 'male', landmark: '', contactName: '', contactPhone: '', instructions: '', shopName: '', shopPhone: '', list: '', counts: blankCounts() }; }
+  function blankExtra() { return { id: MDM.id('col'), kind: 'collect', type: 'home', details: blankExtraDetails(), address: '', zone: 'male', landmark: '', contactName: '', contactPhone: '', instructions: '', shopName: '', shopPhone: '', list: '', items: [], counts: blankCounts() }; }
   function emptyDraft() {
     return {
       category: 'pick', type: 'home', level: 'normal',
@@ -151,7 +151,7 @@
       redbox_maafannu: ['collectionCode', 'collectBefore', 'trackingNo'],
       redbox_main: ['trackingNo', 'ownerName', 'shippingAddress', 'ownerContact'],
       pikpost: ['location', 'collectionCode', 'collectBefore', 'trackingNo'],
-      post_office: ['postOffice', 'trackingNo', 'collectionCode'].concat(noCode ? ['idSent', 'ownerName', 'ownerContact', 'shippingAddress'] : []),
+      post_office: ['postOffice', 'trackingNo', 'collectionCode', 'ownerName', 'ownerContact', 'shippingAddress'].concat(noCode ? ['idSent'] : []),
       courier: ['courierName'].concat(otherCourier() ? ['courierOther', 'courierAddress', 'courierZone'] : [], ['trackingNo', 'ownerName', 'ownerContact']),
       dhl: ['trackingNo'],
     })[d.carrier] || [];
@@ -217,7 +217,11 @@
   const shops = () => isShop() || extraShops().length > 0;
   // A stop counts once it says where to collect (for a boat, shop or courier stop: the boat and jetty, the shop, the courier and code),
   // or (a shop stop) what to buy; the shop itself may be left to us.
-  const stopReady = x => (x.kind === 'shop' ? !!trim(x.list) : !!trim(extraPlace(x).address) && (x.type !== 'boat_collect' || !!trim(x.details.boatName)) && (x.type !== 'postal' || !!trim(x.details.code)));
+  // A shop stop lists its items one by one (20/11/2026); a draft from before that carries them as one text (x.list).
+  const itemLine = it => trim(it.name) + (trim(it.details) ? ' ' + trim(it.details) : '') + ' ×' + (Math.max(1, Math.round(Number(it.qty) || 1))) + (trim(it.instructions) ? ' (' + trim(it.instructions) + ')' : '');
+  const stopItems = x => (Array.isArray(x.items) ? x.items : []).filter(it => trim(it.name));
+  const stopList = x => stopItems(x).map(itemLine).join(', ') || trim(x.list);
+  const stopReady = x => (x.kind === 'shop' ? !!stopList(x) : !!trim(extraPlace(x).address) && (x.type !== 'boat_collect' || !!trim(x.details.boatName)) && (x.type !== 'postal' || !!trim(x.details.code)));
   const EXTRA_TYPES = [{ value: 'home', label: 'Home' }, { value: 'boat_collect', label: 'Boat' }, { value: 'shop_collect', label: 'Shop or godown' }, { value: 'postal', label: 'Courier' }];
   const EXTRA_TYPE_NAME = { boat_collect: 'Boat collection', shop_collect: 'Shop or godown collection', postal: 'Courier collection' };
   // Couriers in one list for an extra stop: the post and lockers, DHL, then the couriers the office lists (value courier:<name>).
@@ -244,7 +248,7 @@
   // What the driver reads at an extra stop: its type and details first, then the customer's own instructions.
   function extraInstructions(x) {
     const d = x.details || {}, own = trim(x.instructions);
-    if (x.type === 'boat_collect') return ['Boat collection: ' + trim(d.boatName) + (d.arrivalTime ? ' arriving ' + [d.arrivalDate, d.arrivalTime].filter(Boolean).join(' at ') : ''), own].filter(Boolean).join('. ');
+    if (x.type === 'boat_collect') return ['Boat collection: ' + trim(d.boatName) + (d.arrivalDate || d.arrivalTime ? ' arriving ' + MDM.arrivalText(d) : ', arrival time to be confirmed'), own].filter(Boolean).join('. ');
     if (x.type === 'shop_collect') return ['Shop or godown collection' + (trim(d.orderNo) ? ', invoice or order ' + trim(d.orderNo) : ''), own].filter(Boolean).join('. ');
     if (x.type === 'postal') { const c = extraCarriers().find(t => t.value === d.carrier); return ['Courier collection: ' + (c ? c.label : 'courier') + (trim(d.code) ? ', code or tracking ' + trim(d.code) : '') + (d.collectBefore ? ', collect before ' + d.collectBefore : ''), own].filter(Boolean).join('. '); }
     return own;
@@ -254,7 +258,8 @@
   // extraData() → order.extraCollections for the stops the customer added (store.createOrder cleans and caps them).
   function extraData() {
     return draft.extra.filter(stopReady).map(x => (x.kind === 'shop'
-      ? { id: x.id, kind: 'shop', address: '', zone: x.zone || 'male', landmark: '', instructions: '', shop: { name: trim(x.shopName), phone: normPhone(x.shopPhone), list: trim(x.list), budget: 0, unavailable: 'call' } }
+      ? { id: x.id, kind: 'shop', address: '', zone: x.zone || 'male', landmark: '', instructions: '', shop: { name: trim(x.shopName), phone: normPhone(x.shopPhone), list: stopList(x), budget: 0, unavailable: 'call',
+        items: stopItems(x).map(it => ({ name: trim(it.name), details: trim(it.details), qty: Math.max(1, Math.round(Number(it.qty) || 1)), instructions: trim(it.instructions) })) } }
       : (pl => ({ id: x.id, kind: 'collect', type: x.type || 'home', details: extraDetails(x), address: pl.address, zone: pl.zone, landmark: x.type === 'home' || !x.type ? trim(x.landmark) : '',
         contactName: trim(x.contactName) || pl.contactName, contactPhone: normPhone(x.contactPhone), instructions: extraInstructions(x) }))(extraPlace(x))));
   }
@@ -834,10 +839,16 @@
       if (c === 'redbox_main') out.push(grid(tracking(), F(n, 'details.ownerName', 'Owner name', { required: true })), F(n, 'details.shippingAddress', 'Shipping address on the parcel', { required: true }), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true }));
       if (c === 'pikpost') out.push(F(n, 'details.location', 'Pikpost location', { type: 'select', placeholder: 'Choose a location', required: true, options: MDM.PIKPOST_LOCATIONS, onChange: dictate }), grid(F(n, 'details.collectionCode', 'Collection code', { required: true }), F(n, 'details.collectBefore', 'Collect before (SMS time)', { type: 'datetime-local', required: true })), tracking(null, true));
       if (c === 'post_office') {
-        out.push(F(n, 'details.postOffice', 'Post office', { type: 'select', placeholder: 'Choose a post office', required: true, options: MDM.POST_OFFICES, onChange: dictate }), tracking(),
-          F(n, 'details.collectionCode', 'Collection code', { hint: 'No code? Leave it empty and add the owner.', onChange:v => { if (!trim(v) !== !!dom.steps[n].querySelector('[data-testid="request-id-sent"]')) rerender(n); } }));
-        if (!trim(d.collectionCode)) out.push(check(n, 'details.idSent', OFFICE ? 'The owner gives their ID details to the post collections contact' : 'I will give my ID details to the post collections contact', { required: true, testid: 'request-id-sent' }),
-          grid(F(n, 'details.ownerName', 'Owner name', { required: true }), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true })), F(n, 'details.shippingAddress', 'Shipping address on the parcel', { required: true }));
+        // Post office (client, 20/11/2026): the owner's full name, contact and the shipping address always, the tracking number
+        // optional. Without a collection code the post office wants the owner's ID card: both sides go to our post collections
+        // number once a driver is assigned (MDM.postContacts, set in Rates).
+        const idTo = MDM.postContacts(settings).map(x => phone.format(x)).join(' or ');
+        out.push(F(n, 'details.postOffice', 'Post office', { type: 'select', placeholder: 'Choose a post office', required: true, options: MDM.POST_OFFICES, onChange: dictate }),
+          grid(F(n, 'details.collectionCode', 'Collection code', { hint: 'No code? Leave it empty: we collect with the owner\'s ID card.', onChange: v => { if (!trim(v) !== !!dom.steps[n].querySelector('[data-testid="request-id-sent"]')) rerender(n); } }), tracking(null, true)),
+          grid(F(n, 'details.ownerName', 'Owner full name', { required: true, placeholder: 'As on the parcel' }), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true })),
+          F(n, 'details.shippingAddress', 'Shipping address on the parcel', { required: true }));
+        if (!trim(d.collectionCode)) out.push(MDM.ui.notice('info', 'No collection code: once a driver is assigned, send both sides of the owner\'s ID card to ' + (idTo || 'us') + ' on WhatsApp or Viber.', { testid: 'request-id-note' }),
+          check(n, 'details.idSent', OFFICE ? 'The owner will send both sides of the ID card' : 'I will send both sides of the ID card', { required: true, testid: 'request-id-sent' }));
       }
       if (c === 'courier') {
         // A courier outside the list: its name and the office our driver collects from (that office becomes the collection address).
@@ -864,7 +875,8 @@
         grid(F(n, 'details.boatName', 'Boat, ferry or speedboat name', { required: true, placeholder: 'For example Thulusdhoo Express', testid: 'request-arrival-boat', onChange: dictate }),
           F(n, 'details.jetty', 'Arriving at', { type: 'select', required: true, placeholder: 'Choose the harbour or jetty', options: MDM.geo.jetties().map(j => ({ value: j.value, label: j.label })), testid: 'request-arrival-jetty', onChange: dictate })),
         grid(F(n, 'details.arrivalDate', 'Arrival date', { type: 'date', required: true, attrs: { min: today() }, validate: v => (v && v < today() ? 'Choose today or a later date' : null), testid: 'request-arrival-date' }),
-          F(n, 'details.arrivalTime', 'Arrival time', { type: 'time', required: true, testid: 'request-arrival-time' })),
+          // The time is often not known yet (client, 20/11/2026: "arriving time TBA"): left empty it reads "time to be confirmed".
+          F(n, 'details.arrivalTime', 'Arrival time', { type: 'time', hint: 'Leave empty if not known yet', testid: 'request-arrival-time' })),
         grid(F(n, 'details.senderName', 'Who hands it over', { placeholder: 'Captain or crew member', testid: 'request-sender-name', onChange: dictate }),
           F(n, 'details.senderPhone', 'Their number', { type: 'tel', intl: true, testid: 'request-sender-phone' })),
         F(n, 'details.fromIsland', 'Coming from', { placeholder: 'The island it comes from', testid: 'request-from-island' }));
@@ -1013,27 +1025,31 @@
     paint();
     return el('div', { class: 'request-item__photo' }, box, input, err);
   }
-  function itemsEditor(n) {
-    const rows = draft.items.map((it, i) => {
-      const p = 'items.' + i + '.';
-      return el('div', { class: 'request-item', 'data-testid': 'request-item' },
+  // itemsEditor(n) → the items of a shop order (draft.items, each with an optional sample photo); itemsEditor(n, { list, path, tid })
+  // → the items of a shop at an extra stop (draft.extra[i].items): the same rows, without the photo.
+  function itemsEditor(n, o) {
+    o = o || {};
+    const list = o.list || draft.items, base = o.path || 'items.', own = !o.list, tid = k => 'request-' + (own ? '' : 'extra-') + k + (own ? '' : '-' + o.tid);
+    const rows = list.map((it, i) => {
+      const p = base + i + '.';
+      return el('div', { class: 'request-item', 'data-testid': tid('item') },
         el('div', { class: 'request-item__num', 'aria-hidden': 'true' }, 'Item ' + (i + 1)),
-        F(n, p + 'name', 'Item', { noOptional: true, placeholder: 'For example a phone case', testid: 'request-item-name', fieldClass: 'request-item__name',
+        F(n, p + 'name', 'Item', { noOptional: true, placeholder: 'For example a phone case', testid: tid('item-name'), fieldClass: 'request-item__name',
           // An untouched extra row (no name, details or instructions) is skipped instead of blocking the step.
-          validate: v => (v || (blankItem_(draft.items[i]) && draft.items.some(x => trim(x.name))) ? null : 'Name the item') }),
-        F(n, p + 'details', 'Details', { noOptional: true, placeholder: 'Brand, size or colour', testid: 'request-item-details', fieldClass: 'request-item__details' }),
-        F(n, p + 'qty', 'Quantity', { type: 'number', required: true, min: 1, testid: 'request-item-qty', attrs: { min: '1', max: '999', step: '1' }, validate: v => (Number.isInteger(Number(v)) && Number(v) <= 999 ? null : 'Enter a whole number up to 999'), fieldClass: 'request-item__qty' }),
-        F(n, p + 'instructions', 'Special instructions', { noOptional: true, placeholder: 'Anything to check', testid: 'request-item-instructions', fieldClass: 'request-item__notes' }),
-        itemPhoto(it, i),
-        el('div', { class: 'request-item__remove' }, el('button', { type: 'button', class: 'btn btn--ghost btn--icon', 'aria-label': 'Remove item ' + (i + 1), 'data-testid': 'request-item-remove', disabled: draft.items.length < 2,
-          on: { click: () => { if (it.photoId) MDM.store.remove('files', it.photoId).catch(() => {}); draft.items.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="request-item-add"]'); if (b) b.focus({ preventScroll: true }); } } }, html(MDM.icon('trash', 16)))));
+          validate: v => (v || (blankItem_(list[i]) && list.some(x => trim(x.name))) ? null : 'Name the item') }),
+        F(n, p + 'details', 'Details', { noOptional: true, placeholder: 'Brand, size or colour', testid: tid('item-details'), fieldClass: 'request-item__details' }),
+        F(n, p + 'qty', 'Quantity', { type: 'number', required: true, min: 1, testid: tid('item-qty'), attrs: { min: '1', max: '999', step: '1' }, validate: v => (Number.isInteger(Number(v)) && Number(v) <= 999 ? null : 'Enter a whole number up to 999'), fieldClass: 'request-item__qty' }),
+        F(n, p + 'instructions', 'Special instructions', { noOptional: true, placeholder: 'Anything to check', testid: tid('item-instructions'), fieldClass: 'request-item__notes' }),
+        own ? itemPhoto(it, i) : null,
+        el('div', { class: 'request-item__remove' }, el('button', { type: 'button', class: 'btn btn--ghost btn--icon', 'aria-label': 'Remove item ' + (i + 1), 'data-testid': tid('item-remove'), disabled: list.length < 2,
+          on: { click: () => { if (it.photoId) MDM.store.remove('files', it.photoId).catch(() => {}); list.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="' + tid('item-add') + '"]'); if (b) b.focus({ preventScroll: true }); } } }, html(MDM.icon('trash', 16)))));
     });
-    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'request-item-add', disabled: draft.items.length >= MAX_ITEMS,
-      on: { click: () => { draft.items.push(blankItem()); saveDraft(); renderStep(n); updateSummary(); const all = dom.steps[n].querySelectorAll('[data-testid="request-item-name"]'); if (all.length) all[all.length - 1].focus(); } } }, html(MDM.icon('plus', 16)), 'Add an item');
-    const wrap = el('div', { class: 'field request-items-field', 'data-field': 'items' },
+    const addBtn = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': tid('item-add'), disabled: list.length >= MAX_ITEMS,
+      on: { click: () => { list.push(blankItem()); saveDraft(); renderStep(n); updateSummary(); const all = dom.steps[n].querySelectorAll('[data-testid="' + tid('item-name') + '"]'); if (all.length) all[all.length - 1].focus(); } } }, html(MDM.icon('plus', 16)), 'Add an item');
+    const wrap = el('div', { class: 'field request-items-field', 'data-field': own ? 'items' : base.replace(/\.$/, '') },
       el('div', { class: 'request-items__head', 'aria-hidden': 'true' }, el('span', null, 'Item'), el('span', null, 'Details'), el('span', null, 'Quantity'), el('span', null, 'Special instructions'), el('span', null, '')),
-      el('div', { class: 'request-items', 'data-testid': 'request-items' }, rows), el('div', { class: 'request-items__add' }, addBtn), el('div', { class: 'field__error', hidden: true }));
-    reg(n, wrap, () => (draft.items.some(it => trim(it.name)) ? null : 'Add at least one item'));
+      el('div', { class: 'request-items', 'data-testid': tid('items') }, rows), el('div', { class: 'request-items__add' }, addBtn), el('div', { class: 'field__error', hidden: true }));
+    reg(n, wrap, () => (list.some(it => trim(it.name)) ? null : 'Add at least one item'));
     return wrap;
   }
   function shopStep(n) {
@@ -1054,9 +1070,12 @@
   function extraCard(n, x, i) {
     const p = 'extra.' + i + '.', tid = k => 'request-extra-' + k + '-' + i;
     const zone = () => F(n, p + 'zone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: tid('zone') });
+    // A shop at this stop (client, 20/11/2026: "no place to enter the item details"): its items one by one, as a shop order lists
+    // them. What a draft from before held as one text becomes the first item.
+    if (x.kind === 'shop' && !(Array.isArray(x.items) && x.items.length)) x.items = [Object.assign(blankItem(), trim(x.list) ? { name: trim(x.list) } : {})];
     const fields = x.kind === 'shop'
       ? [grid(F(n, p + 'shopName', 'Shop name', { placeholder: 'Leave empty and we choose', testid: tid('shop-name') }), zone()),
-        F(n, p + 'list', 'What to buy', { type: 'textarea', required: true, rows: 2, placeholder: 'Items, brands, sizes and how many', testid: tid('list') }),
+        el('div', { class: 'request-extra__items' }, el('div', { class: 'field__label' }, 'Items to buy'), itemsEditor(n, { list: x.items, path: p + 'items.', tid: String(i) })),
         F(n, p + 'shopPhone', 'Shop phone', { type: 'tel', intl: true, landline: true, testid: tid('shop-phone') })]
       : [seg(n, p + 'type', 'Collection type', EXTRA_TYPES, { testid: tid('type'), onChange: () => { saveDraft(); rerender(n); updateSummary(); } })].concat(extraTypeFields(n, x, p, tid, zone));
     const remove = () => { draft.extra.splice(i, 1); saveDraft(); renderStep(n); updateSummary(); const b = dom.steps[n].querySelector('[data-testid="request-extra-add"]'); if (b) b.focus({ preventScroll: true }); };
@@ -1070,12 +1089,13 @@
   function extraTypeFields(n, x, p, tid, zone) {
     const again = () => { saveDraft(); rerender(n); updateSummary(); };
     const note = F(n, p + 'instructions', x.type === 'home' ? 'What to collect and instructions' : 'Instructions', { type: 'textarea', rows: 2, placeholder: 'What the driver picks up, floor, gate', testid: tid('instructions') });
-    const contact = (name, number, ph) => grid(F(n, p + 'contactName', name, { placeholder: ph, testid: tid('contact-name') }), F(n, p + 'contactPhone', number, { type: 'tel', intl: true, landline: true, testid: tid('contact-phone') }));
+    // A collection address needs someone to call (client, 20/11/2026): its contact number is required; a boat's or a parcel owner's is not.
+    const contact = (name, number, ph, need) => grid(F(n, p + 'contactName', name, { placeholder: ph, testid: tid('contact-name') }), F(n, p + 'contactPhone', number, { type: 'tel', intl: true, landline: true, required: !!need, requiredMessage: 'Enter the contact number at this address', testid: tid('contact-phone') }));
     if (x.type === 'boat_collect') return [
       grid(F(n, p + 'details.boatName', 'Boat, ferry or speedboat name', { required: true, placeholder: 'For example Thulusdhoo Express', testid: tid('boat') }),
         F(n, p + 'details.jetty', 'Arriving at', { type: 'select', required: true, placeholder: 'Choose the harbour or jetty', options: MDM.geo.jetties().map(j => ({ value: j.value, label: j.label })), testid: tid('jetty') })),
       grid(F(n, p + 'details.arrivalDate', 'Arrival date', { type: 'date', attrs: { min: today() }, validate: v => (v && v < today() ? 'Choose today or a later date' : null), testid: tid('arrival-date') }),
-        F(n, p + 'details.arrivalTime', 'Arrival time', { type: 'time', required: true, testid: tid('arrival-time') })),
+        F(n, p + 'details.arrivalTime', 'Arrival time', { type: 'time', hint: 'Leave empty if not known yet', testid: tid('arrival-time') })),
       contact('Who hands it over', 'Their number', 'Captain or crew member'), note];
     if (x.type === 'shop_collect') return [
       grid(F(n, p + 'shopName', 'Shop or godown', { required: true, placeholder: 'For example Agora Mall, electronics counter', testid: tid('shop') }), zone()),
@@ -1092,7 +1112,7 @@
     }
     return [grid(F(n, p + 'address', 'Collection address', { required: true, placeholder: 'House or building name, street', testid: tid('address') }), zone()),
       F(n, p + 'landmark', 'Landmark', { placeholder: 'Near a shop, mosque or school', testid: tid('landmark') }),
-      contact('Contact person', 'Contact number', 'Who hands it over'), note];
+      contact('Contact person', 'Contact number', 'Who hands it over', true), note];
   }
   function extraGroup(n) {
     const max = MDM.MAX_EXTRA_COLLECTIONS, full = draft.extra.length >= max;
@@ -1153,7 +1173,8 @@
         check(n, 'extraVehicle', 'Extra vehicle', { testid: 'request-extra-vehicle', hint: 'For several boxes or XL. Charge confirmed with the price.' })) : null,
       MDM.ui.notice('info', shop ? 'If it turns out bigger, we update the size before you pay.'
         : 'No photo? The driver takes one at collection and we price from it. A wrong size is corrected before you pay.'),
-      F(n, 'description', shop ? 'What kind of shopping is it?' : 'What is inside?', { required: true, placeholder: shop ? 'For example a phone, a gift or home appliances' : 'For example documents, a gift box, a phone charger', testid: 'request-description' }),
+      // The office may leave it out (client, 20/11/2026): a caller does not always say what is inside.
+      F(n, 'description', shop ? 'What kind of shopping is it?' : 'What is inside?', { required: !OFFICE, placeholder: shop ? 'For example a phone, a gift or home appliances' : 'For example documents, a gift box, a phone charger', testid: 'request-description' }),
       el('div', { class: 'row row--wrap request-flags' }, check(n, 'fragile', 'Fragile, handle with care')),
       actions()];
   }
@@ -1268,7 +1289,7 @@
     if (t === 'boat_collect') {
       add('Arriving on', [(MDM.VESSEL_TYPES.find(x => x.value === d.vesselType) || {}).label, d.boatName].filter(Boolean).join(': '));
       add('Arriving at', (MDM.geo.terminals().find(x => x.value === d.jetty) || {}).label);
-      add('Arrives', [d.arrivalDate, d.arrivalTime].filter(Boolean).join(' at '));
+      add('Arrives', MDM.arrivalText(d));
       add('Hands it over', [d.senderName, d.senderPhone ? phone.format(d.senderPhone) : ''].filter(Boolean).join(' · '));
       add('Coming from', d.fromIsland);
     }
@@ -1284,7 +1305,7 @@
   // The extra stops (multi collection) as review rows: 'Stop 2' → what happens there.
   function extraRows() {
     return draft.extra.filter(stopReady).map((x, i) => reviewRow('Stop ' + (i + 2), x.kind === 'shop'
-      ? 'Buy at ' + [MDM.shopName({ name: x.shopName }), MDM.geo.zoneLabel(x.zone)].join(', ') + ': ' + trim(x.list)
+      ? 'Buy at ' + [MDM.shopName({ name: x.shopName }), MDM.geo.zoneLabel(x.zone)].join(', ') + ': ' + stopList(x)
       : 'Collect from ' + [trim(x.address), MDM.geo.zoneLabel(x.zone)].join(', ') + ([trim(x.contactName), x.contactPhone ? phone.format(x.contactPhone) : ''].filter(Boolean).length ? ', ' + [trim(x.contactName), x.contactPhone ? phone.format(x.contactPhone) : ''].filter(Boolean).join(' ') : '') + (trim(x.instructions) ? ' (' + trim(x.instructions) + ')' : '')));
   }
   function collectionRows() {
@@ -1448,7 +1469,7 @@
       delete details.courierOther; delete details.courierZone;
       if (details.ownerContact) details.ownerContact = normPhone(details.ownerContact);
       if (details.collectBefore) details.collectBefore = details.collectBefore.replace('T', ' ');
-      if (det.carrier === 'post_office' && !trim(det.collectionCode)) details.idNote = 'No collection code; the owner gives their ID details to the post collections contact';
+      if (det.carrier === 'post_office' && !trim(det.collectionCode)) details.idNote = 'No collection code: the owner sends both sides of the ID card to our post collections number once a driver is assigned';
     }
     if (t === 'shop_collect') details.paidByCustomer = true;
     if (t === 'boat_collect' && details.senderPhone) details.senderPhone = normPhone(details.senderPhone) || details.senderPhone;

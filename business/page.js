@@ -15,7 +15,7 @@
   const TABS = [
     { key: 'overview', label: 'Home' }, { key: 'new', label: 'One order' }, { key: 'bulk', label: 'Bulk' }, { key: 'excel', label: 'Excel' },
     { key: 'orders', label: 'All orders' }, { key: 'cod', label: 'Cash on delivery' }, { key: 'points', label: 'Account' },
-    { key: 'priority', label: 'Priority' }, { key: 'invoices', label: 'Invoices' }, { key: 'labels', label: 'Labels' },
+    { key: 'priority', label: 'Priority' }, { key: 'invoices', label: 'Payments' }, { key: 'labels', label: 'Labels' },
   ];
   // Five destinations; a destination with more than one tab shows them as a segmented control. Every tab keeps its own hash and its
   // biz-tab-<key> testid (on the destination itself when it has one tab, on the segment otherwise).
@@ -166,7 +166,7 @@
     ['banknote', 'Cash on delivery', 'We collect it and pay you.'],
     ['ship', 'Boat, cargo, airport', 'Islands and resorts too.'],
     ['printer', 'Labels and tracking', 'A code and a label per package.'],
-    ['receipt', 'Weekly invoice', 'Pay weekly or daily.'],
+    ['receipt', 'Pay as you go', 'After each delivery, or by the 14th and 28th.'],
   ];
   function featuresBlock() {
     return el('ul', { class: 'biz-features', 'data-reveal-group': '' }, FEATURES.map(f => el('li', { class: 'biz-feature', 'data-reveal': '' },
@@ -259,8 +259,13 @@
       list.hidden = !st.items.length;
       list.replaceChildren(...st.items.map((it, i) => el('li', { class: 'biz-photos__item', 'data-testid': 'business-photo-item' },
         el('img', { class: 'biz-photos__thumb', src: it.img.dataUrl, alt: 'Package photo ' + (i + 1) }),
-        el('input', { class: 'input biz-photos__note', type: 'text', maxlength: '60', value: it.note, placeholder: 'Note, like "small, a phone case"', 'aria-label': 'Note for photo ' + (i + 1), 'data-testid': 'business-photo-note',
-          on: { input: e => { it.note = e.target.value; } } }),
+        // The size the business thinks it is (client, 20/11/2026: "submit one or several package sizes and pictures for each"); our
+        // team confirms it when it sets the rates.
+        el('div', { class: 'biz-photos__fields' },
+          (sel => { sel.value = it.tier || ''; return sel; })(el('select', { class: 'select biz-photos__size', 'aria-label': 'Size of the package in photo ' + (i + 1), 'data-testid': 'business-photo-size', on: { change: e => { it.tier = e.target.value; } } },
+            el('option', { value: '' }, 'Size: not sure'), allTiers().map(t => el('option', { value: t.value }, t.label)))),
+          el('input', { class: 'input biz-photos__note', type: 'text', maxlength: '60', value: it.note, placeholder: 'What it is, like "phone cases"', 'aria-label': 'Note for photo ' + (i + 1), 'data-testid': 'business-photo-note',
+            on: { input: e => { it.note = e.target.value; } } })),
         el('button', { type: 'button', class: 'btn btn--ghost btn--sm biz-photos__remove', 'aria-label': 'Remove photo ' + (i + 1), 'data-testid': 'business-photo-remove',
           on: { click: () => { st.items = st.items.filter(x => x !== it); draw(); const next = zone.querySelector('[data-testid="business-photo-remove"]') || chooseBtn; next.focus(); onChange && onChange(); } } }, 'Remove'))));
       const full = st.items.length >= MAX_PHOTOS;
@@ -278,7 +283,7 @@
       const room = MAX_PHOTOS - st.items.length;
       if (pics.some(f => !/^image\//.test(f.type || ''))) setError(fileInput, 'Choose photos (JPG or PNG)');
       const run = pics.filter(f => /^image\//.test(f.type || '')).slice(0, Math.max(0, room)).reduce((p, file) => p.then(() => MDM.ui.imageToJpeg(file, { maxEdge: 1200, quality: 0.8 })
-        .then(img => { st.items.push({ id: ++st.seq, file, img, note: '' }); setError(fileInput, null); })
+        .then(img => { st.items.push({ id: ++st.seq, file, img, note: '', tier: '' }); setError(fileInput, null); })
         .catch(() => { setError(fileInput, 'We could not read a photo. Choose a JPG or PNG image.'); })), Promise.resolve());
       st.busy = run.then(() => { draw(); onChange && onChange(); }).finally(() => { st.busy = null; });
       await st.busy;
@@ -288,7 +293,7 @@
     zone.addEventListener('dragleave', () => zone.classList.remove('is-over'));
     zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('is-over'); take(e.dataTransfer && e.dataTransfer.files); });
     draw();
-    return { el: zone, input: fileInput, get: () => st.items.map(it => ({ file: it.file, img: it.img, note: String(it.note || '').trim() })), ready: () => st.busy || Promise.resolve(), focus: () => chooseBtn.focus() };
+    return { el: zone, input: fileInput, get: () => st.items.map(it => ({ file: it.file, img: it.img, note: String(it.note || '').trim(), tier: it.tier || '' })), ready: () => st.busy || Promise.resolve(), focus: () => chooseBtn.focus() };
   }
   function requestForm(s) {
     const f = el('form', { class: 'form', novalidate: true, 'data-testid': 'business-form' });
@@ -363,7 +368,7 @@
         const at = new Date().toISOString();
         for (const pic of pics) {
           const row = await MDM.store.insert('files', { kind: 'business_package', orderId: null, name: pic.file.name || 'package.jpg', type: pic.img.type, size: pic.img.size, width: pic.img.width, height: pic.img.height, dataUrl: pic.img.dataUrl, note: pic.note, at });
-          saved.push({ fileId: row.id, note: pic.note });
+          saved.push({ fileId: row.id, note: pic.note, tier: pic.tier || '' });
         }
         state.received = await MDM.store.insert('business_requests', {
           name: r.values.name, contactName: r.values.contactName, phone, landline: MDM.ui.phone.normalize(r.values.landline) || '', email: r.values.email,
@@ -401,7 +406,7 @@
     const applyBtn = el('a', { class: 'btn btn--brand btn--lg', href: '#apply', 'data-testid': 'business-apply', on: { click: e => { e.preventDefault(); toForm(true); } } }, 'Request an account');
     app.replaceChildren(el('div', { class: 'container container--narrow biz-public' },
       el('div', { class: 'page-head page-head--stack' }, el('h1', null, 'Delivery for businesses'),
-        el('p', { class: 'page-head__desc' }, 'Fixed rates, daily pickups and weekly invoice.'),
+        el('p', { class: 'page-head__desc' }, 'Fixed rates, daily pickups, and payment after each delivery or twice a month.'),
         el('div', { class: 'page-head__actions' }, applyBtn)),
       signinCard(),
       el('section', { class: 'section', 'aria-label': 'What you get' }, featuresBlock()),
@@ -518,15 +523,38 @@
     return el('section', Object.assign({ class: 'card' }, attrs || {}), el('div', { class: 'card__header' }, el('h2', null, title), action || null), body);
   }
   const headLink = (text, href, testid) => el('a', { class: 'biz-link', href, 'data-testid': testid || null }, text, html(MDM.icon('chevron-right', 16)));
+  // The business's sizes with what each means for it (the office's description), its package photos with their size, and "Add a
+  // package type" for a new kind of packaging (client, 20/11/2026): its photo goes to our team, who set its size and rate.
   async function ratesCard(acc) {
-    const tiers = tiersOf(acc), rates = state.settings.rates || {};
-    const photo = acc.packagePhotoId ? await MDM.store.get('files', acc.packagePhotoId) : null;
+    const tiers = tiersOf(acc), rates = state.settings.rates || {}, notes = acc.rateNotes || {};
+    const photos = MDM.requestPhotos(acc), files = {};
+    for (const ph of photos) files[ph.fileId] = await MDM.store.get('files', ph.fileId);
+    const sizeName = v => (allTiers().find(t => t.value === v) || {}).label || '';
+    const shown = photos.filter(ph => files[ph.fileId] && files[ph.fileId].dataUrl);
     return panelCard('Your rates', null, [
-      el('div', { class: 'rate-table' }, tiers.map(t => MDM.ui.rateRow(t.label, money(t.rate), { sub: MDM.pricing.sizeLabel(t.size), mono: true }))),
+      el('div', { class: 'rate-table' }, tiers.map(t => MDM.ui.rateRow(t.label, money(t.rate), { sub: notes[t.value] || MDM.pricing.sizeLabel(t.size), mono: true }))),
       el('div', { class: 'card__body stack-3 biz-rates__foot' },
-        photo && photo.dataUrl || acc.assessment ? el('div', { class: 'row row--start biz-photo-note' }, photo && photo.dataUrl ? el('img', { class: 'thumb', src: photo.dataUrl, alt: 'Your typical package' }) : null,
-          el('p', { class: 'small muted' }, acc.assessment ? acc.assessment : 'Agreed from your package photo.')) : null,
+        shown.length ? el('div', { class: 'biz-packages', 'data-testid': 'biz-packages' }, shown.map((ph, i) => el('figure', { class: 'biz-packages__item', 'data-testid': 'biz-package' },
+          el('img', { class: 'thumb', src: files[ph.fileId].dataUrl, alt: 'Your package ' + (i + 1) }),
+          el('figcaption', { class: 'small muted' }, [sizeName(ph.tier), ph.note].filter(Boolean).join(' · ') || 'Size being set')))) : null,
+        acc.assessment ? el('p', { class: 'small muted' }, acc.assessment) : null,
+        el('div', { class: 'row row--wrap' }, el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'biz-package-add', on: { click: () => addPackageType(acc) } }, html(MDM.icon('plus', 16)), 'Add a package type'),
+          el('span', { class: 'small muted' }, 'A new kind of packaging? Send its photo and we set its size.')),
         el('p', { class: 'small muted' }, 'Cargo + ' + money(rates.cargo) + ' · Airport + ' + money(rates.airport)))], { 'data-testid': 'biz-rates' });
+  }
+  async function addPackageType(acc) {
+    const v = await MDM.ui.dialog({ title: 'Add a package type', message: 'A photo of the package (put a phone next to it for scale), the size you think it is, and what it is. Our team checks it and tells you its rate.', okLabel: 'Send photo',
+      fields: [{ name: 'photo', label: 'Photo', type: 'file', accept: 'image/*', required: true, requiredMessage: 'Add a photo of the package' },
+        { name: 'tier', label: 'Size', type: 'select', required: false, options: [{ value: '', label: 'Not sure' }].concat(allTiers().map(t => ({ value: t.value, label: t.label }))), value: '' },
+        { name: 'note', label: 'What it is', type: 'text', required: false, placeholder: 'Gift boxes, about 30 cm' }] });
+    if (!v) return;
+    try {
+      const img = await MDM.ui.imageToJpeg(v.photo, { maxEdge: 1200, quality: 0.8 });
+      const f = await MDM.store.insert('files', { kind: 'business_package', orderId: null, name: v.photo.name || 'package.jpg', type: img.type, size: img.size, width: img.width, height: img.height, dataUrl: img.dataUrl, note: v.note || '', at: new Date().toISOString() });
+      await MDM.store.addBusinessPackage(acc.id, { fileId: f.id, tier: v.tier || '', note: v.note || '', by: 'business:' + acc.id });
+      MDM.ui.toast('Photo sent. We check it and set its size and rate.', 'ok');
+      renderTab();
+    } catch (e) { MDM.ui.toast((e && e.message) || 'We could not add the photo', 'danger'); }
   }
   async function tabOverview(opts) {
     const d = await load();
@@ -545,7 +573,11 @@
     const batches = d.batches.slice(0, 3);
     const codes = list => list.map((o, i) => [i ? ', ' : '', el('a', { href: trackHref(o) }, o.code)]);
     return el('div', { class: 'stack-6 biz-home' },
-      failed.length ? MDM.ui.notice('warn', el('div', null, codes(failed), ' could not be delivered. We will call you.'), { title: 'Needs attention' }) : null,
+      // Each failed order with what our driver reported (client, 20/11/2026), linked to its tracking page.
+      failed.length ? MDM.ui.notice('warn', el('div', { class: 'stack-2', 'data-testid': 'biz-failed' }, failed.map(o => {
+        const x = ((o.route && o.route.stops) || []).find(s => s.status === 'failed'), why = x ? String(x.remarks || '').trim() || MDM.failReasonLabel(x) : '';
+        return el('div', null, el('a', { href: trackHref(o) }, o.code), ' ' + (x && x.type === 'pickup' ? 'could not be collected' : 'could not be delivered') + (why ? ': ' + why : '') + (/[.!?]$/.test(why) ? '' : '.'));
+      }), el('div', null, 'We will call you about what happens next.')), { title: 'Needs attention' }) : null,
       returning.length ? MDM.ui.notice('info', el('div', null, 'Cancelled, coming back to you: ', codes(returning), '.'), { title: 'Returning to you', testid: 'biz-returning' }) : null,
       el('div', { class: 'kpi-row biz-kpis' },
         kpi('Open orders', String(open.length), open.filter(o => o.status === 'out_for_delivery').length + ' out now', 'biz-kpi-open', cu),
@@ -751,7 +783,7 @@
         el('div', { class: 'biz-sum stack-4' },
           el('h2', { class: 'biz-sum__title' }, 'Summary'),
           priceBox, failure, submit,
-          el('p', { class: 'small muted biz-sum__note' }, 'Invoiced weekly. Nothing to pay now.'))));
+          el('p', { class: 'small muted biz-sum__note' }, 'Nothing to pay now. Due after delivery, by the 14th or 28th.'))));
     single.cards.forEach(addCard);
     const tierOf = c => tiers.find(t => t.value === c.row.tier) || null;
     const qtyOf = c => Math.max(1, Math.min(20, Math.round(Number(c.qty.value) || 1)));
@@ -1598,28 +1630,55 @@
   // ---- Invoices ----------------------------------------------------------------------------------------------------------------
   // One invoice per billing week, Sunday to Saturday (MDM.billingWeek); older invoices cover a month and still list by their start.
   const periodStart = inv => (MDM.invoicePeriod(inv) || {}).from || '';
+  // Payments (client, 20/11/2026): what is due now, delivery by delivery (a delivery is due once our team has finalised its charges;
+  // a package returned to the business is charged the delivery once), payable at once or by the next 14th or 28th; then the invoices,
+  // each paid with one transfer and its slip uploaded here.
   async function tabInvoices() {
     const d = await load();
-    const week = MDM.billingWeek(new Date());
-    const delivered = d.orders.filter(o => o.status === 'delivered' && MDM.inPeriod(week, deliveredAt(o)));
-    const pkgs = delivered.reduce((n, o) => n + (o.packages || []).length, 0);
-    const amount = delivered.reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0);
+    const own = d.orders.filter(o => (o.payment || {}).method === 'invoice');
+    const sum = list => list.reduce((n, o) => n + (o.totals ? o.totals.total : 0), 0);
+    const due = own.filter(o => o.payment.status === 'requested' && MDM.completedAt(o)).sort((a, b) => (MDM.completedAt(a) < MDM.completedAt(b) ? 1 : -1));
+    const checking = own.filter(o => o.payment.status === 'received'), finalising = own.filter(MDM.toFinalise);
+    const next = due.map(o => o.payment.dueAt).filter(Boolean).sort()[0];
     const invoices = d.invoices.slice().sort((a, b) => periodStart(a) < periodStart(b) ? 1 : periodStart(a) > periodStart(b) ? -1 : (a.number < b.number ? 1 : -1));
+    const banks = (d.settings.banks || []);
+    const paySlip = async inv => {
+      try {
+        const v = await MDM.slipDialog({ title: 'Pay invoice ' + inv.number, amount: inv.total, reference: inv.number, banks, message: MDM.pricing.format(inv.total, { cents: true }) + ' for ' + MDM.periodLabel(inv) + '.' });
+        if (!v) return;
+        await MDM.store.submitInvoicePayment(inv.id, Object.assign({ by: 'business:' + state.acc.id }, v));
+        MDM.ui.toast('Slip sent for ' + inv.number + '. We check it and mark the invoice paid.', 'ok');
+        renderTab();
+      } catch (e) { MDM.ui.toast((e && e.message) || 'We could not send the slip', 'danger'); }
+    };
+    const dueRows = due.map(o => el('tr', { 'data-testid': 'biz-due-row', 'data-order-id': o.id },
+      el('td', { class: 'table__primary' }, el('a', { class: 'mono--code', href: trackHref(o) }, o.code), o.status !== 'delivered' ? el('span', { class: 'table__sub' }, 'Returned to you') : null),
+      el('td', { 'data-label': 'Done' }, fmtDate(MDM.completedAt(o), { dateOnly: true })),
+      el('td', { 'data-label': 'Receiver' }, (o.delivery || {}).recipientName || ''),
+      el('td', { class: 'num mono', 'data-label': 'Amount' }, money(o.totals.total)),
+      el('td', null, el('a', { class: 'btn btn--secondary btn--sm', href: MDM.href('checkout/?order=' + encodeURIComponent(o.id)), 'data-testid': 'biz-due-pay' }, 'Pay'))));
     return el('div', { class: 'stack-6' },
-      panelCard('This week so far', el('span', { class: 'small muted', 'data-testid': 'biz-invoice-week' }, MDM.periodLabel(week)), el('div', { class: 'rate-table' },
-        MDM.ui.rateRow('Packages delivered', String(pkgs)), MDM.ui.rateRow('Orders', String(delivered.length)), MDM.ui.rateRow('Amount', money(amount), { mono: true }),
-        MDM.ui.rateRow('Payment', 'Bank transfer', { valueSub: 'Due in ' + plural(d.settings.invoiceDueDays || 14, 'day') }))),
+      panelCard('Amount due', el('span', { class: 'small muted', 'data-testid': 'biz-due-date' }, next ? 'Due by ' + fmtDate(next, { dateOnly: true }) : 'Due on the 14th and 28th'), el('div', { class: 'card__body stack-4' },
+        el('div', { class: 'rate-table' },
+          MDM.ui.rateRow('To pay now', el('span', { 'data-testid': 'biz-due-total' }, money(sum(due))), { mono: true, valueSub: plural(due.length, 'delivery', 'deliveries') }),
+          checking.length ? MDM.ui.rateRow('Slips we are checking', money(sum(checking)), { mono: true, valueSub: plural(checking.length, 'delivery', 'deliveries') }) : null,
+          finalising.length ? MDM.ui.rateRow('Being finalised', plural(finalising.length, 'delivery', 'deliveries'), { valueSub: 'The amount shows here once our team has checked the charges' }) : null),
+        due.length ? el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'biz-due' },
+          el('thead', null, el('tr', null, ['Order', 'Done', 'Receiver', 'Amount', ''].map((h, i) => el('th', { class: i === 3 ? 'num' : null }, h)))), el('tbody', null, dueRows))) : null,
+        el('p', { class: 'small muted' }, 'Pay a delivery on its own, or pay an invoice below with one transfer. Everything is due on the 14th and the 28th of each month.'))),
       el('div', { class: 'card' }, el('div', { class: 'card__header' }, el('h2', null, 'Invoices')),
         invoices.length ? el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'biz-invoices' },
-          el('thead', null, el('tr', null, ['Invoice', 'Week', 'Status', 'Due', 'Total', ''].map((h, i) => el('th', { class: i === 4 ? 'num' : null }, h)))),
-          el('tbody', null, invoices.map(inv => el('tr', null,
+          el('thead', null, el('tr', null, ['Invoice', 'Period', 'Status', 'Due', 'Total', ''].map((h, i) => el('th', { class: i === 4 ? 'num' : null }, h)))),
+          el('tbody', null, invoices.map(inv => el('tr', { 'data-testid': 'biz-invoice-row', 'data-status': MDM.invoiceState(inv) },
             el('td', { class: 'table__primary' }, el('span', { class: 'mono--code' }, inv.number)),
-            el('td', { 'data-label': 'Week' }, MDM.periodLabel(inv)),
-            el('td', { 'data-label': 'Status' }, html(MDM.ui.invoiceBadge(inv.status))),
-            el('td', { 'data-label': 'Due' }, fmtDate(inv.dueAt, { dateOnly: true })),
+            el('td', { 'data-label': 'Period' }, MDM.periodLabel(inv)),
+            el('td', { 'data-label': 'Status' }, html(MDM.ui.invoiceBadge(MDM.invoiceState(inv))), inv.status !== 'paid' && inv.payment && inv.payment.rejectReason ? el('span', { class: 'table__sub', 'data-testid': 'biz-invoice-rejected' }, 'Slip not accepted: ' + inv.payment.rejectReason) : null),
+            el('td', { 'data-label': 'Due' }, inv.status === 'paid' ? 'Paid ' + fmtDate(inv.paidAt, { dateOnly: true }) : fmtDate(inv.dueAt, { dateOnly: true })),
             el('td', { class: 'num mono', 'data-label': 'Total' }, MDM.pricing.format(inv.total, { cents: true })),
-            el('td', null, el('a', { class: 'btn btn--secondary btn--sm', href: MDM.href('admin/invoice.html?id=' + encodeURIComponent(inv.id)), target: '_blank', rel: 'noopener', 'data-testid': 'biz-invoice-open' }, 'Open')))))))
-          : empty('No invoices yet', 'The first one comes when your first week ends. Weeks run Sunday to Saturday.')));
+            el('td', null, el('div', { class: 'row row--wrap' },
+              ['paid', 'received'].indexOf(MDM.invoiceState(inv)) < 0 ? el('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-testid': 'biz-invoice-pay', on: { click: () => paySlip(inv) } }, 'Upload slip') : null,
+              el('a', { class: 'btn btn--secondary btn--sm', href: MDM.href('admin/invoice.html?id=' + encodeURIComponent(inv.id)), target: '_blank', rel: 'noopener', 'data-testid': 'biz-invoice-open' }, 'Open'))))))))
+          : empty('No invoices yet', 'Our team sends one for what is not paid yet. You can pay each delivery before that.')));
   }
 
   // ---- Labels (How it works §9) ------------------------------------------------------------------------------------------------

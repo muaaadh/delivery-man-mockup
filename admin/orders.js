@@ -256,7 +256,7 @@
   function person(name, ph) { return [trim(name), ph ? phone.format(ph) : ''].filter(Boolean).join(' · '); }
   function contactLinks(ph) {
     const l = phone.links(ph);
-    return l ? el('small', { class: 'contact-links' }, el('a', { href: l.tel }, 'Call'), ' · ', el('a', { href: l.wa, target: '_blank', rel: 'noopener' }, 'WhatsApp'), ' · ', el('a', { href: l.sms }, 'SMS')) : null;
+    return l ? el('small', { class: 'contact-links' }, el('a', { href: l.tel }, 'Call'), ' · ', el('a', { href: l.wa, target: '_blank', rel: 'noopener' }, 'WhatsApp'), ' · ', el('a', { href: l.viber, 'data-testid': 'contact-viber' }, 'Viber'), ' · ', el('a', { href: l.sms }, 'SMS')) : null;
   }
   function bankName(id) { const b = ((state.settings || {}).banks || []).find(x => x.id === id); return b ? b.name : (id === 'other' ? 'Other bank' : (id || '')); }
   function thumbButton(file, text) {
@@ -442,6 +442,8 @@
     }
     if (d.budget != null && d.budget !== '') rows.push(row('Budget', money(d.budget), { mono: true }));
     keys.forEach(k => rows.push(row(DETAIL_LABELS[k] || k.replace(/([A-Z])/g, ' $1').toLowerCase().replace(/^./, c => c.toUpperCase()), detailValue(k, d[k]))));
+    // A boat collection booked before its time was known (20/11/2026).
+    if (o.requestType === 'boat_collect' && !d.arrivalTime) rows.push(row('Arrival time', 'To be confirmed'));
     const shopItems = Array.isArray(d.items) && d.items.length ? el('div', { class: 'stack-2 item-list' }, el('h4', null, 'Items to buy (' + d.items.length + ')'),
       el('div', { class: 'list', 'data-testid': 'drawer-items' }, d.items.map((i, n) => el('div', { class: 'list__item', 'data-testid': 'drawer-item' },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, (n + 1) + '. ' + (i.name || 'Item')),
@@ -655,14 +657,18 @@
       return el('div', { class: 'list__item', 'data-testid': 'drawer-package', 'data-package-id': pkg.id, 'data-size': pkg.size },
         el('div', { class: 'list__main' },
           el('div', { class: 'list__title' }, (i + 1) + '. ' + MDM.pricing.sizeLabel(pkg.size) + (pkg.description ? ' · ' + pkg.description : '')),
-          el('div', { class: 'list__meta' }, CATEGORY_SOURCE[pkg.sizeSource] || CATEGORY_SOURCE.estimate),
+          el('div', { class: 'list__meta' }, pkg.addedAt ? 'Added ' + fmtDate(pkg.addedAt) + ' by ' + F.byLabel(pkg.addedBy) : CATEGORY_SOURCE[pkg.sizeSource] || CATEGORY_SOURCE.estimate),
           lines.map(l => el('div', { class: 'list__meta' }, l)),
           tags.length ? el('div', { class: 'tags' }, tags.map(f => el('span', { class: 'tag' }, f))) : null,
           photo.length ? el('div', { class: 'thumbs' }, photo) : null),
         el('div', { class: 'list__aside' }, el('span', { class: 'mono' }, money(pkg.price ? shown[i] : 0)),
           canChange ? el('div', { class: 'row' }, rowBtn('Change category', 'drawer-change-category', () => changeCategory(o, pkg.id), 'btn--secondary', { 'data-package-id': pkg.id })) : null));
     });
-    return sec('Packages', 'drawer-packages', el('div', { class: 'list' }, items), categoryHistory(o));
+    // A package on top of the booked ones (client, 20/11/2026): the customer hands one more over at the collection, or says so on
+    // the phone. Until the order is delivered.
+    const canAdd = open(o) && o.service !== 'store' && (o.packages || []).length > 0;
+    return sec('Packages', 'drawer-packages', el('div', { class: 'list' }, items),
+      canAdd ? el('div', { class: 'row row--wrap', style: { marginTop: '12px' } }, smallBtn('Add package', 'drawer-add-package', () => addPackage(o, ctx))) : null, categoryHistory(o));
   }
   // Category changes (§2.3) with the order total before and after: the store writes a price-history entry for each change ('Package
   // category changed: XL to Box', business packages included since it re-prices them itself); older orders fall back to o.changes.
@@ -855,8 +861,26 @@
     const st = p.status || 'pending';
     const rows = [rowNode('Status', el('span', null, html(MDM.payBadge(st).replace('<span ', '<span data-testid="drawer-payment-status" ')), p.upfront ? el('small', null, 'Requested before delivery') : null))];
     if (p.method === 'invoice') {
-      rows.push(row('Method', 'Weekly business invoice'), row('Amount', money(o.totals.total), { mono: true }));
-      return sec('Payment', 'drawer-payment', el('div', { class: 'rate-table' }, rows), o.accountId && MDM.admin.can('business') ? el('p', { class: 'muted small' }, el('a', { href: '#/business/' + encodeURIComponent(o.accountId) }, 'Open the account invoices')) : null);
+      // A business order (client, 20/11/2026): on account until it is delivered or returned and the office finalises its charges
+      // here; then the amount is due on the next 14th or 28th, and the business may pay it at once with a slip, or with the invoice
+      // that lists it.
+      const done = !!MDM.completedAt(o);
+      rows.push(row('Method', 'Business account, bank transfer'), row(st === 'paid' ? 'Amount paid' : st === 'invoiced' ? 'Amount' : 'Amount due', money(o.totals.total), { mono: true }));
+      if (st === 'invoiced') rows.push(row('When', MDM.toFinalise(o) ? 'Once the charges are finalised: the business then sees the amount and can pay' : done ? 'Billed on its invoice' : 'After delivery, once the charges are finalised'));
+      if (p.requestedAt) rows.push(row('Finalised', fmtDate(p.requestedAt) + ' by ' + F.byLabel(p.requestedBy)));
+      if (p.dueAt && st !== 'paid') rows.push(row('Due', fmtDate(p.dueAt, { dateOnly: true })));
+      if (p.submittedAt) rows.push(row('Slip received', fmtDate(p.submittedAt)));
+      const slipB = p.slip && ctx.fileById[p.slip.fileId];
+      if (p.slip) rows.push(rowNode('Transfer slip', slipB ? el('span', { class: 'slip' }, thumbButton(slipB, 'transfer slip ' + o.code), el('small', null, p.slip.name)) : el('span', null, p.slip.name, el('small', null, 'File missing from this browser'))));
+      if (st === 'paid') rows.push(row('Paid', fmtDate(p.paidAt || p.verifiedAt) + (p.invoiceNumber ? ' with invoice ' + p.invoiceNumber : '') + (p.verifiedBy ? ' · ' + F.byLabel(p.verifiedBy) : '')));
+      if (p.note) rows.push(row('Note', p.note));
+      if (p.rejectReason) rows.push(row('Last rejection', p.rejectReason));
+      const acts = [];
+      if (MDM.toFinalise(o)) acts.push(smallBtn('Finalise charges', 'drawer-finalise-charges', () => finaliseCharges(o), 'btn--primary'));
+      if (st === 'received') acts.push(smallBtn('Reject slip', 'drawer-reject', () => rejectPayment(o)), smallBtn('Verify payment', 'drawer-verify', () => verify(o), 'btn--primary'));
+      if (st === 'requested' || st === 'received') acts.push(smallBtn('Mark as paid', 'drawer-mark-paid', () => markPaid(o)));
+      if (o.accountId && MDM.admin.can('business')) acts.push(el('a', { class: 'btn btn--ghost btn--sm', href: '#/business/' + encodeURIComponent(o.accountId), 'data-testid': 'drawer-account-invoices' }, 'Account and invoices'));
+      return sec('Payment', 'drawer-payment', el('div', { class: 'rate-table' }, rows), acts.length ? el('div', { class: 'row row--wrap', style: { marginTop: '12px' } }, acts) : null);
     }
     rows.push(row('Method', p.method === 'cash' ? 'Cash' : 'Bank transfer'));
     rows.push(row('When', p.upfrontRequired ? 'Before collection (shopping and upfront orders)' : ((state.settings || {}).rules || {}).paymentTiming === 'upfront' ? 'Upfront once the price is confirmed' : 'After delivery, upfront optional'));
@@ -985,16 +1009,61 @@
     return sec('Activity', 'drawer-activity', el('div', { class: 'timeline' }, items));
   }
 
+  // "Scan": the QR code of a label (or its number typed) opens the order; a bulk order's number opens the bulk order.
+  async function scanLabel() {
+    const code = await MDM.ui.scanCode({ title: 'Scan a label', hint: 'Point the camera at the QR code on the package label.' });
+    if (!code) return;
+    if (/^BLK-/.test(code)) {
+      const b = (await MDM.store.list('batches')).find(x => x.code === code);
+      if (!b) { toast('No bulk order ' + code, 'warn'); return; }
+      if (MDM.admin.can('bulk')) MDM.admin.navigate('#/bulk/' + encodeURIComponent(b.id)); else setFilters({ view: 'list', batch: b.id });
+      return;
+    }
+    const o = await MDM.store.orderByCode(code);
+    if (!o) { toast('No order ' + code, 'warn'); return; }
+    MDM.admin.openOrder(o.id);
+    if (!o.driverId && ['requested', 'confirmed'].indexOf(o.status) >= 0) toast(o.code + ': choose its driver at the bottom', 'ok');
+  }
+
+  // "Add package": its category (a business order's size, at the account's rate), what it is, where it is collected when the order
+  // has several collections, and a photo if there is one. Saved by store.addPackage, as from the driver's phone.
+  async function addPackage(o, ctx) {
+    const business = o.service === 'business';
+    const options = business ? MDM.pricing.businessTiers(state.settings).map(t => ({ value: t.value, label: t.label + ' · ' + money(MDM.pricing.businessRate(ctx.account, t.value, state.settings)) }))
+      : Object.keys(MDM.pricing.SIZES).map(k => ({ value: k, label: MDM.pricing.SIZES[k] }));
+    const first = (o.packages || [])[0] || {};
+    const pickups = ((o.route && o.route.stops) || []).filter(x => x.type === 'pickup' && !x.shop);
+    const fields = [{ name: 'size', label: business ? 'Package size' : 'Category', type: business ? 'select' : 'segmented', required: true, options, value: business ? first.tier || (options[0] || {}).value : first.size || 'bag' },
+      { name: 'description', label: 'What is it', type: 'text', required: false, placeholder: 'A second bag of clothes' },
+      { name: 'fragile', label: 'Fragile', type: 'checkbox', required: false, value: false }];
+    if (pickups.length > 1) fields.push({ name: 'stopId', label: 'Collected at', type: 'select', required: true, options: pickups.map((x, i) => ({ value: x.id, label: 'Collection ' + (i + 1) + ' · ' + (x.address || '') })), value: (pickups.find(x => x.status !== 'done') || pickups[0]).id });
+    fields.push({ name: 'photo', label: 'Photo', type: 'file', accept: 'image/*', required: false });
+    const v = await dialog({ title: 'Add a package to ' + o.code, message: 'One more package than booked. It is collected and delivered with the others, at the price of its ' + (business ? 'size.' : 'category.') + (MDM.priceAfterCollection(o) ? ' The price is still set after collection.' : ''), okLabel: 'Add package', fields });
+    if (!v) return;
+    const photoId = v.photo ? await storePhoto(v.photo, o.id, 'package') : null;
+    const saved = await MDM.store.addPackage(o.id, Object.assign({ description: v.description || '', fragile: !!v.fragile, photoId, stopId: v.stopId || (pickups[0] || {}).id || null, by: by() }, business ? { tier: v.size } : { size: v.size }));
+    toast('Package added: ' + o.code + ' is now ' + money(saved.totals.total), 'ok');
+  }
+
   // ---- Drawer footer: the next step for this status ---------------------------------------------------------------------------
   function btn(text, testid, cls, fn, attrs) { return el('button', Object.assign({ type: 'button', class: 'btn ' + cls, 'data-testid': testid, on: { click: () => act(fn) } }, attrs || {}), text); }
   // The payment step of a delivered order (client, 31/10/2026: "Request payment" beside Labels; 16/11/2026: a button for every payment
   // stage): the price still to finalise, then Request payment, then Mark as paid, or Verify payment once a slip is in. The same steps as
   // the board's cards (boardStep). An order on the weekly invoice is paid with its invoice, a paid one has nothing left to do.
   function paymentStep(o) {
+    const p = o.payment || {};
+    // A business order (20/11/2026): its charges are finalised once it is delivered or returned, then it is paid like any other.
+    if (p.method === 'invoice') {
+      if (o.status === 'delivered' && MDM.priceToFinalise(o)) return { key: 'price', label: 'Finalise price', testid: 'drawer-footer-finalise', run: () => confirmPrice(o) };
+      if (MDM.toFinalise(o)) return { key: 'finalise', label: 'Finalise charges', testid: 'drawer-footer-finalise-charges', run: () => finaliseCharges(o) };
+      if (!MDM.completedAt(o)) return null;
+      if (p.status === 'requested') return { key: 'paid', label: 'Mark as paid', testid: 'drawer-footer-mark-paid', run: () => markPaid(o) };
+      if (p.status === 'received') return { key: 'verify', label: 'Verify payment', testid: 'drawer-footer-verify', run: () => verify(o) };
+      return null;
+    }
     if (o.status !== 'delivered') return null;
     if (MDM.priceToFinalise(o)) return { key: 'price', label: 'Finalise price', testid: 'drawer-footer-finalise', run: () => confirmPrice(o) };
-    const p = o.payment || {};
-    if (p.method === 'invoice' || p.status === 'invoiced') return null;
+    if (p.status === 'invoiced') return null;
     if (p.status === 'pending') return { key: 'request', label: 'Request payment', testid: 'drawer-footer-request-payment', run: () => requestPayment(o) };
     if (p.status === 'requested') return { key: 'paid', label: 'Mark as paid', testid: 'drawer-footer-mark-paid', run: () => markPaid(o) };
     if (p.status === 'received') return { key: 'verify', label: 'Verify payment', testid: 'drawer-footer-verify', run: () => verify(o) };
@@ -1025,7 +1094,7 @@
     else if (st === 'confirmed' || MDM.waitingAtOffice(o)) {
       const sel = assignSelect(o, ctx, 'drawer-assign-driver');
       items.push(sel, btn('Assign driver', 'drawer-assign', 'btn--primary', () => assign(o, sel.value)));
-    } else if (st === 'assigned') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('Dispatch', 'drawer-dispatch', 'btn--primary', () => dispatchOrder(o)));
+    } else if (st === 'assigned') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('Dispatch', 'drawer-dispatch', 'btn--brand', () => dispatchOrder(o)));
     else if (st === 'dispatched') items.push(btn('Reassign', 'drawer-reassign', 'btn--secondary', () => reassign(o, ctx)), btn('On the way', 'drawer-start', 'btn--primary', () => startRoute(o)));
     // Reassign at every stage (client, 05/11/2026): before the collection too, the new driver goes to collect it.
     else if (st === 'on_the_way') items.push(btn('Report failed', 'drawer-fail', 'btn--ghost', () => reportFailed(o)), btn('Reassign', 'drawer-reassign', 'btn--ghost', () => reassign(o, ctx)), btn('Arrived', 'drawer-arrived', 'btn--secondary', () => arrived(o)), btn('Mark collected', 'drawer-collected', 'btn--primary', () => collected(o)));
@@ -1070,9 +1139,23 @@
   // The live service's link carries the order's secret (MDM.remote.trackLink), so the customer opens it on any phone without signing in.
   function trackUrl(o) { return MDM.remote && MDM.remote.trackLink ? MDM.remote.trackLink(o) : o.trackToken ? MDM.href('track/?code=' + encodeURIComponent(o.code) + '&t=' + o.trackToken) : MDM.href('track/?order=' + encodeURIComponent(o.id)); }
   // A delivered order still to be paid says what is due, so Send update also works as a payment reminder.
+  // The first message about an order carries its tracking link and what the link is for; the ones after it are the order number and
+  // the update only (client, 20/11/2026). A payment that is due always has the link: that is where it is paid.
+  const FIRST_UPDATE_LINES = ['Track your delivery and view the POD photo through the link.',
+    'Once delivered, your delivery fee will be updated there, allowing you to make the payment easily.', 'Thank you for choosing Mr. Delivery Man!'];
+  const updateSent = o => (o.events || []).some(e => e.type === 'update_sent');
+  function statusWords(o) {
+    if (o.status !== 'failed') return MDM.STATUS[o.status].customer;
+    // What the driver reported, as the tracking page says it.
+    const x = ((o.route && o.route.stops) || []).find(s => s.status === 'failed'), why = x ? String(x.remarks || '').trim() || MDM.failReasonLabel(x) : '';
+    return (x && x.type === 'pickup' ? 'Collection' : 'Delivery') + ' could not be completed' + (why ? ' (' + why.replace(/[.\s]+$/, '') + ')' : '') + '. We will contact you';
+  }
   function statusMessage(o) {
     const due = o.status === 'delivered' && o.payment && o.payment.method !== 'invoice' && o.payment.status === 'requested';
-    return 'Mr. Delivery Man, order ' + o.code + ': ' + MDM.STATUS[o.status].customer + '. ' + (due ? 'Amount due ' + money(o.totals.total) + '. Pay and track it here: ' : 'Track it here: ') + trackUrl(o);
+    const head = 'Mr. Delivery Man, order ' + o.code + ': ' + statusWords(o) + '.';
+    if (due) return head + ' Amount due ' + money(o.totals.total) + '. Pay and track it here: ' + trackUrl(o);
+    if (updateSent(o)) return head;
+    return head + ' Track it here: ' + trackUrl(o) + '\n\n' + FIRST_UPDATE_LINES.join('\n\n');
   }
   // The payment request (client, 01/11/2026: "Request payment" sent nothing): the amount and the tracking link, where the customer pays
   // without signing in.
@@ -1098,7 +1181,7 @@
         el('div', { class: 'dialog__body stack-4' },
           el('h2', { class: 'dialog__title', id: 'send-title' }, opts.title || 'Send an update to ' + (c.name || 'the customer')),
           el('p', { class: 'muted small' }, phone.format(c.phone) + ' · prefers ' + (F.NOTIFY[pref] || 'WhatsApp')),
-          el('textarea', { class: 'textarea', rows: 4, readonly: true, 'data-testid': 'send-text', 'aria-label': 'Message' }, text),
+          el('textarea', { class: 'textarea', rows: text.indexOf('\n') >= 0 ? 9 : 4, readonly: true, 'data-testid': 'send-text', 'aria-label': 'Message' }, text),
           el('div', { class: 'row row--wrap' }, channels.map(([ch, label, href, target]) => el('a', { class: 'btn ' + (ch === pref ? 'btn--primary' : 'btn--secondary'), href, target, rel: target ? 'noopener' : null, 'data-testid': 'send-' + ch,
             on: { click: () => {
               if (ch === 'viber') MDM.ui.copy(text).then(() => toast('Message copied: paste it into the Viber chat if it is empty.', 'ok')).catch(() => {});
@@ -1541,12 +1624,24 @@
   }
   async function requestPayment(o) {
     const delivered = o.status === 'delivered';
-    const v = await dialog({ title: 'Request payment for ' + o.code, message: 'Then send the customer the amount, ' + money(o.totals.total) + ', and the link to pay by ' + (F.NOTIFY[o.customer.notify] || 'SMS') + ': they pay without signing in.', okLabel: 'Request payment',
+    // After delivery this is the office's word that the charges are complete (client, 20/11/2026: a customer paid before the naalu
+    // was entered): the amount and the way to pay show on the customer's link only once it is requested.
+    const v = await dialog({ title: 'Request payment for ' + o.code, message: (delivered ? 'Check the charges first (naalu, a pickup fee, anything else): the customer sees the amount and can pay once you request it. ' : '') + 'Then send the customer the amount, ' + money(o.totals.total) + ', and the link to pay by ' + (F.NOTIFY[o.customer.notify] || 'SMS') + ': they pay without signing in.', okLabel: 'Request payment',
       fields: delivered ? [] : [{ name: 'upfront', label: 'This is an upfront payment, before delivery', type: 'checkbox', value: true }] });
     if (!v) return;
     const upd = await MDM.store.requestPayment(o.id, { by: by(), upfront: delivered ? false : !!v.upfront });
     toast('Payment requested', 'ok');
     await sendUpdate(upd || o, paymentMessage(upd || o), { title: 'Send the payment request', what: 'Payment request' });
+  }
+  // "Finalise charges" on a business delivery that is done (delivered, or returned to the sender, which is charged once): the office
+  // has checked naalu and every other charge, and the amount is now the business's to pay, at once or by the next 14th or 28th.
+  async function finaliseCharges(o) {
+    const due = fmtDate(MDM.dueDate(new Date().toISOString()), { dateOnly: true });
+    const ok = await MDM.ui.confirm({ title: 'Finalise the charges of ' + o.code, okLabel: 'Finalise charges',
+      message: money(o.totals.total) + (o.status === 'delivered' ? '' : ' (returned to the sender, charged once)') + ' goes on the amount ' + ((o.customer || {}).name || 'the business') + ' has to pay: payable from now, due by ' + due + '. Check naalu and any other charge first.' });
+    if (!ok) return;
+    await MDM.store.requestPayment(o.id, { by: by() });
+    toast('Charges finalised: ' + money(o.totals.total) + ' due by ' + due, 'ok');
   }
   async function verify(o) {
     const v = await dialog({ title: 'Verify payment for ' + o.code, message: 'Declared ' + money(o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total) + ', reference ' + (o.payment.reference || o.code) + '.', okLabel: 'Verify payment',
@@ -2277,7 +2372,7 @@
     { key: 'new', title: 'New order', steps: ['new', 'confirmed', 'assigned'] },
     { key: 'dispatch', title: 'Dispatch', steps: ['failed', 'dispatched', 'on_the_way', 'arrived', 'collected'] },
     { key: 'later', title: 'Advance / Office', long: 'Advance orders and orders at the office', slim: true, steps: ['advance', 'office'] },
-    { key: 'delivery', title: 'Delivery', steps: ['failed', 'return', 'out', 'delivered'] },
+    { key: 'delivery', title: 'Delivery', steps: ['failed', 'return', 'out', 'delivered', 'returned'] },
     { key: 'payment', title: 'Payment', steps: ['due', 'received', 'requested', 'paid'] }];
   // A payment asked for more than a day ago and still not paid is due.
   const DUE_AFTER_MS = 24 * 3600 * 1000;
@@ -2296,8 +2391,11 @@
     const st = o.status, p = o.payment || {};
     const step = (col, key, label, tone, next, note) => ({ col, key, label, tone, next: next || null, note: note || '' });
     const go = (key, text, run) => ({ key, label: text, run });
-    if (st === 'cancelled') return F.returnPending(o) ? step('delivery', 'return', 'Return', 'red', go('returned', 'Returned', () => markReturned(o))) : null;
-    if (st === 'returned') return null;
+    // A business package that came back (returned to the sender, or cancelled after collection): its one delivery charge is
+    // finalised like a delivery's (20/11/2026), so it stays on the board until then.
+    const finalise = go('finalise', 'Finalise', () => finaliseCharges(o));
+    if (st === 'cancelled') return F.returnPending(o) ? step('delivery', 'return', 'Return', 'red', go('returned', 'Returned', () => markReturned(o))) : MDM.toFinalise(o) ? step('delivery', 'returned', 'Returned', 'grey', finalise) : null;
+    if (st === 'returned') return MDM.toFinalise(o) ? step('delivery', 'returned', 'Returned', 'grey', finalise) : null;
     if (['requested', 'confirmed', 'assigned'].indexOf(st) >= 0) {
       if (laterAdvance(o)) return step('later', 'advance', 'Advance', st === 'requested' ? 'red' : 'grey', null, { requested: 'New order', confirmed: 'Confirmed', assigned: 'Assigned' }[st]);
       if (st === 'assigned') return step('new', 'assigned', 'Assigned', 'yellow', go('dispatch', 'Dispatch', () => dispatchOrder(o)));
@@ -2316,7 +2414,13 @@
     if (st === 'out_for_delivery') return step('delivery', 'out', 'Out for delivery', 'yellow', go('delivered', nextStop(o, ['return']) ? 'Returned' : 'Delivered', () => delivered(o)));
     if (st !== 'delivered') return null;
     if (MDM.priceToFinalise(o)) return step('delivery', 'delivered', 'Delivered', 'green', go('price', 'Finalise price', () => confirmPrice(o)));
-    if (p.method === 'invoice' || p.status === 'invoiced') return isToday(F.deliveredAt(o)) ? step('delivery', 'delivered', 'Delivered', 'green', null, 'Weekly invoice') : null;
+    // A business delivery waits for its charges to be finalised (20/11/2026); after that it is on the business's amount due (its
+    // account page), and comes back here only when a slip is in to verify.
+    if (p.method === 'invoice' || p.status === 'invoiced') {
+      if (MDM.toFinalise(o)) return step('delivery', 'delivered', 'Delivered', 'green', finalise);
+      if (p.status === 'received') return step('payment', 'received', 'Slip received', 'blue', go('verify', 'Verify', () => verify(o)));
+      return isToday(F.deliveredAt(o)) ? step('delivery', 'delivered', 'Delivered', 'green', null, p.status === 'paid' ? 'Paid' : p.status === 'requested' ? 'Due ' + MDM.dayMonth(p.dueAt) : 'On account') : null;
+    }
     if (p.status === 'pending') return step('delivery', 'delivered', 'Delivered', 'green', go('request', 'Request payment', () => requestPayment(o)));
     if (p.status === 'requested') return payDue(o) ? step('payment', 'due', 'Due', 'red', go('paid', 'Paid', () => markPaid(o))) : step('payment', 'requested', 'Payment requested', 'yellow', go('paid', 'Paid', () => markPaid(o)));
     if (p.status === 'received') return step('payment', 'received', 'Slip received', 'blue', go('verify', 'Verify', () => verify(o)));
@@ -2451,9 +2555,9 @@
       slim ? go : el('div', { class: 'kb-card__foot' }, go));
   }
   const STEP_LABEL = { new: 'New order', confirmed: 'Confirmed', assigned: 'Assigned', failed: 'Failed', dispatched: 'Dispatched', on_the_way: 'On the way', arrived: 'Arrived', collected: 'Collected',
-    advance: 'Advance', office: 'At the office', return: 'Return', out: 'Out for delivery', delivered: 'Delivered', due: 'Due', received: 'Slip received', requested: 'Payment requested', paid: 'Paid' };
+    advance: 'Advance', office: 'At the office', return: 'Return', out: 'Out for delivery', delivered: 'Delivered', returned: 'Returned', due: 'Due', received: 'Slip received', requested: 'Payment requested', paid: 'Paid' };
   const STEP_TONE = { new: 'red', confirmed: 'red', assigned: 'yellow', failed: 'red', dispatched: 'blue', on_the_way: 'yellow', arrived: 'yellow', collected: 'green',
-    advance: 'grey', office: 'yellow', return: 'red', out: 'yellow', delivered: 'green', due: 'red', received: 'blue', requested: 'yellow', paid: 'green' };
+    advance: 'grey', office: 'yellow', return: 'red', out: 'yellow', delivered: 'green', returned: 'grey', due: 'red', received: 'blue', requested: 'yellow', paid: 'green' };
   // Each column's own status filter (client, 12/11/2026 evening: "filter it from this part", one status or several, in each column
   // separately): the counts under a column's title are buttons. One press shows that status only, more presses add statuses, "All"
   // or pressing them off shows the whole column again. The choice is kept for the browser session, per column.
@@ -2550,7 +2654,10 @@
       host.append(
         el('div', { class: 'page-head' },
           el('h1', { tabindex: '-1' }, 'Orders'),
-          el('div', { class: 'page-head__actions' }, state.slots.viewSwitch, el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'orders-new', 'aria-haspopup': 'dialog', on: { click: chooseNewOrder } }, html(MDM.icon('plus', 16)), 'New order'))),
+          el('div', { class: 'page-head__actions' }, state.slots.viewSwitch,
+            // Scan a label (client, 20/11/2026): opens that order, to assign it or work on it.
+            el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'orders-scan', 'aria-haspopup': 'dialog', on: { click: () => act(scanLabel) } }, html(MDM.icon('camera', 16)), 'Scan'),
+            el('button', { type: 'button', class: 'btn btn--primary', 'data-testid': 'orders-new', 'aria-haspopup': 'dialog', on: { click: chooseNewOrder } }, html(MDM.icon('plus', 16)), 'New order'))),
         state.slots.tabs,
         el('div', { class: 'orders-toolbar' }, el('div', { class: 'orders-filters' }, state.controls.el), state.slots.filtersBtn),
         state.slots.chips,

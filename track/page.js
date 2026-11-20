@@ -65,9 +65,11 @@
   }
   const canPay = o => {
     const p = o.payment || {};
-    if (p.method === 'invoice' || o.status === 'cancelled') return false;
-    if (p.status === 'requested') return true;
-    return p.status === 'pending' && priceConfirmed(o);
+    // The amount is payable once our team asks for it (client, 20/11/2026: "to avoid missing any naalu, pickup fee or any other,
+    // else sometimes the customer pays before the naalu is entered"): after delivery when the charges are final, or upfront when we
+    // request it. A business pays a delivery the same way once its charges are finalised (also one returned to it).
+    if (p.status !== 'requested') return false;
+    return p.method === 'invoice' ? !!MDM.completedAt(o) : o.status !== 'cancelled';
   };
   const vesselLabel = v => ((MDM.VESSEL_TYPES.find(x => x.value === v) || {}).label || 'Boat');
   const jettyLabel = v => ((MDM.geo.terminals().find(t => t.value === v) || {}).label || v || '');
@@ -318,6 +320,7 @@
       ((o.details || {}).items || []).forEach(it => { if (it && it.photoId) ids.add(it.photoId); });
       (o.documents || []).forEach(d => { if (d.fileId) ids.add(d.fileId); });
       (o.charges || []).forEach(c => { if (c.photoId && !c.void) ids.add(c.photoId); });
+      shopsOf(o).forEach(sh => { if (sh.receiptPhotoId) ids.add(sh.receiptPhotoId); (sh.extraReceipts || []).forEach(r => { if (r && r.photoId) ids.add(r.photoId); }); });
     }
     const files = {};
     for (const id of ids) files[id] = await MDM.store.get('files', id);
@@ -333,7 +336,7 @@
     // Status first (the hero), the stops, the progress steps, then the photos and documents and the driver (client, 12/11/2026: the
     // photos between Progress and the driver, the map at the bottom); the details follow and the map comes last.
     const parts = [buildHead(o, refs), buildNotices(o, stops)];
-    if (stops.length) parts.push(buildRoute(o, stops));
+    if (stops.length) parts.push(buildRoute(o, stops, files));
     parts.push(buildProgress(o, first));
     const proofs = buildProofs(o, stops, files);
     if (proofs) parts.push(proofs);
@@ -523,13 +526,18 @@
       }
       // Confirmed and the driver steps: the hero's status, ETA and short line say it all.
       case 'failed': {
+        // What the driver reported is shown as written (client, 20/11/2026: "receiver no response or any other reason mentioned by the
+        // driver to be seen on the tracking link"), to the customer, the business and its receiver alike.
         const failed = stops.find(x => x.status === 'failed');
-        const why = failed ? MDM.failReasonLabel(failed) : '';
-        items.push(notice('danger', null, (failed ? (failed.type === 'pickup' ? 'Collection' : 'Delivery') + ' could not be completed' : 'A stop could not be completed') + (why ? ' (' + why.toLowerCase() + ')' : '') + '. We contact you ' + channelOn + ' to reschedule.'));
+        const why = failed ? failWords(failed) : '';
+        items.push(notice('danger', (failed ? (failed.type === 'pickup' ? 'Collection' : 'Delivery') + ' could not be completed' : 'A stop could not be completed'),
+          (why ? 'Our driver reported: ' + why + (/[.!?]$/.test(why) ? ' ' : '. ') : '') + (failed && failed.failedAt ? 'Reported ' + fmtWhen(failed.failedAt) + '. ' : '') + 'We contact you ' + channelOn + ' to arrange what happens next.', { testid: 'track-failed' }));
         break;
       }
       case 'delivered':
         if (priceAfter) items.push(notice('info', 'We are confirming the final price', 'Your invoice follows ' + channelOn + '.', { testid: 'track-price-after' }));
+        // Delivered, and the office has not sent the final amount yet (20/11/2026): nothing to pay until it does.
+        else if (!state.receiver && (p.status === 'pending' || (p.method === 'invoice' && MDM.toFinalise(o)))) items.push(notice('info', 'We are finalising your charges', 'The amount to pay shows here shortly' + (p.method === 'invoice' ? '.' : ', and we message you ' + channelOn + '.'), { testid: 'track-finalising' }));
         break;
       case 'cancelled': {
         // A business cancelled one of its orders (§5.5): after collection the package goes back to the sender.
@@ -549,6 +557,12 @@
         break;
       }
       default: break;
+    }
+    // A post office parcel without a collection code (client, 20/11/2026): the post office wants the owner's ID card, so both sides
+    // of it go to our post collections number once a driver is assigned.
+    if (o.requestType === 'postal' && (o.details || {}).idNote && ['requested', 'confirmed', 'assigned', 'dispatched', 'on_the_way', 'arrived'].indexOf(o.status) >= 0 && !state.receiver) {
+      const to = MDM.postContacts(s).map(x => MDM.ui.phone.format(x)).join(' or ') || 'us';
+      items.push(notice('warn', 'Send both sides of the owner\'s ID card', (o.status === 'requested' || o.status === 'confirmed' ? 'Once a driver is assigned, send' : 'A driver is assigned: send') + ' photos of both sides to ' + to + ' on WhatsApp or Viber. The post office hands the parcel over only with them.', { testid: 'track-id-card' }));
     }
     // Extra vehicle (§2.3): the customer asked for it; our team confirms the charge with the price.
     if (o.extraVehicle && !priceConfirmed(o) && o.status !== 'cancelled' && !state.receiver) items.push(notice('info', 'Extra vehicle requested', 'We add its charge when we confirm your price, ' + (priceAfter ? 'after collection.' : 'before collection.'), { testid: 'track-extra-vehicle' }));
@@ -635,14 +649,53 @@
     }
     const payDone = p.status === 'paid' || p.status === 'refunded';
     const payCurrent = p.status === 'requested' || p.status === 'received';
-    const payLabel = p.method === 'invoice' ? 'Payment on the weekly invoice' : 'Payment';
+    const payLabel = 'Payment';
     items.push(el('li', { class: ['timeline__item', payDone ? 'is-done' : payCurrent ? 'is-current' : 'is-upcoming'], 'data-status': 'payment', 'data-testid': 'track-step' },
       el('div', { class: 'timeline__label' }, payLabel, ' ', html(MDM.payBadge(p.status))),
       p.verifiedAt && payDone ? el('div', { class: 'timeline__time' }, fmtDate(p.verifiedAt)) : null));
     return progressSection(items, first);
   }
 
-  function buildRoute(o, stops) {
+  // The driver's own words for a stop that failed, or the reason picked from the list.
+  const failWords = x => String((x && x.remarks) || '').trim() || MDM.failReasonLabel(x);
+  // Every shop of the order: the shop order's own, and shops at extra stops.
+  function shopsOf(o) { return (o.service === 'shop' ? (o.packages || []).filter(p => p.shop).map(p => p.shop) : []).concat((o.extraCollections || []).filter(c => c && c.kind === 'shop' && c.shop).map(c => c.shop)); }
+  function shopOfStop(o, x) {
+    if (!x.shop) return null;
+    const c = x.collectionId ? (o.extraCollections || []).find(k => k.id === x.collectionId) : null;
+    if (c && c.shop) return c.shop;
+    const pkg = (o.packages || []).find(p => p.id === x.packageId && p.shop) || (o.service === 'shop' ? (o.packages || []).find(p => p.shop) : null);
+    return pkg ? pkg.shop : null;
+  }
+  // The pictures of a finished stop, right under it (client, 20/11/2026: "show the collection picture below collection details, with
+  // time, if any additional invoice or such; same for delivery picture"): the proof of collection and the shop's receipts, the proof of
+  // delivery and a Maldivian Cargo bill. A business's receiver sees the proofs, never a receipt or a bill.
+  function stopPhotos(o, x, files) {
+    if (x.status !== 'done') return null;
+    const items = [];
+    const add = (id, title, testid) => {
+      const f = id ? files[id] : null; if (!f || !f.dataUrl) return;
+      const isImg = /^image\//.test(f.type || '') || /^data:image\//.test(f.dataUrl), away = !/^(data|blob):/.test(f.dataUrl) ? { target: '_blank', rel: 'noopener' } : { download: f.name || 'photo' };
+      items.push(el('div', { class: 'stop-photos__item', 'data-testid': testid },
+        el('a', Object.assign({ href: f.dataUrl, 'aria-label': 'Open ' + title.toLowerCase() }, away),
+          isImg ? el('img', { class: 'thumb', src: f.dataUrl, alt: title, 'data-testid': testid + '-img' }) : el('span', { class: 'thumb track-file', 'aria-hidden': 'true' }, 'PDF')),
+        el('span', { class: 'stop-photos__name' }, title)));
+    };
+    if (x.type === 'pickup') {
+      (x.proofPhotoIds || [x.proofPhotoId]).forEach(id => add(id, 'Proof of collection', 'track-proof-collection'));
+      const sh = state.receiver ? null : shopOfStop(o, x);
+      if (sh) { add(sh.receiptPhotoId, 'Shop receipt', 'track-receipt'); (sh.extraReceipts || []).forEach(r => add(r && r.photoId, 'Shop receipt', 'track-receipt')); }
+    } else {
+      add(x.photoId, x.type === 'return' ? 'Returned to sender' : 'Proof of delivery', 'track-proof');
+      if (!state.receiver && x.type === 'dropoff') (o.charges || []).filter(c => c.type === 'cargo' && c.photoId && c.billable && !c.void).forEach(c => add(c.photoId, 'Maldivian Cargo bill', 'track-cargo-bill'));
+    }
+    if (!items.length) return null;
+    const who = x.type === 'pickup' ? '' : x.recipientName || (x.contact && x.contact.name) || '';
+    const cap = x.type === 'pickup' ? 'Collected ' + fmtWhen(x.at) : x.type === 'return' ? 'Returned to sender ' + fmtWhen(x.at) + (who ? ', received by ' + who : '')
+      : (x.handedTo === 'left' ? 'Left as instructed ' : 'Delivered ') + fmtWhen(x.at) + (who && x.handedTo !== 'left' ? ' to ' + who : '');
+    return el('div', { class: 'stop-photos', 'data-testid': 'track-stop-photos', dataset: { stopId: x.id } }, el('div', { class: 'stop-photos__cap' }, cap), el('div', { class: 'stop-photos__row' }, items));
+  }
+  function buildRoute(o, stops, files) {
     const clickable = NO_MAP.indexOf(o.status) < 0 && MDM.map.available();
     const active = ACTIVE.indexOf(o.status) >= 0;
     const current = active ? stops.findIndex(x => x.status === 'arrived' || x.status === 'pending') : -1;
@@ -655,16 +708,17 @@
       if (x.meetAt && MEET_AT[x.meetAt]) meta.push(MEET_AT[x.meetAt]);
       if (x.type !== 'pickup' && x.contact && x.contact.name) meta.push('Recipient ' + x.contact.name);
       if (x.cargo && x.cargo.boat) meta.push('Boat ' + x.cargo.boat + (x.cargo.time ? ', ' + x.cargo.time : ''));
+      if (x.status === 'failed' && failWords(x)) meta.push('Reported: ' + failWords(x));
       const aside = x.status === 'done' ? fmtWhen(x.at) : x.status === 'failed' ? "Couldn't complete" : x.status === 'skipped' ? 'Skipped' : o.status === 'cancelled' ? 'Cancelled' : x.status === 'arrived' ? 'Driver arrived' : isCurrent ? 'Next' : 'Pending';
       const shopName = x.shop ? String(x.label || '').replace(/^Shop: /, '') : '';
       const title = shopName ? (x.address && x.address.indexOf(shopName) === 0 ? x.address : shopName + (x.address && x.address !== shopName ? ' · ' + x.address : '')) : x.address;
       const attrs = { class: cls, 'data-testid': 'track-stop', dataset: { stopId: x.id, status: x.status } };
       if (clickable) { attrs.type = 'button'; attrs.on = { click: () => showStop(x) }; attrs['aria-label'] = 'Show ' + kind.toLowerCase() + ' on the map: ' + x.address; }
-      return el(clickable ? 'button' : 'div', attrs,
+      return [el(clickable ? 'button' : 'div', attrs,
         el('span', { class: 'stop__marker', 'aria-hidden': 'true' }, String(i + 1)),
         el('span', { class: 'stop__main' }, el('span', { class: 'stop__title' }, title), el('span', { class: 'stop__meta' }, meta.join(' · '))),
-        el('span', { class: 'stop__aside' }, aside));
-    });
+        el('span', { class: 'stop__aside' }, aside)), stopPhotos(o, x, files || {})];
+    }).reduce((all, pair) => all.concat(pair.filter(Boolean)), []);
     return el('section', { class: 'section track-route', 'aria-labelledby': 'track-route-h' }, el('h2', { id: 'track-route-h', class: 'sr-only' }, 'Route'),
       el('div', { class: 'stops', 'data-testid': 'track-stops' }, rows));
   }
@@ -863,16 +917,23 @@
     const name = businessName(o);
     const rows = [row('Delivery arranged by', el('span', { 'data-testid': 'track-arranged-by' }, name)),
       row('Delivery charge', 'Billed to ' + name),
-      codRow(o)];
+      // No cash on the order: the row is left out (client, 20/11/2026: "Cash to pay the driver: Nothing to pay" read as a payment line).
+      o.cod && o.cod.amount > 0 ? codRow(o) : null].filter(Boolean);
     return section('track-payment-h', 'Payment', el('div', { class: 'rate-table', 'data-testid': 'track-arranged' }, rows),
       el('p', { class: 'track-summary-note small muted' }, 'Price questions go to ' + name + '. ',
         el('a', { href: MDM.href('login/?as=business&next=' + encodeURIComponent('track/?code=' + o.code)), 'data-testid': 'track-business-signin' }, 'Are you ' + name + '? Sign in')));
   }
   function buildPayment(o) {
     const p = o.payment || {};
-    const rows = [row('Status', html(MDM.payBadge(p.status))), row('Method', p.method === 'invoice' ? 'Weekly business invoice' : 'Bank transfer')];
-    if (p.method !== 'invoice') {
-      rows.push(row('When', p.upfrontRequired || p.upfront ? 'Upfront, once the price is confirmed' : 'After delivery'));
+    const rows = [row('Status', html(MDM.payBadge(p.status))), row('Method', p.method === 'invoice' ? 'Business account, bank transfer' : 'Bank transfer')];
+    if (p.method === 'invoice') {
+      // A business's delivery (20/11/2026): due on the next 14th or 28th once our team has finalised its charges; payable sooner.
+      rows.push(row('When', p.status === 'invoiced' ? 'After delivery, once we finalise the charges' : 'After each delivery, or by the 14th and 28th'));
+      if (p.dueAt && p.status !== 'paid') rows.push(row('Due', fmtDate(p.dueAt, { time: false })));
+      if (p.submittedAt) rows.push(row('Slip uploaded', fmtDate(p.submittedAt)));
+      if (p.status === 'paid') rows.push(row('Paid', fmtDate(p.paidAt || p.verifiedAt) + (p.invoiceNumber ? ' with invoice ' + p.invoiceNumber : '')));
+    } else {
+      rows.push(row('When', p.upfrontRequired || p.upfront ? 'Upfront, once the price is confirmed' : 'After delivery, once we send the final amount'));
       if (p.invoiceNo) rows.push(row('Invoice', p.invoiceNo, { mono: true }));
       if (p.paidAmount != null && (p.status === 'received' || p.status === 'paid' || p.status === 'refunded')) rows.push(row('Amount transferred', fmt(p.paidAmount), { mono: true }));
       if (p.bank) rows.push(row('Paid from', bankName(p.bank)));
@@ -888,7 +949,7 @@
       rows.push(row('Shopping balance', el('span', { 'data-testid': 'track-settlement' }, text)));
     }
     const body = [el('div', { class: 'rate-table', 'data-testid': 'track-payment' }, rows)];
-    if (canPay(o)) body.push(el('div', { class: 'track-actions track-pay-row' }, payButton(o, p.status === 'requested' ? 'Pay ' + fmt(o.totals.total) : 'Pay now (optional)')));
+    if (canPay(o)) body.push(el('div', { class: 'track-actions track-pay-row' }, payButton(o, 'Pay ' + fmt(o.totals.total))));
     return section('track-payment-h', 'Payment', body);
   }
 
@@ -915,7 +976,7 @@
       add('Arriving on', [(MDM.VESSEL_TYPES.find(x => x.value === d.vesselType) || {}).label, d.boatName].filter(Boolean).join(': '));
       const j = MDM.geo.terminals().find(x => x.value === d.jetty);
       add('Arriving at', j ? (j.unsure ? 'Jetty to be confirmed' : j.label) : '');
-      add('Arrives', [d.arrivalDate, d.arrivalTime].filter(Boolean).join(' at '));
+      add('Arrives', MDM.arrivalText(d));
       add('Hands it over', [d.senderName, d.senderPhone ? MDM.ui.phone.format(d.senderPhone) : ''].filter(Boolean).join(' · ')); add('Coming from', d.fromIsland);
     } else if (t === 'shop_collect') {
       add('Shop', d.shopName); add('Proof', { invoice: 'Invoice', quotation: 'Quotation and payment slip', order_no: 'Order number' }[d.proof]); add('Order number', d.orderNo);
@@ -961,20 +1022,13 @@
       f && f.dataUrl ? el('a', Object.assign({ class: 'btn btn--ghost btn--sm', href: f.dataUrl, download: f.name || 'file' }, away), 'Download', el('span', { class: 'sr-only' }, ' ' + title)) : null);
   }
   function buildProofs(o, stops, files) {
+    // The proofs of collection and delivery sit under their stops since 20/11/2026 (stopPhotos); a delivery without a photo keeps
+    // its line here, so who received it is still said.
     const items = [];
-    stops.filter(x => x.type === 'pickup' && x.status === 'done').forEach(x => {
-      // One photo per package since 31/10/2026 (proofPhotoIds); older stops have the one proofPhotoId.
-      (x.proofPhotoIds || [x.proofPhotoId]).forEach(id => {
-        const f = id ? files[id] : null;
-        if (f) items.push(thumbItem(f, 'Proof of collection', 'Collected ' + fmtWhen(x.at) + (x.address ? ' · ' + x.address : ''), 'track-proof-collection'));
-      });
-    });
-    stops.filter(x => (x.type === 'dropoff' || x.type === 'return') && x.status === 'done').forEach(x => {
-      const f = x.photoId ? files[x.photoId] : null;
+    stops.filter(x => (x.type === 'dropoff' || x.type === 'return') && x.status === 'done' && !(x.photoId && files[x.photoId])).forEach(x => {
       const who = x.recipientName || (x.contact && x.contact.name) || '';
       const text = x.type === 'return' ? 'Returned to sender' + (who ? ', received by ' + who : '') : x.handedTo === 'left' ? 'Left as instructed' + (who ? ' for ' + who : '') : 'Delivered to ' + (who || 'the recipient') + handedWords(x.handedTo);
-      items.push(f ? thumbItem(f, 'Proof of delivery', text + ' at ' + fmtWhen(x.at), 'track-proof') :
-        el('div', { class: 'list__item', 'data-testid': 'track-proof' }, el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, text + (x.at ? ' at ' + fmtWhen(x.at) : '')), el('div', { class: 'list__meta' }, x.address))));
+      items.push(el('div', { class: 'list__item', 'data-testid': 'track-proof' }, el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, text + (x.at ? ' at ' + fmtWhen(x.at) : '')), el('div', { class: 'list__meta' }, x.address))));
     });
     const seenPhotos = new Set();
     (o.packages || []).forEach(p => {
@@ -984,8 +1038,8 @@
     });
     ((o.details || {}).items || []).forEach(it => { const f = it && it.photoId ? files[it.photoId] : null; if (f) items.push(thumbItem(f, 'Sample photo', it.name, 'track-item-photo')); });
     (o.documents || []).forEach(d => { const f = files[d.fileId]; items.push(thumbItem(f, d.name || 'Document', DOC_KIND[d.kind] || 'Document', 'track-document')); });
-    // The Maldivian Cargo bill behind the charges on the price (a business's receiver never sees its prices).
-    if (!state.receiver) (o.charges || []).filter(c => c.type === 'cargo' && c.photoId && c.billable && !c.void).forEach(c => {
+    // The Maldivian Cargo bill sits under the delivery stop (stopPhotos); it stays here only while no delivery stop is done.
+    if (!state.receiver && !stops.some(x => x.type === 'dropoff' && x.status === 'done')) (o.charges || []).filter(c => c.type === 'cargo' && c.photoId && c.billable && !c.void).forEach(c => {
       const f = files[c.photoId]; if (f) items.push(thumbItem(f, 'Maldivian Cargo bill', fmt(c.amount) + (c.description ? ' · ' + c.description : ''), 'track-cargo-bill'));
     });
     if (!items.length) return null;

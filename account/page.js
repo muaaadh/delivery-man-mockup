@@ -22,7 +22,8 @@
   function loadMe() { try { const m = JSON.parse(localStorage.getItem('mdm:me')); return m && m.phone ? m : null; } catch (e) { return null; } }
   function signOut() { try { localStorage.removeItem('mdm:me'); } catch (e) { /* storage blocked */ } location.href = MDM.href(''); }
   const mine = o => o.customer && MDM.ui.phone.normalize(o.customer.phone) === phoneKey;
-  const canPay = o => o.payment && o.payment.method !== 'invoice' && o.status !== 'cancelled' && (o.payment.status === 'requested' || (o.payment.status === 'pending' && o.pricing && o.pricing.status === 'confirmed'));
+  // Payable once our team asks for the payment (client, 20/11/2026): after delivery when the charges are final, or upfront on request.
+  const canPay = o => o.payment && o.payment.method !== 'invoice' && o.status !== 'cancelled' && o.payment.status === 'requested';
   const isDone = o => ['delivered', 'returned', 'cancelled'].indexOf(o.status) >= 0;
   const canReorder = o => !o.accountId && NO_REORDER.indexOf(o.requestType) < 0 && o.service !== 'store' && o.service !== 'business' && o.source !== 'store';
   const reorderHref = o => MDM.href('request/?reorder=' + encodeURIComponent(o.id));

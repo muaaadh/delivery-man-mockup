@@ -63,7 +63,45 @@
     received:  { label: 'Payment received',  kind: 'info' },
     paid:      { label: 'Paid',              kind: 'ok' },
     refunded:  { label: 'Refunded',          kind: 'neutral' },
-    invoiced:  { label: 'Weekly invoice',    kind: 'neutral' },
+    invoiced:  { label: 'On account',        kind: 'neutral' },
+  };
+  // Business dues (client, 20/11/2026: "keep all amounts due after each delivery is completed or the item is returned ... payment due
+  // every 14 days, but they can pay after each delivery"; "due dates: 14th and 28th of each month"; "payments to be shown after it is
+  // finalised by the operator"). A business order stays 'invoiced' (on account) until it is delivered or returned and the office
+  // finalises its charges (store.requestPayment): then it is 'requested' with payment.dueAt, the business sees the amount and may pay
+  // it at once with a slip ('received', then 'paid'), or with the invoice that lists it (store.markInvoicePaid pays its orders).
+  // completedAt(o) → when a business delivery became billable: delivered, or returned to the sender (a return is charged the delivery
+  // once): status 'returned', or cancelled after collection and brought back.
+  MDM.completedAt = function (o) {
+    if (!o) return null;
+    const last = t => { const e = ((o.events || []).filter(x => x.type === t).pop()); return e ? e.at : null; };
+    if (o.status === 'delivered') return last('delivered') || o.updatedAt || null;
+    if (o.status === 'returned') return last('returned') || o.updatedAt || null;
+    if (o.status === 'cancelled' && o.cancellation && o.cancellation.returnStatus === 'done') return o.cancellation.returnedAt || o.updatedAt || null;
+    return null;
+  };
+  // Deliveries completed before this day were billed the old way (the weekly invoice alone): they need no finalising.
+  MDM.DUES_FROM = '2026-11-20';
+  // toFinalise(o) → a business delivery that is done and whose charges the office has not finalised yet.
+  MDM.toFinalise = function (o) {
+    const p = (o && o.payment) || {}, at = p.method === 'invoice' && p.status === 'invoiced' ? MDM.completedAt(o) : null;
+    return !!at && MDM.localDayKey(at) >= MDM.DUES_FROM;
+  };
+  // invoiceState(inv) → 'draft' | 'sent' | 'received' | 'paid'. "received": a transfer slip is in and waits to be checked. It is read
+  // from the invoice's payment record, not kept as a status of its own (the invoice's status stays draft, sent or paid).
+  MDM.invoiceState = function (inv) {
+    if (!inv) return '';
+    const p = inv.payment || {};
+    return inv.status !== 'paid' && p.slip && p.slip.fileId && p.submittedAt && !p.rejectReason ? 'received' : inv.status;
+  };
+  // dayMonth(iso) → '28 Nov' (this module has no page helpers on the server).
+  MDM.dayMonth = iso => { const d = new Date(iso); return d.getDate() + ' ' + BILL_MONTHS[d.getMonth()]; };
+  // dueDate(at) → the end of the next 14th or 28th after the day of `at`: when a business's amounts fall due.
+  MDM.dueDate = function (at) {
+    const d = at ? new Date(at) : new Date(), day = d.getDate();
+    const due = day < 14 ? new Date(d.getFullYear(), d.getMonth(), 14) : day < 28 ? new Date(d.getFullYear(), d.getMonth(), 28) : new Date(d.getFullYear(), d.getMonth() + 1, 14);
+    due.setHours(23, 59, 0, 0);
+    return due.toISOString();
   };
   // Business billing is weekly (client, 25 Oct 2026): one invoice per billing week, Sunday to Saturday (the Maldives working week
   // starts on Sunday), on LOCAL dates. An invoice keeps `month` (the month its week starts in: the live column is YYYY-MM) and adds
@@ -289,6 +327,19 @@
     if (MDM.geo && MDM.geo.setJetties) { const j = cleanPlaces(ops.jetties, 'jetty'); MDM.geo.setJetties(j.length ? j : null); }
   }
   MDM.applyPlaces = applyPlaces;
+  // When a boat we collect from arrives (client, 20/11/2026: the time is often "to be announced" when the order is placed):
+  // '2026-11-20 at 18:00', '2026-11-20, time to be confirmed' or 'To be confirmed'. day(d) words the date for the page.
+  MDM.arrivalText = function (d, day) {
+    d = d || {};
+    const when = d.arrivalDate ? (day ? day(d.arrivalDate) : d.arrivalDate) : '';
+    return when && d.arrivalTime ? when + ' at ' + d.arrivalTime : when ? when + ', time to be confirmed' : d.arrivalTime ? 'At ' + d.arrivalTime : 'To be confirmed';
+  };
+  // The numbers a parcel's owner sends both sides of the ID card to when the post office has no collection code (client, 20/11/2026:
+  // two numbers for now, more later): settings.ops.postContacts, kept in Rates; our own contact number until some are set.
+  MDM.postContacts = function (s) {
+    const list = ((s && s.ops && s.ops.postContacts) || []).map(x => String(x || '').trim()).filter(Boolean);
+    return list.length ? list : [((s && s.contact) || {}).phone].filter(Boolean);
+  };
   MDM.OFFICE_TASKS = [
     { value: 'submit', label: 'Document submission' }, { value: 'collect', label: 'Document collection' },
     { value: 'procedure', label: 'Procedure or application assistance' }, { value: 'other', label: 'Other administrative request' },
@@ -608,20 +659,26 @@
   MDM.EMAIL_UPDATES = [
     { value: 'confirmed', label: 'Order confirmed', subject: 'is confirmed' }, { value: 'collected', label: 'Collected', subject: 'is collected' },
     { value: 'delivered', label: 'Delivered', subject: 'is delivered' }, { value: 'payment_due', label: 'Payment due', subject: ': payment due' },
+    { value: 'failed', label: 'Delivery problem', subject: ': delivery problem' },
   ];
+  // Updates that may go out more than once for an order: each payment request, each failed attempt.
+  const EMAIL_REPEATS = ['payment_due', 'failed'];
   MDM.emailUpdateOf = function (order, ev) {
     if (ev.type === 'price_confirmed' || ev.type === 'confirmed' || (ev.type === 'created' && order.status === 'confirmed')) return 'confirmed';
     if (ev.type === 'collected' || ev.type === 'delivered') return ev.type;
     if (ev.type === 'payment_requested' || ev.type === 'invoice_updated') return 'payment_due';
+    if (ev.type === 'failed') return 'failed';
     return null;
   };
   function notifyEmail(order, ev, cfg) {
     const kind = MDM.emailUpdateOf(order, ev);
     const email = String(((order.customer || {}).email) || '').trim().toLowerCase();
     if (!kind || bulkSilent(order) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+    // A business's amounts come due one delivery after another: it is not emailed for each (it sees them in its portal and on the invoice).
+    if (kind === 'payment_due' && (order.payment || {}).method === 'invoice') return;
     if ((cfg.channels || {}).email === false || (cfg.emails || {})[kind] === false) return;
     // One email per update: a price confirmed on an order that also turns confirmed is one "confirmed" email.
-    if (readCol('notifications').some(n => n.orderId === order.id && n.channel === 'email' && n.update === kind && (kind !== 'payment_due' || n.at === ev.at))) return;
+    if (readCol('notifications').some(n => n.orderId === order.id && n.channel === 'email' && n.update === kind && (EMAIL_REPEATS.indexOf(kind) < 0 || n.at === ev.at))) return;
     const u = MDM.EMAIL_UPDATES.find(x => x.value === kind);
     insert('notifications', { orderId: order.id, code: order.code, to: email, name: (order.customer || {}).name || '', channel: 'email', event: ev.type, update: kind,
       title: 'Your order ' + order.code + ' ' + u.subject, message: ev.label, status: window.MDM_SERVER ? 'queued' : 'sent', at: ev.at });
@@ -816,7 +873,14 @@
   // ---- Payments (requirements §4) ---------------------------------------------------------------------------------------
   function invoiceNo(o) { return 'INV-' + o.code.replace('MDM-', ''); }
   function requestPaymentOn(o, by, upfront) {
-    if (o.payment.method === 'invoice') return;
+    if (o.payment.method === 'invoice') {
+      // A business delivery, done: its charges are final and the amount is due on the next 14th or 28th (the business may pay sooner).
+      if (o.payment.status !== 'invoiced' || !MDM.completedAt(o)) return;
+      const dueAt = MDM.dueDate(now());
+      o.payment = Object.assign({}, o.payment, { status: 'requested', requestedAt: now(), requestedBy: by || 'admin', dueAt, rejectReason: null });
+      pushEvent(o, makeEvent('payment_requested', 'Charges finalised: ' + fmt(o.totals.total) + ', due ' + MDM.dayMonth(dueAt), by, 'public'));
+      return;
+    }
     o.payment = Object.assign({}, o.payment, { status: 'requested', requestedAt: now(), requestedBy: by || 'admin', invoiceNo: o.payment.invoiceNo || invoiceNo(o), upfront: !!upfront, rejectReason: null });
     pushEvent(o, makeEvent('payment_requested', (upfront ? 'Payment requested before delivery: ' : 'Invoice issued: ') + fmt(o.totals.total), by, 'public'));
   }
@@ -838,7 +902,9 @@
   }
   function markPaid(orderId, p) {
     const o = orderOrThrow(orderId);
-    o.payment = Object.assign({}, o.payment, { status: 'paid', method: p.method || o.payment.method, verifiedAt: now(), verifiedBy: p.by || 'admin', paidAt: now(), note: p.note || '', paidAmount: o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total, invoiceNo: o.payment.invoiceNo || invoiceNo(o) });
+    // A business order stays a business order when it is paid (method 'invoice'); how the money came is kept beside it.
+    const account = o.payment.method === 'invoice';
+    o.payment = Object.assign({}, o.payment, { status: 'paid', method: account ? 'invoice' : p.method || o.payment.method, verifiedAt: now(), verifiedBy: p.by || 'admin', paidAt: now(), note: p.note || '', paidAmount: o.payment.paidAmount != null ? o.payment.paidAmount : o.totals.total, invoiceNo: o.payment.invoiceNo || invoiceNo(o) }, account && p.method ? { paidVia: p.method } : {});
     pushEvent(o, makeEvent('payment_verified', 'Payment received' + (p.note ? ' (' + p.note + ')' : ''), p.by, 'public'));
     return save(o);
   }
@@ -1270,9 +1336,10 @@
         const here = o.packages.filter(k => (s.packageIds || [s.packageId]).indexOf(k.id) >= 0);
         s.proofPhotoId = p.photoId || here.map(k => perPkg[k.id]).find(Boolean) || null;
         s.proofPhotoIds = [s.proofPhotoId].concat(here.map(k => perPkg[k.id])).filter((id, i, a) => id && a.indexOf(id) === i);
-        const own = Object.keys(perPkg).length > 0;
+        // Several packages from one point (client, 20/11/2026): one photo of them together is enough; a package photographed on its
+        // own keeps its photo.
         here.forEach(k => {
-          const f = own ? perPkg[k.id] : p.photoId; if (!f) return;
+          const f = perPkg[k.id] || p.photoId; if (!f) return;
           k.collectionPhotoId = f;
           if (!k.photoId) { k.photoId = f; k.photoSource = 'driver'; }
         });
@@ -1282,7 +1349,13 @@
           const pkg = o.packages.find(k => k.id === s.packageId);
           const extra = s.collectionId ? (o.extraCollections || []).find(c => c.id === s.collectionId) : null;
           const sh = pkg && pkg.shop ? pkg.shop : extra && extra.shop ? extra.shop : null;
-          if (sh) { sh.receiptTotal = Math.round(Number(p.receiptTotal) || 0); sh.receiptPhotoId = p.receiptPhotoId || null; recalc(o); }
+          if (sh) {
+            sh.receiptTotal = Math.round(Number(p.receiptTotal) || 0); sh.receiptPhotoId = p.receiptPhotoId || null;
+            // Bought at more than one shop (20/11/2026): the other receipts, each with its photo.
+            const more = (Array.isArray(p.moreReceipts) ? p.moreReceipts : []).map(r => ({ id: MDM.id('rcp'), amount: Math.round(Number(r && r.amount) || 0), note: String((r && r.note) || '').trim().slice(0, 120), photoId: (r && r.photoId) || null, at: now(), by })).filter(r => r.amount > 0).slice(0, 6);
+            if (more.length && sh.receiptTotal > 0) sh.extraReceipts = (sh.extraReceipts || []).concat(more);
+            recalc(o);
+          }
           s.receiptTotal = p.receiptTotal; s.receiptPhotoId = p.receiptPhotoId || null;
         }
         const pickups = o.route.stops.filter(x => x.type === 'pickup');
@@ -1327,18 +1400,23 @@
           setStatus(o, 'delivered', 'delivered', label, by, 'public', { stopId });
           settleShop(o);
           // A price still to be set from the proof of collection holds the invoice back; confirmPrice sends it.
+          // Payment is asked for by the office, not by the delivery itself (client, 20/11/2026: a customer paid before the naalu was
+          // entered): the office checks the charges, then "Request payment" shows the amount on the customer's link.
           if (MDM.priceAfterCollection(o)) notifyStaff(o, 'operations', 'Finalise the price', 'delivered before the price was confirmed: confirm it to send the invoice');
-          else if (o.payment && o.payment.status === 'pending') requestPaymentOn(o, 'system', false);
         } else pushEvent(o, makeEvent('delivered_partial', label, by, 'public', { stopId }));
         if (p.remarks) pushEvent(o, makeEvent('note', 'Driver remark: ' + p.remarks, by, 'internal', { stopId }));
         if (['delivered', 'returned'].indexOf(o.status) >= 0 && o.driverId) releaseDriverIfIdle(o.driverId, o.id);
       }
     } else if (p.status === 'failed') {
       s.status = 'failed'; s.failReason = p.failReason || 'other'; s.remarks = p.remarks || ''; s.failedAt = now(); s.failPhotoId = p.photoId || null;
-      const why = MDM.failReasonLabel(s);
+      // What the driver wrote is what the customer reads (client, 20/11/2026: "receiver no response or any other reason mentioned by
+      // the driver to be seen on the tracking link"): it is in the public timeline, in the customer's message and email, and a
+      // business is told in its portal.
+      const why = MDM.failReasonLabel(s), said = String(p.remarks || '').trim().slice(0, 300);
       const what = s.type === 'pickup' ? 'Collection failed' : 'Delivery failed';
-      setStatus(o, 'failed', 'failed', what + (why ? ': ' + why.toLowerCase() : ''), by, 'public', { stopId });
-      if (p.remarks) pushEvent(o, makeEvent('note', 'Driver remark: ' + p.remarks, by, 'internal', { stopId }));
+      setStatus(o, 'failed', 'failed', what + (said ? ': ' + said : why ? ': ' + why.toLowerCase() : ''), by, 'public', { stopId });
+      if (said && why) pushEvent(o, makeEvent('note', 'Reason: ' + why, by, 'internal', { stopId }));
+      if (o.accountId) notifyStaff(o, 'business', s.type === 'pickup' ? 'Collection problem' : 'Delivery problem', (s.type === 'pickup' ? 'could not be collected' : 'could not be delivered') + (said || why ? ': ' + (said || why.toLowerCase()) : '') + '. We will contact you about what happens next');
     }
     return save(o);
   }
@@ -1368,6 +1446,70 @@
       priceHistory(o, before, o.totals.total, 'Package category changed' + (changed.length ? ': ' + changed.join(', ') : ''), by);
       pushEvent(o, makeEvent('size_updated', 'Package category changed' + (changed.length ? ' (' + changed.join(', ') + ')' : '') + (o.totals.total !== before ? ', price ' + fmt(before) + ' to ' + fmt(o.totals.total) : ''), by, o.pricing && o.pricing.status === 'confirmed' ? 'public' : 'internal'));
     }
+  }
+  // addPackage(orderId, { size | tier, description, fragile, photoId, stopId, by }): a package on top of the booked ones (client,
+  // 20/11/2026: "if customer hands over additional package when driver arrives for collection"), added by the driver or the office.
+  // It is collected and delivered with the package it joins (the one of stopId, else the first), at the price of its own size; a
+  // business order's at the account's rate for its size category.
+  function addPackage(orderId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId);
+    if (['delivered', 'cancelled', 'returned'].indexOf(o.status) >= 0) throw new StoreError('transition', 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase());
+    if ((o.packages || []).length >= 60) throw new StoreError('validation', 'This order has too many packages already');
+    const s = settings(), by = p.by || 'admin', byDriver = String(by).indexOf('driver:') === 0;
+    const stops = (o.route && o.route.stops) || [];
+    const at = p.stopId ? stops.find(x => x.id === p.stopId && x.type === 'pickup') : null;
+    const idsOf = x => (x.packageIds || [x.packageId]).filter(Boolean);
+    const base = (at && (o.packages || []).find(k => idsOf(at).indexOf(k.id) >= 0)) || (o.packages || [])[0];
+    if (!base) throw new StoreError('validation', 'This order has no package to add to');
+    let size = MDM.pricing.SIZES[p.size] ? p.size : null, tier = null, tierRate = null;
+    if (o.service === 'business') {
+      const acc = readCol('business_accounts').find(a => a.id === o.accountId), t = MDM.pricing.businessTiers(s).find(x => x.value === (p.tier || base.tier));
+      if (!t) throw new StoreError('validation', 'Choose the package size');
+      tier = t.value; size = t.size; tierRate = MDM.pricing.businessRate(acc, tier, s);
+    }
+    if (!size) throw new StoreError('validation', 'Choose the package category');
+    const pkg = Object.assign({}, base, { id: MDM.id('pkg'), size, description: String(p.description || '').trim().slice(0, 200), fragile: !!p.fragile, needsVehicle: false,
+      underOneFt: o.service === 'business' ? size === 'bag' : size !== 'xl', photoId: p.photoId || null, collectionPhotoId: null, sizeSource: byDriver ? 'driver' : 'operator', shop: null, notes: '', addedAt: now(), addedBy: by });
+    delete pkg.price; delete pkg.tier; delete pkg.tierRate; delete pkg.photoSource;
+    if (p.photoId && byDriver) pkg.photoSource = 'driver';
+    if (tier) { pkg.tier = tier; pkg.tierRate = tierRate; }
+    const priced = MDM.pricing.quote({ service: o.service, packages: [pkg] }, s).packages[0];
+    const before = o.totals.total;
+    o.packages = (o.packages || []).concat([priced]);
+    // With a route already made, it joins its collection and its delivery, so the driver counts and hands it over with the rest.
+    const pick = at || stops.find(x => x.type === 'pickup' && idsOf(x).indexOf(base.id) >= 0);
+    const drop = stops.find(x => x.type === 'dropoff' && idsOf(x).indexOf(base.id) >= 0);
+    [pick, drop].forEach(x => { if (x) x.packageIds = idsOf(x).concat([priced.id]); });
+    recalc(o);
+    if (!(o.pricing && o.pricing.status === 'confirmed')) o.estimate = MDM.pricing.estimateRange(o.packages, s, o.service, o.extraCollections);
+    const name = tier ? ((MDM.pricing.businessTiers(s).find(x => x.value === tier) || {}).label || tier) : MDM.pricing.sizeLabel(size);
+    priceHistory(o, before, o.totals.total, 'added a package: ' + name, by);
+    pushEvent(o, makeEvent('package_added', 'Package added' + (byDriver ? ' at collection' : '') + ': ' + name + (pkg.description ? ', ' + pkg.description : '') + ' (' + fmt(priced.price.lineTotal) + ')', by, 'public'));
+    invoiceFollows(o, before, by);
+    return save(o);
+  }
+  // addReceipt(orderId, { shop: 'main' | <collection id>, amount, note, photoId, by }): another receipt from a shop of the order,
+  // added from the driver's phone (client, 20/11/2026: the driver goes to a second shop when the first does not have it all) or by the
+  // office. The first receipt comes with the shopping itself (setStop); the shopping fee follows the receipts (pricing.shopBase).
+  function addReceipt(orderId, r) {
+    r = r || {};
+    const o = orderOrThrow(orderId);
+    if (['cancelled', 'returned'].indexOf(o.status) >= 0) throw new StoreError('transition', 'This order is ' + MDM.STATUS[o.status].label.toLowerCase());
+    const amount = Math.round(Number(r.amount) || 0), by = r.by || 'admin';
+    if (!(amount > 0)) throw new StoreError('validation', 'Enter the total of the receipt');
+    const list = shopsOf(o), x = list.find(k => k.key === (r.shop || 'main')) || (list.length === 1 && !r.shop ? list[0] : null);
+    if (!x) throw new StoreError('validation', 'This order has no shop to add a receipt to');
+    if (!(x.shop.receiptTotal > 0)) throw new StoreError('validation', 'Record the shopping first, with its receipt');
+    if ((x.shop.extraReceipts || []).length >= 12) throw new StoreError('validation', 'Too many receipts on this shop');
+    const before = o.totals.total;
+    x.shop.extraReceipts = (x.shop.extraReceipts || []).concat([{ id: MDM.id('rcp'), amount, note: String(r.note || '').trim().slice(0, 120), photoId: r.photoId || null, at: now(), by }]);
+    recalc(o);
+    priceHistory(o, before, o.totals.total, 'added receipt ' + fmt(amount) + ' at ' + MDM.shopName(x.shop), by);
+    pushEvent(o, makeEvent('receipt_added', 'Another receipt at ' + MDM.shopName(x.shop) + ': ' + fmt(amount), by, 'public'));
+    if (o.status === 'delivered' && o.totals.total !== before && o.settlement && (o.settlement.status !== 'settled' || !o.settlement.balance)) settleShop(o);
+    invoiceFollows(o, before, by);
+    return save(o);
   }
   function updatePackages(orderId, sizes, by) { const o = orderOrThrow(orderId); const before = o.totals.total; applySizes(o, sizes, by); invoiceFollows(o, before, by); return save(o); }
   // resolveFailure: the operator's decision on a failed collection or delivery.
@@ -1790,12 +1932,16 @@
     const usable = c => c && (String(c.address || '').trim() || (c.kind === 'shop' && c.shop && (String(c.shop.list || '').trim() || String(c.shop.name || '').trim())));
     // A "Collect an item" stop carries its collection type and details (client, 02/11/2026): boat, shop or godown, courier, or home.
     const EXTRA_DETAIL_KEYS = ['boatName', 'jetty', 'arrivalDate', 'arrivalTime', 'carrier', 'location', 'code', 'collectBefore', 'orderNo', 'note'];
+    const text = (v, n) => String(v == null ? '' : v).trim().slice(0, n || 200);
+    const shopItems = list => (Array.isArray(list) ? list : []).filter(it => it && text(it.name)).slice(0, 40).map(it => ({ name: text(it.name), details: text(it.details), qty: Math.max(1, Math.min(999, Math.round(Number(it.qty) || 1))), instructions: text(it.instructions, 300) }));
     const extraDetails = x => { const out = {}; EXTRA_DETAIL_KEYS.forEach(k => { const v = x && typeof x[k] === 'string' ? x[k].trim().slice(0, 300) : ''; if (v) out[k] = v; }); return out; };
     const extraCollections = (Array.isArray(d.extraCollections) ? d.extraCollections : []).filter(usable).slice(0, MDM.MAX_EXTRA_COLLECTIONS).map(c => {
       const shop = c.kind === 'shop';
       return { id: c.id || MDM.id('col'), kind: shop ? 'shop' : 'collect', type: shop ? null : ['boat_collect', 'shop_collect', 'postal'].indexOf(c.type) >= 0 ? c.type : 'home', details: shop ? null : extraDetails(c.details), address: String(c.address || '').trim(), zone: c.zone && c.zone !== 'airport' ? c.zone : 'male', landmark: String(c.landmark || '').trim(),
         contactName: shop ? '' : String(c.contactName || '').trim(), contactPhone: shop ? '' : normPhone(c.contactPhone) || String(c.contactPhone || '').trim(), instructions: String(c.instructions || '').trim(),
-        shop: shop ? { name: String((c.shop || {}).name || '').trim(), phone: normPhone((c.shop || {}).phone) || '', list: String((c.shop || {}).list || '').trim(), budget: Math.round(Number((c.shop || {}).budget) || 0), unavailable: (c.shop || {}).unavailable || 'call', receiptTotal: null, receiptPhotoId: null } : null };
+        shop: shop ? Object.assign({ name: String((c.shop || {}).name || '').trim(), phone: normPhone((c.shop || {}).phone) || '', list: String((c.shop || {}).list || '').trim(), budget: Math.round(Number((c.shop || {}).budget) || 0), unavailable: (c.shop || {}).unavailable || 'call', receiptTotal: null, receiptPhotoId: null },
+          // The items of a shop at an extra stop, one by one (20/11/2026), beside the one-line list every page already prints.
+          shopItems((c.shop || {}).items).length ? { items: shopItems((c.shop || {}).items) } : {}) : null };
     });
     const shopStop = extraCollections.some(c => c.kind === 'shop');
     const q = MDM.pricing.quote({ service: d.service || 'pick', packages: d.packages, extraCollections }, s);
@@ -1827,27 +1973,32 @@
     if (d.status === 'confirmed') { x.pricing.status = 'confirmed'; x.pricing.confirmedAt = now(); x.pricing.confirmedBy = d.by || 'admin'; }
     return save(x);
   }
-  // createInvoice(accountId, period): period is a billing week { from, to } (inclusive local day keys, MDM.billingWeek) or a 'YYYY-MM'
-  // month, the way invoices were made before weekly billing. Lines are the account's orders delivered on a local day inside it.
-  function createInvoice(accountId, period) {
+  // createInvoice(accountId, period, { by, except }): period is a billing week { from, to } (inclusive local day keys,
+  // MDM.billingWeek) or a 'YYYY-MM' month, the way invoices were made before weekly billing. Lines are the account's orders delivered
+  // (or returned) on a local day inside it and not paid yet. except: order numbers to leave out, the ones another invoice already
+  // lists, when the office invoices "everything not paid so far" and must not bill a delivery twice.
+  function createInvoice(accountId, period, opts) {
     const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Account not found');
     const span = MDM.invoicePeriod(period); if (!span) throw new StoreError('validation', 'Choose the week to invoice');
     const weekly = !(typeof period === 'string');
     const month = span.from.slice(0, 7);
     const s = settings();
-    const orders = readCol('orders').filter(o => o.accountId === accountId && o.status === 'delivered');
-    const lines = [];
+    // Deliveries done in the period and not paid yet: delivered, or returned to the sender, which is charged the delivery once
+    // (client, 20/11/2026). One the business already paid by itself is left out.
+    const except = {}; ((opts && Array.isArray(opts.except) && opts.except) || []).forEach(c => { except[String(c)] = true; });
+    const orders = readCol('orders').filter(o => o.accountId === accountId && MDM.completedAt(o) && (o.payment || {}).status !== 'paid' && (o.payment || {}).status !== 'refunded' && !except[o.code]);
+    const lines = [], billed = [];
     orders.forEach(o => {
-      const ev = (o.events || []).filter(e => e.type === 'delivered').pop();
-      const at = ev ? ev.at : o.updatedAt;
+      const at = MDM.completedAt(o), back = o.status !== 'delivered';
       if (!MDM.inPeriod(span, at)) return;
+      billed.push(o);
       // A price still waiting for its quote (extra vehicle, XL) would be billed at the estimate: the office confirms it first.
       if (o.totals && o.totals.quoteRequired && !(o.pricing && o.pricing.status === 'confirmed')) throw new StoreError('validation', 'Confirm the price of ' + o.code + ' first: it was delivered before its price was set');
       // The price our team confirmed shows in the package lines, not as a line of its own (client, 12/11/2026).
       const shown = MDM.pricing.packageAmounts(o);
       (o.packages || []).forEach((pkg, i) => {
         const rate = pkg.price ? shown.amounts[i] : (acc.ratePerPackage || s.rates.business);
-        lines.push({ kind: 'package', tier: pkg.tier || null, size: pkg.size, date: at, orderCode: o.code, recipient: pkg.dropoff && pkg.dropoff.recipient ? pkg.dropoff.recipient.name : '', description: pkg.description || '', packages: 1, rate, amount: rate });
+        lines.push(Object.assign({ kind: 'package', tier: pkg.tier || null, size: pkg.size, date: at, orderCode: o.code, recipient: pkg.dropoff && pkg.dropoff.recipient ? pkg.dropoff.recipient.name : '', description: pkg.description || '', packages: 1, rate, amount: rate }, back ? { returned: true } : {}));
       });
       if (o.fees && o.fees.cargo) lines.push({ kind: 'cargo', date: at, orderCode: o.code, recipient: '', description: 'Maldivian Cargo fee', packages: 0, rate: o.fees.cargo, amount: o.fees.cargo });
       if (o.fees && o.fees.airport) lines.push({ kind: 'airport', date: at, orderCode: o.code, recipient: '', description: 'Airport fee', packages: 0, rate: o.fees.airport, amount: o.fees.airport });
@@ -1857,10 +2008,59 @@
     const gstPercent = Number(s.gstPercent) || 0;
     const gst = Math.round(subtotal * gstPercent) / 100;
     const m = meta(); const number = 'INV-' + month + '-' + String(m.invoiceSeq).padStart(3, '0'); m.invoiceSeq += 1; writeMeta(m);
-    const issued = new Date(); const due = new Date(issued.getTime() + (Number(s.invoiceDueDays) || 14) * 86400000);
-    const inv = insert('invoices', Object.assign({ accountId, month }, weekly ? { period: span } : {}, { number, lines, subtotal, gstPercent, gst, total: Math.round((subtotal + gst) * 100) / 100, status: 'draft', issuedAt: issued.toISOString(), dueAt: due.toISOString(), paidAt: null, reference: '' }));
-    audit('invoice_created', 'Invoice ' + number + ' for ' + acc.name + ', ' + MDM.periodLabel(inv), 'admin', { invoiceId: inv.id });
+    // Due on the next 14th or 28th (client, 20/11/2026), no longer a number of days after it is issued.
+    const issued = new Date(), dueAt = MDM.dueDate(issued.toISOString()), by = (opts && opts.by) || 'admin';
+    const inv = insert('invoices', Object.assign({ accountId, month }, weekly ? { period: span } : {}, { number, lines, subtotal, gstPercent, gst, total: Math.round((subtotal + gst) * 100) / 100, status: 'draft', issuedAt: issued.toISOString(), dueAt, paidAt: null, reference: '' }));
+    // An invoice is the office's word on the charges: a delivery on it that was not finalised yet is finalised with it.
+    billed.filter(MDM.toFinalise).forEach(o => { const x = clone(o); requestPaymentOn(x, by, false); x.payment = Object.assign({}, x.payment, { dueAt }); save(x); });
+    audit('invoice_created', 'Invoice ' + number + ' for ' + acc.name + ', ' + MDM.periodLabel(inv), by, { invoiceId: inv.id });
     return inv;
+  }
+  // The orders an invoice lists (by their numbers).
+  function invoiceOrders(inv) {
+    const codes = {}; (inv.lines || []).forEach(l => { if (l.orderCode) codes[l.orderCode] = true; });
+    return readCol('orders').filter(o => o.accountId === inv.accountId && codes[o.code]);
+  }
+  // markInvoicePaid(invoiceId, { paidAt, reference, slip, by }): the invoice is paid, and so is every order on it that was not paid
+  // yet (client, 20/11/2026: "business payment link doesn't update after marking the generated invoice as paid"). slip: a transfer
+  // slip the office attaches ({ fileId, name, type, size }), kept on the invoice.
+  function markInvoicePaid(invoiceId, p) {
+    p = p || {};
+    const inv = readCol('invoices').find(x => x.id === invoiceId); if (!inv) throw new StoreError('not_found', 'Invoice not found');
+    const by = p.by || 'admin', at = p.paidAt || now();
+    const payment = Object.assign({}, inv.payment || {}, p.slip ? { slip: p.slip } : {}, { verifiedAt: now(), verifiedBy: by, rejectReason: null });
+    const saved = update('invoices', invoiceId, { status: 'paid', paidAt: at, reference: p.reference != null ? String(p.reference) : inv.reference || (inv.payment || {}).reference || '', payment });
+    invoiceOrders(inv).filter(o => ['invoiced', 'requested', 'received'].indexOf((o.payment || {}).status) >= 0).forEach(o => {
+      const x = clone(o);
+      x.payment = Object.assign({}, x.payment, { status: 'paid', paidAt: at, verifiedAt: now(), verifiedBy: by, paidAmount: x.totals.total, invoiceNumber: inv.number, rejectReason: null });
+      pushEvent(x, makeEvent('payment_verified', 'Paid with invoice ' + inv.number, by, 'public'));
+      save(x);
+    });
+    audit('invoice_paid', 'Invoice ' + inv.number + ' marked as paid', by, { invoiceId });
+    return saved;
+  }
+  // submitInvoicePayment(invoiceId, { slip, bank, payerName, reference, paidAmount, by }): the transfer slip for an invoice, uploaded
+  // by the business in its portal or on the invoice, or by the office for it (client, 20/11/2026). The invoice reads "Slip received"
+  // until the office verifies it (markInvoicePaid) or rejects it.
+  function submitInvoicePayment(invoiceId, p) {
+    p = p || {};
+    const inv = readCol('invoices').find(x => x.id === invoiceId); if (!inv) throw new StoreError('not_found', 'Invoice not found');
+    if (inv.status === 'paid') throw new StoreError('validation', 'This invoice is already paid');
+    if (!p.slip || !p.slip.fileId) throw new StoreError('validation', 'Attach the transfer slip');
+    const by = p.by || 'business:' + inv.accountId;
+    const saved = update('invoices', invoiceId, { status: inv.status === 'draft' ? 'sent' : inv.status, payment: { slip: p.slip, bank: p.bank || '', payerName: String(p.payerName || '').trim(), reference: String(p.reference || '').trim(), paidAmount: p.paidAmount != null && p.paidAmount !== '' ? Number(p.paidAmount) : inv.total, submittedAt: now(), by, rejectReason: null } });
+    const acc = readCol('business_accounts').find(a => a.id === inv.accountId);
+    insert('notifications', { orderId: null, code: inv.number, to: 'operations', name: 'Operations', audience: 'operations', channel: 'app', event: 'staff_operations', title: 'Invoice slip to verify', message: inv.number + ': ' + (acc ? acc.name : 'the business') + ' sent a transfer slip', status: 'sent', at: now() });
+    audit('invoice_slip', 'Transfer slip for invoice ' + inv.number, by, { invoiceId });
+    return saved;
+  }
+  // rejectInvoicePayment(invoiceId, { reason, by }): the slip does not match; the business uploads another.
+  function rejectInvoicePayment(invoiceId, p) {
+    p = p || {};
+    const inv = readCol('invoices').find(x => x.id === invoiceId); if (!inv) throw new StoreError('not_found', 'Invoice not found');
+    if (MDM.invoiceState(inv) !== 'received') throw new StoreError('validation', 'This invoice has no slip to reject');
+    audit('invoice_slip_rejected', 'Slip for invoice ' + inv.number + ' rejected' + (p.reason ? ': ' + p.reason : ''), p.by || 'admin', { invoiceId });
+    return update('invoices', invoiceId, { payment: Object.assign({}, inv.payment || {}, { rejectReason: String(p.reason || '').trim() || 'We could not match the transfer', rejectedAt: now() }) });
   }
   function orderByCode(code) {
     let c = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
@@ -2190,14 +2390,44 @@
     audit('business_created', 'Business account opened by our team: ' + name + ' (' + tiers.map(k => k + ' ' + fmt(rates[k])).join(', ') + ')', d.by || 'admin', { accountId: acc.id });
     return acc;
   }
-  function setBusinessRates(accountId, rates, by) {
+  function setBusinessRates(accountId, rates, by, notes) {
     const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
     const clean = {}; Object.keys(rates || {}).forEach(k => { const v = Math.round(Number(rates[k])); if (v > 0) clean[k] = v; });
     if (!Object.keys(clean).length) throw new StoreError('validation', 'Keep at least one package size with a rate');
     const tiers = MDM.pricing.businessTiers(settings()).map(t => t.value).filter(k => clean[k] != null);
-    const saved = update('business_accounts', accountId, { rates: clean, tiers, ratePerPackage: clean[tiers[0]] });
+    // What each size means for this business (client, 20/11/2026: "write any description for these"): rateNotes { small: '…' }.
+    const patch = { rates: clean, tiers, ratePerPackage: clean[tiers[0]] };
+    if (notes && typeof notes === 'object') { patch.rateNotes = {}; tiers.forEach(k => { const v = String(notes[k] || '').trim().slice(0, 160); if (v) patch.rateNotes[k] = v; }); }
+    const saved = update('business_accounts', accountId, patch);
     audit('business_rates', 'Rates for ' + acc.name + ': ' + tiers.map(k => k + ' ' + fmt(clean[k])).join(', '), by || 'admin', { accountId });
     return saved;
+  }
+  // The packages a business sends, with a photo each (client, 20/11/2026: "submit one or several package sizes and pictures for each
+  // when requesting a business account ... and have the option to enter more with pictures, for the expansion of their packaging").
+  // A request's photos carry the size the business thinks it is ({ fileId, note, tier }); the account keeps them (packagePhotos) and
+  // the business or the office adds more: addBusinessPackage(accountId, { fileId, tier, note, by }).
+  function addBusinessPackage(accountId, p) {
+    p = p || {};
+    const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
+    if (!p.fileId) throw new StoreError('validation', 'Add a photo of the package');
+    const list = MDM.requestPhotos(acc);
+    if (list.some(x => x.fileId === p.fileId)) return clone(acc);
+    if (list.length >= 30) throw new StoreError('validation', 'Up to 30 package photos. Remove one first.');
+    const by = p.by || 'admin', tier = MDM.pricing.businessTiers(settings()).some(t => t.value === p.tier) ? p.tier : '';
+    const item = { fileId: p.fileId, note: String(p.note || '').trim().slice(0, 120), tier, at: now(), by };
+    const saved = update('business_accounts', accountId, { packagePhotos: list.concat([item]), packagePhotoId: acc.packagePhotoId || p.fileId });
+    audit('business_package', acc.name + ': package photo added' + (item.note ? ' (' + item.note + ')' : ''), by, { accountId });
+    // A package type the business adds itself is for the office to look at: it may need a size and a rate.
+    if (String(by).indexOf('business:') === 0) insert('notifications', { orderId: null, code: null, to: 'operations', name: 'Operations', audience: 'operations', channel: 'app', event: 'staff_operations', title: 'New package type',
+      message: acc.name + ' added a package photo' + (item.note ? ': ' + item.note : '') + '. Check its size and rate.', status: 'sent', at: now() });
+    return saved;
+  }
+  function removeBusinessPackage(accountId, fileId, p) {
+    const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
+    const list = MDM.requestPhotos(acc), next = list.filter(x => x.fileId !== fileId);
+    if (next.length === list.length) return clone(acc);
+    audit('business_package', acc.name + ': package photo removed', (p && p.by) || 'admin', { accountId });
+    return update('business_accounts', accountId, { packagePhotos: next, packagePhotoId: acc.packagePhotoId === fileId ? (next[0] ? next[0].fileId : null) : acc.packagePhotoId });
   }
 
   // ---- Who may see an order's details (privacy, client 24/10/2026) --------------------------------------------------------
@@ -2231,6 +2461,8 @@
     _boot: boot, get _tabId() { return getTabId(); },
     audit: P(audit), transition: P(transition), addEvent: P(addEvent), addNote: P(addNote),
     createOrder: P(createOrder), modifyOrder: P(modifyOrder), addAdjustment: P(addAdjustment), confirmPrice: P(confirmPrice), updatePackages: P(updatePackages),
+    addPackage: P(addPackage), addReceipt: P(addReceipt), markInvoicePaid: P(markInvoicePaid), submitInvoicePayment: P(submitInvoicePayment), rejectInvoicePayment: P(rejectInvoicePayment),
+    addBusinessPackage: P(addBusinessPackage), removeBusinessPackage: P(removeBusinessPackage),
     requestPayment: P(requestPayment), submitPayment: P(submitPayment), verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), recordRefund: P(recordRefund), markSettled: P(markSettled),
     cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
     assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep), addStopPhoto: P(addStopPhoto),

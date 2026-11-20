@@ -123,6 +123,12 @@ body.page-admin .tier-row { display: grid; grid-template-columns: minmax(0, 1fr)
 body.page-admin .tier-row + .tier-row { border-top: 1px solid var(--border); }
 body.page-admin .tier-row .checkbox { padding-top: 0; align-self: center; }
 body.page-admin .tier-row__rate.field > label { font-weight: 400; color: var(--text-2); }
+body.page-admin .tier-row__note { grid-column: 1 / -1; }
+body.page-admin .tier-row__note.field > label { font-weight: 400; color: var(--text-2); }
+body.page-admin .account-packages { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+body.page-admin .account-packages__item { margin: 0; display: grid; gap: 6px; justify-items: start; }
+body.page-admin .account-packages__item figcaption { font-size: 12px; line-height: 1.35; color: var(--text-2); overflow-wrap: anywhere; display: grid; gap: 2px; justify-items: start; }
+body.page-admin .rate-table__label small { display: block; font-weight: 400; color: var(--text-2); }
 body.page-admin .tier-editor > .field__error { margin-top: 8px; }
 @media (max-width: 480px) { body.page-admin .tier-row { grid-template-columns: 1fr; } body.page-admin .approve-photo { flex-direction: column; } }
 

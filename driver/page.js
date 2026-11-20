@@ -298,7 +298,7 @@
     } else if (o.requestType === 'boat_collect') {
       add('Arriving on', [vesselLabel(d.vesselType), d.boatName].filter(Boolean).join(': '));
       add('Arriving at', d.jetty ? terminalLabel(d.jetty) : '');
-      add('Arrives', [d.arrivalDate ? dayText(d.arrivalDate) : '', d.arrivalTime].filter(Boolean).join(' at '));
+      add('Arrives', MDM.arrivalText(d, dayText));
       add('Hands it over', [d.senderName, d.senderPhone ? MDM.ui.phone.format(d.senderPhone) : ''].filter(Boolean).join(' · '));
       add('Coming from', d.fromIsland);
     } else if (o.requestType === 'office') {
@@ -478,6 +478,10 @@
     const canFail = ACTIVE.indexOf(o.status) >= 0 && cur;
     // Collected and not delivered yet: the driver may bring it to the office instead (client, 05/11/2026), next to the problem button.
     const canHandOver = ['collected', 'out_for_delivery'].indexOf(o.status) >= 0 && pickups.every(s => s.status === 'done') && cur && cur.type === 'dropoff';
+    // A package the customer hands over on top of the booked ones (client, 20/11/2026): added while the driver is at, or on the way
+    // to, a collection that is not a shop. Another receipt (a second shop for the same list): once the shopping is recorded.
+    const canAddPackage = ['dispatched', 'on_the_way', 'arrived'].indexOf(o.status) >= 0 && cur && cur.type === 'pickup' && !cur.shop;
+    const canAddReceipt = ['on_the_way', 'arrived', 'collected', 'out_for_delivery'].indexOf(o.status) >= 0 && MDM.orderShops(o).some(x => x.shop.receiptTotal > 0);
     const charges = chargesBlock(o);
     const more = charges ? el('div', { class: 'card__body job__body' }, charges) : null;
     return el('article', { class: ['card', 'job', hero && 'job--hero', pri.rank < 9 && 'is-priority', state.focusOrder === o.id && 'is-focus'], 'data-testid': 'driver-job', 'data-order-id': o.id, 'data-code': o.code, 'data-status': o.status },
@@ -505,6 +509,8 @@
         el('div', { class: 'job__links' },
           target ? el('a', { class: 'btn btn--secondary', href: directionsHref(target), target: '_blank', rel: 'noopener', 'data-testid': 'driver-directions' }, icon('navigation', 16), 'Directions') : null,
           el('a', { class: 'btn btn--secondary', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), 'data-testid': 'driver-label' }, icon('printer', 16), 'Label'),
+          canAddPackage ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'driver-add-package', on: { click: e => onAddPackage(e.currentTarget, o, cur) } }, icon('plus', 16), 'Add a package') : null,
+          canAddReceipt ? el('button', { type: 'button', class: 'btn btn--secondary', 'data-testid': 'driver-add-receipt', on: { click: e => onAddReceipt(e.currentTarget, o) } }, icon('plus', 16), 'Add a receipt') : null,
           canFail ? el('button', { type: 'button', class: 'btn btn--ghost job__problem', 'data-testid': 'driver-problem', on: { click: e => onFailed(e.currentTarget, o, cur) } }, icon('flag', 16), 'Report a problem') : null,
           canHandOver ? el('button', { type: 'button', class: 'btn btn--ghost job__office', 'data-testid': 'driver-hand-office', on: { click: e => onHandOver(e.currentTarget, o) } }, icon('building', 16), 'Hand to office') : null)),
       methodBlock(o),
@@ -600,6 +606,8 @@
     if (!active.length && !waiting.length && !returns.length && !state.upcoming.length && !collections.length) {
       parts.push(el('div', { class: 'empty driver-empty', 'data-testid': 'driver-empty' }, el('div', { class: 'empty__title' }, 'No jobs right now'), el('div', { class: 'empty__hint' }, 'New jobs appear here.')));
     }
+    // Scan a label (client, 20/11/2026): straight to that package's job, and to its "Delivered" step when it is out for delivery.
+    if (state.driver) parts.push(el('div', { class: 'driver-scan' }, el('button', { type: 'button', class: 'btn btn--secondary btn--block', 'data-testid': 'driver-scan', on: { click: () => onScan().catch(e => fail(e, 'Could not open the scanner')) } }, icon('camera', 16), 'Scan a label')));
     if (collections.length) parts.push(group('Bulk collections', 'Collect from the business and tick each package off.', el('div', { class: 'jobs-list' }, collections.map(collectionCard)), 'driver-collections'));
     if (returns.length) parts.push(group('Returns', 'Bring each package back to the sender.', el('div', { class: 'jobs-list' }, returns.map(returnCard)), 'driver-returns'));
     // The first active job (priority first, then oldest) is the one to work on now; the rest follow under Next.
@@ -1083,6 +1091,8 @@
     if (wrap) wrap.parentNode.insertBefore(el('h3', { class: 'driver-dlg-group' }, text), wrap);
   }
   const amountOrNote = (amountKey, noteKey, msg) => vals => vals[noteKey] && !(Number(vals[amountKey]) > 0) ? { [amountKey]: msg } : null;
+  // Another receipt recorded with the shopping needs both its total and its photo.
+  const moreReceiptsCheck = vals => { for (const k of [2, 3]) { const amount = Number(vals['receiptTotal' + k]) > 0, photo = !!vals['receiptPhoto' + k]; if (amount && !photo) return { ['receiptPhoto' + k]: 'Take a photo of receipt ' + k }; if (photo && !amount) return { ['receiptTotal' + k]: 'Enter the total of receipt ' + k }; } return null; };
   // Money fields take whole MVR. A number input that holds text the browser cannot read ("1e", "--") reports an empty value, so
   // without this check a mistyped naalu or packing charge would be dropped silently and the job closed without it.
   const wholeMvr = (name, laari) => v => {
@@ -1092,32 +1102,95 @@
   };
   // Collected: proof photo is required; the driver can correct each package's category (Bag / Box / XL, no measurements: §2.2, §2.3)
   // and record a naalu paid to collect it from a boat (§6.1).
+  // "Scan a label": the label's QR code (or its number typed) finds the job. Out for delivery: its "Delivered" dialog opens at once,
+  // photo first. A package of a bulk collection: that collection. Anything else of the driver's: the job, with its next step named.
+  async function onScan() {
+    const code = await MDM.ui.scanCode({ title: 'Scan a label', hint: 'Point the camera at the QR code on the package label.' });
+    if (!code) return;
+    const col = (state.collections || []).find(c => c.batch.code === code || c.kids.some(k => k.code === code));
+    const o = state.route.orders.concat(state.upcoming, state.zoneQueue, state.doneToday).find(x => x.code === code);
+    if (!o && col) {
+      const card = ui.jobs.querySelector('[data-testid="driver-collection"][data-batch-id="' + col.batch.id + '"]');
+      if (card) MDM.ui.scrollIntoViewIfNeeded(card, 'start');
+      MDM.ui.toast(code + ' is in the bulk collection ' + col.batch.code, 'ok');
+      return;
+    }
+    if (!o) { MDM.ui.toast(code + ' is not one of your jobs', 'warn'); return; }
+    state.focusOrder = o.id; renderJobs();
+    const ph = phase(o), btn = ui.jobs.querySelector('[data-order-id="' + o.id + '"] [data-testid="driver-action"]');
+    if ((ph.key === 'deliver' || ph.key === 'return') && btn) { act(btn, o, ph); return; }
+    MDM.ui.toast(o.code + ': ' + (ph.label ? 'next, ' + ph.label : MDM.STATUS[o.status].label), 'ok');
+  }
+  // "Add a package": its category (a business order's size), what it is, fragile, and a photo if wanted. The office sees it at once.
+  async function onAddPackage(btn, o, stop) {
+    const business = o.service === 'business';
+    const first = stopPackages(o, stop)[0] || (o.packages || [])[0] || {};
+    const options = business ? MDM.pricing.businessTiers(state.settings).map(t => ({ value: t.value, label: t.label })) : Object.keys(MDM.pricing.SIZES).map(k => ({ value: k, label: MDM.pricing.SIZES[k] }));
+    const v = await MDM.ui.dialog({ title: 'Add a package', message: o.code + ' · handed over on top of ' + packagesLine(o, stopPackages(o, stop).length ? stopPackages(o, stop) : null) + '. The office prices it with the rest.', okLabel: 'Add package',
+      fields: [{ name: 'size', label: business ? 'Package size' : 'Package category', type: 'segmented', required: true, options, value: business ? first.tier || (options[0] || {}).value : first.size || 'bag' },
+        { name: 'description', label: 'What is it', type: 'text', required: false, autocomplete: 'off', placeholder: 'For example a second bag' },
+        { name: 'fragile', label: 'Fragile, handle with care', type: 'checkbox', required: false },
+        { name: 'photo', label: 'Photo', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: 'Not needed when the collection photo shows it with the others.' }] });
+    if (!v || !(await stillYours(o))) return;
+    btn.disabled = true;
+    let photoId = null;
+    try { if (v.photo) photoId = await storePhoto(v.photo, 'proof_collection', o.id); } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; }
+    await run(btn, o, () => MDM.store.addPackage(o.id, Object.assign({ description: v.description || '', fragile: !!v.fragile, photoId, stopId: stop.id, by: by() }, business ? { tier: v.size } : { size: v.size })),
+      () => 'Package added to ' + o.code, 'Could not add the package');
+  }
+  // "Add a receipt": another shop's receipt for the same shopping, with its photo. The shopping fee follows it.
+  async function onAddReceipt(btn, o) {
+    const shops = MDM.orderShops(o).filter(x => x.shop.receiptTotal > 0);
+    if (!shops.length) return;
+    const fields = [];
+    if (shops.length > 1) fields.push({ name: 'shop', label: 'For the shopping at', type: 'select', required: true, options: shops.map(x => ({ value: x.key, label: MDM.shopName(x.shop) })), value: shops[shops.length - 1].key });
+    fields.push({ name: 'amount', label: 'Receipt total (MVR)', type: 'number', required: true, min: 1, step: 'any', inputmode: 'decimal', validate: wholeMvr('amount', true), requiredMessage: 'Enter the receipt total' },
+      { name: 'photo', label: 'Receipt photo', type: 'file', required: true, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', requiredMessage: 'Take a photo of the receipt' },
+      { name: 'note', label: 'Bought at', type: 'text', required: false, autocomplete: 'off', placeholder: 'The other shop' });
+    const v = await MDM.ui.dialog({ title: 'Add a receipt', message: o.code + ' · bought at another shop for the same list. It is added to the items, and the shopping fee follows.', fields, okLabel: 'Add receipt' });
+    if (!v || !(await stillYours(o))) return;
+    btn.disabled = true;
+    let photoId = null;
+    try { photoId = await storePhoto(v.photo, 'receipt', o.id); } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; }
+    await run(btn, o, () => MDM.store.addReceipt(o.id, { shop: v.shop || shops[0].key, amount: Math.round(Number(v.amount)), note: v.note || '', photoId, by: by() }),
+      () => 'Receipt of ' + money(Math.round(Number(v.amount))) + ' added', 'Could not add the receipt');
+  }
   async function onCollected(btn, o, stop) {
     const pkgs = stopPackages(o, stop);
     const fields = [];
     // Several collections: the driver confirms this stop's count before leaving it (client, 25/10/2026: "1 bag from stop 1, 2 boxes
     // from stop 2").
-    if (pkgs.length && o.route.stops.filter(x => x.type === 'pickup').length > 1) fields.push({ name: 'countOk', label: 'I have ' + packagesLine(o, pkgs) + ' from this stop', type: 'checkbox', required: true,
+    const several = pkgs.length > 1;
+    if (!several && pkgs.length && o.route.stops.filter(x => x.type === 'pickup').length > 1) fields.push({ name: 'countOk', label: 'I have ' + packagesLine(o, pkgs) + ' from this stop', type: 'checkbox', required: true,
       requiredMessage: 'Check the packages, then tick. If something is missing, report a problem instead.' });
     if (stop.shop) {
       const sh = shopOf(o, stop);
       fields.push({ name: 'receiptTotal', label: 'Receipt total (MVR)', type: 'number', required: true, min: 0, step: 'any', inputmode: 'decimal', validate: wholeMvr('receiptTotal', true), hint: sh && sh.budget ? 'Agreed with the customer: ' + MDM.pricing.format(sh.budget) : null, requiredMessage: 'Enter the receipt total' });
       fields.push({ name: 'receiptPhoto', label: 'Receipt photo', type: 'file', required: true, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', requiredMessage: 'Take a photo of the receipt' });
+      // Bought at more than one shop (client, 20/11/2026: the first shop did not have it all): the other receipts, each with its photo.
+      const foldR = 'More receipts, from another shop';
+      [2, 3].forEach(k => {
+        fields.push({ name: 'receiptTotal' + k, label: 'Receipt ' + k + ' total (MVR)', type: 'number', required: false, min: 0, step: 'any', inputmode: 'decimal', placeholder: '0', validate: wholeMvr('receiptTotal' + k), fold: foldR });
+        fields.push({ name: 'receiptPhoto' + k, label: 'Receipt ' + k + ' photo', type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', fold: foldR });
+        fields.push({ name: 'receiptNote' + k, label: 'Receipt ' + k + ' is from', type: 'text', required: false, autocomplete: 'off', placeholder: 'The other shop', fold: foldR });
+      });
     }
     // No customer photo (updates 17/10/2026): the office sets this order's price from the proof of collection. An extra collection
     // stop has no package of its own yet (it is packed with the rest), so it only needs a photo of what was collected.
     const photoHint = stop.collectionId && !stop.shop ? 'What you collected, packed with the rest.'
       : MDM.priceAfterCollection(o) ? 'The office prices the order from this photo.' : 'The office uses it to confirm the price.';
     // A photo of each package, next to its category (client, 31/10/2026). A stop with no package of its own keeps one photo.
+    // Several packages from one point (client, 20/11/2026): one photo of them together, a tick for each package in hand, and a
+    // photo of a package on its own only if the driver wants one. (Before: a photo of every package was required.)
     const sizeOptions = Object.keys(MDM.pricing.SIZES).map(k => ({ value: k, label: MDM.pricing.SIZES[k] }));
-    const several = pkgs.length > 1;
-    if (!several) fields.push({ name: 'photo', label: 'Proof of collection', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', hint: photoHint, requiredMessage: 'Take a photo of the package' });
+    fields.push({ name: 'photo', label: several ? 'Photo of the ' + pkgs.length + ' packages' : 'Proof of collection', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo',
+      hint: several ? 'One photo of them together. ' + photoHint : photoHint, requiredMessage: several ? 'Take a photo of the packages' : 'Take a photo of the package' });
     pkgs.forEach((p, i) => {
-      if (several) fields.push({ name: 'photo_' + i, label: 'Photo', type: 'file', required: !stop.shop, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo',
-        hint: i === 0 ? photoHint : null, requiredMessage: 'Take a photo of package ' + (i + 1) });
+      if (several) fields.push({ name: 'got_' + i, label: 'I have package ' + (i + 1), type: 'checkbox', required: true, requiredMessage: 'Tick each package you have. If one is missing, report a problem instead.' });
       fields.push({ name: 'size_' + i, label: several ? 'Category' : 'Package category', type: 'segmented', required: true, value: p.size, options: sizeOptions,
         hint: i === pkgs.length - 1 ? 'Change it if it does not fit. No measuring.' : null });
     });
+    if (several) pkgs.forEach((p, i) => fields.push({ name: 'photo_' + i, label: 'Photo of package ' + (i + 1), type: 'file', required: false, accept: 'image/*', capture: 'environment', buttonLabel: 'Take a photo', fold: 'A photo of each package' }));
     // Naalu and remarks fold into one line (client, 01/11/2026): most collections have neither, and the button stays in reach.
     const fold = 'Naalu paid, or a remark';
     fields.push({ name: 'naalu', label: 'Naalu paid at collection (MVR)', type: 'number', required: false, min: 0, step: 1, placeholder: '0', validate: wholeMvr('naalu'),
@@ -1125,8 +1198,8 @@
     fields.push({ name: 'naaluNote', label: 'Naalu note', type: 'text', required: false, autocomplete: 'off', placeholder: 'e.g. Dhoni crew, North Harbour', fold });
     fields.push({ name: 'remarks', label: 'Remarks', type: 'textarea', required: false, rows: 2, fold });
     const p = MDM.ui.dialog({ title: stop.shop ? 'Shopping done' : 'Collected', message: o.code + ' · ' + addressText(o, stop), fields,
-      validate: amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note'), okLabel: 'Confirm collection' });
-    if (several) pkgs.forEach((p, i) => dialogHeading('photo_' + i, 'Package ' + (i + 1) + (p.description ? ' · ' + p.description : '')));
+      validate: vals => amountOrNote('naalu', 'naaluNote', 'Enter the naalu you paid, or clear the note')(vals) || moreReceiptsCheck(vals), okLabel: 'Confirm collection' });
+    if (several) pkgs.forEach((p, i) => dialogHeading('got_' + i, 'Package ' + (i + 1) + (p.description ? ' · ' + p.description : '')));
     const v = await p;
     if (!v || !(await stillYours(o))) return;
     btn.disabled = true;
@@ -1137,7 +1210,12 @@
       if (pkgs.length === 1 && patch.photoId) photos[pkgs[0].id] = patch.photoId;
       for (let i = 0; several && i < pkgs.length; i++) if (v['photo_' + i]) photos[pkgs[i].id] = await storePhoto(v['photo_' + i], 'proof_collection', o.id);
       if (Object.keys(photos).length) { patch.packagePhotos = photos; if (!patch.photoId) patch.photoId = photos[pkgs.find(k => photos[k.id]).id]; }
-      if (stop.shop) { patch.receiptTotal = v.receiptTotal; patch.receiptPhotoId = await storePhoto(v.receiptPhoto, 'receipt', o.id); if (!patch.photoId) patch.photoId = patch.receiptPhotoId; }
+      if (stop.shop) {
+        patch.receiptTotal = v.receiptTotal; patch.receiptPhotoId = await storePhoto(v.receiptPhoto, 'receipt', o.id); if (!patch.photoId) patch.photoId = patch.receiptPhotoId;
+        const more = [];
+        for (const k of [2, 3]) if (Number(v['receiptTotal' + k]) > 0) more.push({ amount: Math.round(Number(v['receiptTotal' + k])), note: v['receiptNote' + k] || '', photoId: await storePhoto(v['receiptPhoto' + k], 'receipt', o.id) });
+        if (more.length) patch.moreReceipts = more;
+      }
     } catch (e) { btn.disabled = false; fail(e, 'Could not save the photo'); return; }
     const sizes = {};
     pkgs.forEach((p, i) => { const size = v['size_' + i]; if (size && size !== p.size) sizes[p.id] = { size }; });
