@@ -67,9 +67,10 @@
     const p = o.payment || {};
     // The amount is payable once our team asks for it (client, 20/11/2026: "to avoid missing any naalu, pickup fee or any other,
     // else sometimes the customer pays before the naalu is entered"): after delivery when the charges are final, or upfront when we
-    // request it. A business pays a delivery the same way once its charges are finalised (also one returned to it).
+    // request it. A business pays a delivery the same way once its charges are finalised (also one returned to it): the business
+    // itself, signed in on this browser, never the receiver who opens the link of a business delivery.
     if (p.status !== 'requested') return false;
-    return p.method === 'invoice' ? !!MDM.completedAt(o) : o.status !== 'cancelled';
+    return p.method === 'invoice' ? !!MDM.completedAt(o) && signedInBusiness() === o.accountId : o.status !== 'cancelled';
   };
   const vesselLabel = v => ((MDM.VESSEL_TYPES.find(x => x.value === v) || {}).label || 'Boat');
   const jettyLabel = v => ((MDM.geo.terminals().find(t => t.value === v) || {}).label || v || '');
