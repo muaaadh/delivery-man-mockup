@@ -674,7 +674,7 @@
     });
     return qrLib;
   }
-  // orderCodeFrom(text) → 'MDM-2063' (or 'BLK-1004') from a label's link ('…/track/?code=MDM-2063&t=…'), a code or a bare order
+  // orderCodeFrom(text) → 'MDM-1042' (or 'BLK-1004') from a label's link ('…/track/?code=MDM-1042&t=…'), a code or a bare order
   // number; '' when the text holds none.
   function orderCodeFrom(text) {
     const t = String(text || '').trim();
@@ -684,7 +684,7 @@
     if (m) return m[1].toUpperCase() + '-' + m[2];
     return /^\d{3,7}$/.test(c) ? 'MDM-' + c : '';
   }
-  // scanCode({ title, hint }) → Promise<'MDM-2063' | null>: the order number read with the camera from a label's QR code, from a photo
+  // scanCode({ title, hint }) → Promise<'MDM-1042' | null>: the order number read with the camera from a label's QR code, from a photo
   // of the label, or typed. null when the scanner is closed.
   let scanSeq = 0;
   function scanCode(opts) {
@@ -696,7 +696,7 @@
       const region = el('div', { class: 'scan__view', id: regionId, 'data-testid': 'scan-view' });
       // A photo is read in its own box, off the screen but with a size (the library draws the picture into it).
       const photoBox = el('div', { class: 'scan__photo', id: regionId + '-photo', 'aria-hidden': 'true' });
-      const input = el('input', { class: 'input', id: inputId, type: 'text', inputmode: 'numeric', autocomplete: 'off', placeholder: 'For example 2063', 'data-testid': 'scan-code' });
+      const input = el('input', { class: 'input', id: inputId, type: 'text', inputmode: 'numeric', autocomplete: 'off', placeholder: 'For example 1042', 'data-testid': 'scan-code' });
       const file = el('input', { class: 'sr-only', type: 'file', accept: 'image/*', capture: 'environment', tabindex: '-1', 'aria-label': 'Photo of the label', 'data-testid': 'scan-file' });
       const err = el('div', { class: 'field__error', role: 'alert', hidden: true, 'data-testid': 'scan-error' });
       const say = text => { err.hidden = !text; err.textContent = text || ''; };
@@ -708,7 +708,7 @@
         if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) { /* not allowed */ } }
         finish(code);
       };
-      const form = el('form', { class: 'row scan__form', novalidate: true, on: { submit: e => { e.preventDefault(); const code = orderCodeFrom(input.value); if (!code) { say('Enter the order number, for example 2063'); input.focus(); return; } finish(code); } } },
+      const form = el('form', { class: 'row scan__form', novalidate: true, on: { submit: e => { e.preventDefault(); const code = orderCodeFrom(input.value); if (!code) { say('Enter the order number, for example 1042'); input.focus(); return; } finish(code); } } },
         input, el('button', { type: 'submit', class: 'btn btn--secondary', 'data-testid': 'scan-go' }, 'Open'));
       file.addEventListener('change', async () => {
         const f = file.files && file.files[0]; file.value = '';
