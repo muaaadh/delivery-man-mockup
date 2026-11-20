@@ -30,7 +30,7 @@
   const toast = (msg, kind) => MDM.ui.toast(msg, kind || 'ok');
   const icon = (name, size) => html(MDM.icon(name, size || 16));
   const nowIso = () => new Date().toISOString();
-  const plural = (n, word) => n + ' ' + word + (Number(n) === 1 ? '' : 's');
+  const plural = (n, word, many) => n + ' ' + (Number(n) === 1 ? word : many || word + 's');
   const deliveredAt = o => (((o.events || []).filter(e => e.type === 'delivered').pop() || {}).at) || o.updatedAt || o.createdAt;
   // Business billing is weekly, Sunday to Saturday (MDM.billingWeek in store.js).
   const thisWeek = () => MDM.billingWeek(new Date());
@@ -893,8 +893,11 @@
           const own = orders.filter(o => o.accountId === account.id && (o.payment || {}).method === 'invoice');
           const due = own.filter(o => ['requested', 'received'].indexOf(o.payment.status) >= 0 && MDM.completedAt(o)), open = own.filter(MDM.toFinalise);
           const next = due.map(o => o.payment.dueAt).filter(Boolean).sort()[0];
-          return rateRow('Amount due', el('span', { 'data-testid': 'business-due' }, el('span', { class: 'mono' }, money(orderTotal(due))),
-            el('small', null, [plural(due.length, 'delivery', 'deliveries'), next ? 'due ' + fmtDate(next, { dateOnly: true }) : '', open.length ? plural(open.length, 'delivery', 'deliveries') + ' to finalise' : ''].filter(Boolean).join(' · '))));
+          return [rateRow('Amount due', el('span', { 'data-testid': 'business-due' }, el('span', { class: 'mono' }, money(orderTotal(due))),
+            el('small', null, [plural(due.length, 'delivery', 'deliveries'), next ? 'due ' + fmtDate(next, { dateOnly: true }) : '', open.length ? plural(open.length, 'delivery', 'deliveries') + ' to finalise' : ''].filter(Boolean).join(' · ')))),
+            // A business with many deliveries a day: all that are done are finalised in one go, instead of one card at a time.
+            open.length ? rateRow('To finalise', el('span', null, el('span', { class: 'mono' }, money(orderTotal(open))), ' ',
+              el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-finalise-all', on: { click: () => finaliseAll(account, open) } }, 'Finalise ' + plural(open.length, 'delivery', 'deliveries')))) : null];
         })());
       // This billing week's delivered orders (Sunday to Saturday)
       if (!mine.length) ui.orders.replaceChildren(empty('Nothing delivered this week yet.', weekText));
@@ -1075,6 +1078,16 @@
       if (!v) return;
       try { await MDM.store.markInvoicePaid(inv.id, { reference: pay.reference || '', by: MDM.admin.by() }); toast(inv.number + ' paid, its deliveries too'); }
       catch (e) { toast(storeMessage(e), 'danger'); }
+    }
+    // "Finalise N deliveries": the charges of every delivery of the business that is done (delivered, or returned to it) become
+    // final and due on the next 14th or 28th, as "Finalise charges" does on one order.
+    async function finaliseAll(account, open) {
+      const ok = await MDM.ui.confirm({ title: 'Finalise ' + plural(open.length, 'delivery', 'deliveries') + ' of ' + account.name,
+        message: 'Check naalu and other charges first: ' + money(orderTotal(open)) + ' becomes due on ' + fmtDate(MDM.dueDate(new Date().toISOString()), { dateOnly: true }) + ', and the business can pay each delivery from its portal.', okLabel: 'Finalise charges' });
+      if (!ok) return;
+      let done = 0;
+      try { for (const o of open) { await MDM.store.requestPayment(o.id, { by: MDM.admin.by() }); done++; } toast(plural(done, 'delivery', 'deliveries') + ' finalised'); }
+      catch (e) { toast((done ? plural(done, 'delivery', 'deliveries') + ' finalised, then: ' : '') + storeMessage(e), 'danger'); }
     }
     async function rejectInvoice(inv) {
       const v = await MDM.ui.dialog({ title: 'Reject the slip for ' + inv.number, message: 'The business sees the reason on the invoice and uploads another slip.', okLabel: 'Reject slip', danger: true,
