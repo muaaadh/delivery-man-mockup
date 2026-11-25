@@ -891,27 +891,41 @@
     }
     return out.filter(Boolean);
   }
-  // A normal or express order's times are for the day it is placed: { type: 'asap', day, collectTime?, deliverTime? }.
-  function timesToday() {
-    const s = draft.schedule, out = { type: 'asap' };
-    if (trim(s.collectTime)) out.collectTime = trim(s.collectTime);
-    if (trim(s.deliverTime)) out.deliverTime = trim(s.deliverTime);
-    if (out.collectTime || out.deliverTime) out.day = today();
-    return out;
-  }
+  // A normal or express order's times, each with the day it is for: { type: 'asap', day, collectTime?, deliverTime?, collectDay?,
+  // deliverDay? } (MDM.todayTimes: a time after midnight is tomorrow's; our team may also record a time that has passed).
+  const timesNow = () => MDM.todayTimes(draft.schedule, { lenient: OFFICE });
+  function timesToday() { return timesNow().schedule; }
+  function advanceTimes() { const s = draft.schedule; return { type: 'advance', collectDate: s.collectDate, collectTime: s.collectTime, deliverDate: s.deliverDate, deliverTime: s.deliverTime }; }
   function scheduleFields(n) {
-    const out = [seg(n, 'level', 'When', MDM.SERVICE_LEVELS.map(l => ({ value: l.value, label: l.label })), { testid: 'request-level', onChange: () => { saveDraft(); rerender(n); updateSummary(); } })];
+    // The day kept with a typed time belongs to a normal or express order: an advance order has its own dates.
+    const out = [seg(n, 'level', 'When', MDM.SERVICE_LEVELS.map(l => ({ value: l.value, label: l.label })), { testid: 'request-level', onChange: () => { if (draft.level === 'advance') { delete draft.schedule.collectDay; delete draft.schedule.deliverDay; } saveDraft(); rerender(n); updateSummary(); } })];
     if (draft.level === 'express') out.push(MDM.ui.notice('info', 'Express depends on availability. We confirm it with the price.'));
-    // Normal and express orders today: a collection and a delivery time, optional on a normal order, at least one on an express order
-    // (client, 12/11/2026: urgent orders are worked in time order). Another day is an advance order.
+    // Normal and express orders: a collection and a delivery time, optional on a normal order, at least one on an express order
+    // (client, 12/11/2026: urgent orders are worked in time order). A time after midnight is tomorrow's (client, 21/11/2026: nothing
+    // could be recorded after 11pm); the line under each field says which day it is read as. Any other day is an advance order.
     if (draft.level !== 'advance') {
-      const express = draft.level === 'express', s = draft.schedule;
-      const back = new Date(Date.now() - 15 * 60000), soon = MDM.ui.dayKey(back) === today() ? MDM.ui.fmtTime(back) : '00:00';
-      const past = v => (v && v < soon ? 'Choose a time later today, or an advance order for another day' : null);
+      const express = draft.level === 'express', s = draft.schedule, wraps = {};
+      const DAY_OF = { collectTime: 'collectDay', deliverTime: 'deliverDay' }, ONE = { collectTime: 'collect', deliverTime: 'deliver' };
       const either = () => (express && !trim(s.collectTime) && !trim(s.deliverTime) ? 'Give a collection or a delivery time' : null);
-      const after = () => (s.collectTime && s.deliverTime && s.deliverTime < s.collectTime ? 'Delivery must be after collection' : null);
-      out.push(grid(F(n, 'schedule.collectTime', 'Collection time', { type: 'time', noOptional: express, hint: express ? null : 'Today. Leave empty for any time', validate: v => past(v) || either() }),
-        F(n, 'schedule.deliverTime', 'Delivery time', { type: 'time', noOptional: express, hint: express ? 'Today. One of the two is enough' : 'Today. Leave empty for any time', validate: v => past(v) || after() || either() })));
+      // A time the browser holds half typed (hours and minutes without AM or PM) has no value yet: say so, it is not an empty field.
+      const half = k => { const c = wraps[k] && wraps[k].querySelector('input'); return c && c.validity && c.validity.badInput ? 'Finish the time: hours, minutes and AM or PM' : null; };
+      const check = k => () => half(k) || timesNow().errors[k] || either();
+      const idle = k => (express ? (k === 'deliverTime' ? 'One of the two is enough' : '') : 'Leave empty for any time');
+      const notes = () => { const t = timesNow(); Object.keys(wraps).forEach(k => { const h = wraps[k].querySelector('.field__hint'); if (!h) return; h.textContent = trim(s[k]) ? t.notes[k] || 'Today' : idle(k); h.hidden = !h.textContent; }); };
+      // The day is kept with the time from the moment it is typed and cleared with it, so a form sent after midnight means the same.
+      // Both messages are about the two times together: typing in one field clears the other's too.
+      const typed = k => v => {
+        const one = {}; one[k] = v;
+        const t = MDM.todayTimes(one, { lenient: OFFICE })[ONE[k]];
+        if (t) s[DAY_OF[k]] = t.day; else delete s[DAY_OF[k]];
+        Object.keys(wraps).forEach(x => { if (x !== k && wraps[x].classList.contains('is-invalid')) setError(wraps[x], null); });
+        notes();
+      };
+      wraps.collectTime = F(n, 'schedule.collectTime', 'Collection time', { type: 'time', noOptional: express, hint: ' ', validate: check('collectTime'), onChange: typed('collectTime') });
+      wraps.deliverTime = F(n, 'schedule.deliverTime', 'Delivery time', { type: 'time', noOptional: express, hint: ' ', validate: check('deliverTime'), onChange: typed('deliverTime') });
+      Object.keys(wraps).forEach(k => { const h = wraps[k].querySelector('.field__hint'); if (h) h.setAttribute('data-testid', k === 'collectTime' ? 'request-collect-time-note' : 'request-deliver-time-note'); });
+      notes();
+      out.push(grid(wraps.collectTime, wraps.deliverTime));
     }
     if (draft.level === 'advance') {
       const later = () => { const s = draft.schedule; if (!s.collectDate || !s.deliverDate) return null; return (s.deliverDate + 'T' + (s.deliverTime || '00:00')) < (s.collectDate + 'T' + (s.collectTime || '00:00')) ? 'Delivery must be after collection' : null; };
@@ -1298,8 +1312,10 @@
     const docs = draft.docs.filter(x => relevantDoc(x.kind));
     if (docs.length) rows.push(reviewRow('Documents', docs.map(x => x.name).join(', ')));
     const sch = draft.schedule, level = (MDM.SERVICE_LEVELS.find(x => x.value === draft.level) || {}).label;
+    // A normal or express order's times with their day when it is not today ('deliver by Tomorrow 00:30'), as the order will read.
+    const tt = draft.level === 'advance' ? null : timesNow();
     add('Timing', draft.level === 'advance' ? 'Collect ' + sch.collectDate + ' ' + sch.collectTime + ', deliver ' + sch.deliverDate + ' ' + sch.deliverTime
-      : [level, trim(sch.collectTime) ? 'collect at ' + sch.collectTime : '', trim(sch.deliverTime) ? 'deliver by ' + sch.deliverTime : ''].filter(Boolean).join(', '));
+      : [level, tt.collect ? 'collect at ' + MDM.ui.timeText(tt.collect) : '', tt.deliver ? 'deliver by ' + MDM.ui.timeText(tt.deliver) : ''].filter(Boolean).join(', '));
     return rows;
   }
   // The extra stops (multi collection) as review rows: 'Stop 2' → what happens there.
@@ -1521,7 +1537,7 @@
         source: OFFICE ? draft.source : 'web', requestType: isShop() ? 'shop_buy' : t, service: service(), serviceLevel: draft.level, customerId: saved.id, customer,
         collection, delivery, details, documents, packages, extraCollections: extraData(), termsAcceptedAt,
         extraVehicle: !!draft.extraVehicle && MDM.extraVehicleEligible(packages),
-        schedule: draft.level === 'advance' ? Object.assign({ type: 'advance' }, draft.schedule) : timesToday(),
+        schedule: draft.level === 'advance' ? advanceTimes() : timesToday(),
         payment: { method: 'transfer', status: 'pending', upfrontRequired: upfrontForced() || draft.pay === 'upfront' },
         by: OFFICE ? officeBy() : 'customer',
       });

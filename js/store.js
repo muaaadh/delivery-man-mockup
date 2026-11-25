@@ -222,11 +222,57 @@
     const at = (day, time) => (day || hhmm(time) ? { day: day || made, time: hhmm(time) } : null);
     let collect = null, deliver = null;
     if (s.type === 'advance') { collect = at(s.collectDate, s.collectTime); deliver = at(s.deliverDate, s.deliverTime); }
-    else { if (hhmm(s.collectTime)) collect = at(s.day, s.collectTime); if (hhmm(s.deliverTime)) deliver = at(s.day, s.deliverTime); }
-    if (!collect && o && o.collection && hhmm(o.collection.preferredTime)) collect = at(s.day, o.collection.preferredTime);
+    // Each time has its own day since 21/11/2026 (collectDay, deliverDay: a delivery after midnight is tomorrow's); older orders have `day` only.
+    else { if (hhmm(s.collectTime)) collect = at(s.collectDay || s.day, s.collectTime); if (hhmm(s.deliverTime)) deliver = at(s.deliverDay || s.day, s.deliverTime); }
+    if (!collect && o && o.collection && hhmm(o.collection.preferredTime)) collect = at(s.collectDay || s.day, o.collection.preferredTime);
     const r = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2})/.exec(String(s.rescheduledFor || ''));
     if (r) { if (collectedYet(o)) deliver = { day: r[1], time: hhmm(r[2]) }; else collect = { day: r[1], time: hhmm(r[2]) }; }
     return { collect, deliver };
+  };
+  // The times typed on a normal or express order, read against the clock (client, 21/11/2026: "after 11pm, couldn't record any new
+  // order": a delivery after midnight was refused as earlier today, or as earlier than its collection). One helper for the order form,
+  // the office's business order and the business portal, so they cannot disagree.
+  // todayTimes({ collectTime, deliverTime, collectDay, deliverDay }, { now, lenient }) → { collect, deliver, errors, notes, schedule }:
+  // collect and deliver are { day, time } or null; errors and notes are { collectTime, deliverTime } ('' for none); schedule is what the
+  // order stores, { type: 'asap', day, collectTime?, deliverTime?, collectDay?, deliverDay? }, where `day` stays the day its times start
+  // on for the readers that know one day only. It changes nothing and reads no clock but `now` (default: this moment). The rules:
+  //   1. A time is for today when it is not earlier than now minus 15 minutes.
+  //   2. Earlier than that and before 06:00, while it is 18:00 or later now: tomorrow (after midnight).
+  //   3. Otherwise it has passed: an error for a customer; our staff and a business (lenient) may record it, noted "Already passed".
+  //   4. A delivery earlier than its collection: with the collection at 18:00 or later and the delivery before 06:00 it is the day
+  //      after the collection; otherwise an error that names both times.
+  //   5. A day given with a time (the form keeps the day a time was typed for) is kept, so 23:55 typed at 23:50 and sent at 00:03 is
+  //      still the day before. A day more than 12 hours behind the clock is a form left open since: the time is read again.
+  //   6. Lenient, before 06:00 (the night's work belongs to the day before): a collection time without a day of its own, such as a
+  //      collection point's usual time, that would fall after the delivery is yesterday's and already passed, as it was read at 23:50.
+  const TIME_GRACE = 15 * 60000, NIGHT_FROM = '18:00', NIGHT_TO = '06:00', DAY_KEPT_FOR = 12 * 3600000;
+  const TIME_PASSED = 'Choose a time later today, or an advance order for another day';
+  const dayAfter = (key, n) => { const d = localDate(key); return keyOf(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)); };
+  const momentOf = t => new Date(t.day + 'T' + t.time).getTime();
+  MDM.todayTimes = function (v, o) {
+    v = v || {}; o = o || {};
+    const nowMs = o.now == null ? Date.now() : new Date(o.now).getTime(), nowDate = new Date(nowMs), floor = nowMs - TIME_GRACE;
+    const today = keyOf(nowDate), nowTime = String(nowDate.getHours()).padStart(2, '0') + ':' + String(nowDate.getMinutes()).padStart(2, '0');
+    // One time by itself: rules 5, 1, 2 and 3.
+    const read = (time, day) => {
+      const t = hhmm(time); if (!t) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(day || '')) && momentOf({ day, time: t }) >= nowMs - DAY_KEPT_FOR) return { day, time: t, kept: true };
+      if (momentOf({ day: today, time: t }) >= floor) return { day: today, time: t };
+      return { day: t < NIGHT_TO && nowTime >= NIGHT_FROM ? dayAfter(today, 1) : today, time: t };
+    };
+    let c = read(v.collectTime, v.collectDay), d = read(v.deliverTime, v.deliverDay);
+    const errors = { collectTime: '', deliverTime: '' }, passed = t => !!t && momentOf(t) < floor;
+    // The two together: rule 6, then rule 4.
+    if (c && d && momentOf(d) < momentOf(c)) {
+      if (o.lenient && nowTime < NIGHT_TO && !c.kept && !passed(c)) c = { day: dayAfter(today, -1), time: c.time };
+      else if (c.time >= NIGHT_FROM && d.time < NIGHT_TO) d = { day: dayAfter(c.day, 1), time: d.time };
+      if (momentOf(d) < momentOf(c)) errors.deliverTime = 'Delivery must be after collection: collection is ' + c.time + ', delivery ' + d.time;
+    }
+    if (!o.lenient) { if (passed(c)) errors.collectTime = TIME_PASSED; if (passed(d)) errors.deliverTime = TIME_PASSED; }
+    const short = key => key.slice(8, 10) + '/' + key.slice(5, 7);
+    const note = t => (!t ? '' : passed(t) ? (t.day === today ? 'Already passed today' : 'Already passed, ' + short(t.day)) : t.day === today ? '' : t.day === dayAfter(today, 1) ? 'Tomorrow, ' + short(t.day) : short(t.day));
+    const schedule = Object.assign({ type: 'asap' }, c || d ? { day: (c || d).day } : {}, c ? { collectTime: c.time } : {}, d ? { deliverTime: d.time } : {}, c ? { collectDay: c.day } : {}, d ? { deliverDay: d.day } : {});
+    return { collect: c ? { day: c.day, time: c.time } : null, deliver: d ? { day: d.day, time: d.time } : null, errors, notes: { collectTime: note(c), deliverTime: note(d) }, schedule };
   };
   // nextTime(o) → the time that matters now, with kind 'collect' or 'deliver': the collection's until it is collected (or the
   // delivery's when only that was given), then the delivery's. timeAt(t) → that moment in ms on this device's clock (a day without a
@@ -1658,12 +1704,12 @@
     return out;
   }
   // batchSchedule(s) → the timing a bulk order was booked with, or null for "as soon as possible": an advance collection date and time
-  // ({ type: 'advance', collectDate, collectTime, deliverDate, deliverTime }) or times for a day ({ type: 'asap', day, deliverTime }),
-  // as createOrder takes them. Every order of the bulk gets it, so MDM.orderTimes sorts and shows them like single orders.
+  // ({ type: 'advance', collectDate, collectTime, deliverDate, deliverTime }) or times with their days ({ type: 'asap', day, deliverTime,
+  // collectDay, deliverDay }), as createOrder takes them. Every order of the bulk gets it, so MDM.orderTimes sorts and shows them like single orders.
   function batchSchedule(s) {
     if (!s || typeof s !== 'object') return null;
     const out = { type: s.type === 'advance' ? 'advance' : 'asap' };
-    ['collectDate', 'deliverDate', 'day'].forEach(k => { if (/^\d{4}-\d{2}-\d{2}$/.test(String(s[k] || ''))) out[k] = s[k]; });
+    ['collectDate', 'deliverDate', 'day', 'collectDay', 'deliverDay'].forEach(k => { if (/^\d{4}-\d{2}-\d{2}$/.test(String(s[k] || ''))) out[k] = s[k]; });
     ['collectTime', 'deliverTime'].forEach(k => { if (/^\d{1,2}:\d{2}$/.test(String(s[k] || ''))) out[k] = s[k]; });
     return out.type === 'advance' || Object.keys(out).length > 1 ? out : null;
   }

@@ -293,7 +293,9 @@
     const s = o.schedule || {};
     if (s.type === 'advance') return 'Collect ' + fmtDay(s.collectDate) + ' ' + (s.collectTime || '') + ' · deliver ' + fmtDay(s.deliverDate) + ' ' + (s.deliverTime || '');
     if (s.type === 'slot') return fmtDay(s.date) + ', ' + MDM.ui.window(s.window || '');
-    return 'As soon as possible';
+    // A normal or express order's times, each on its own day (21/11/2026: a delivery after midnight reads "Tomorrow 00:30").
+    const t = MDM.orderTimes(o), said = [t.collect && t.collect.time ? 'collect ' + MDM.ui.timeText(t.collect) : '', t.deliver && t.deliver.time ? 'deliver by ' + MDM.ui.timeText(t.deliver) : ''].filter(Boolean).join(' · ');
+    return said ? said.charAt(0).toUpperCase() + said.slice(1) : 'As soon as possible';
   }
   function fmtDay(d) { return d ? MDM.ui.fmtDate(d + 'T00:00:00', { dateOnly: true }) : ''; }
 
