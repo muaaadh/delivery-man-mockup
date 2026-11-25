@@ -1028,7 +1028,8 @@
       { value: 'payment', label: 'Payments', test: t => /^payment_|^refund$|^settled$/.test(t) },
       { value: 'cancel', label: 'Cancellations', test: t => /cancel/.test(t) },
       { value: 'priority', label: 'Priority', test: t => /^priority_/.test(t) },
-      { value: 'changes', label: 'Order changes and remarks', test: t => ['modified', 'note', 'update_sent', 'contacted'].indexOf(t) >= 0 },
+      // A package added, corrected or taken off after booking is a change to the order (its price change is said in the same line).
+      { value: 'changes', label: 'Order changes and remarks', test: t => ['modified', 'note', 'update_sent', 'contacted', 'package_added', 'package_updated', 'package_removed'].indexOf(t) >= 0 },
       { value: 'hr', label: 'Attendance and leave', test: t => /^punch_|^leave_/.test(t) },
       { value: 'setup', label: 'Settings, zones, staff and store', test: t => /^settings_|^zone_|^staff_|^driver_|^product_|^batch_|^invoice_|^signed_/.test(t) },
     ];

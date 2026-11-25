@@ -1039,13 +1039,19 @@
     }
     // Keep each package's pickup/drop-off in step with the order-level addresses and people, which pricing, labels and routing read.
     // Bulk child orders too: each one is a single package to one receiver.
-    const touched = { pickup: new Set(), dropoff: new Set(), movedPickup: new Set(), movedDrop: new Set() };
+    const touched = { pickup: new Set(), dropoff: new Set(), movedPickup: new Set(), movedDrop: new Set(), notedPickup: new Set(), notedDrop: new Set() };
+    // New collection or delivery instructions (client, 24/11/2026: the label and the driver kept the note typed at booking): a
+    // package that carried the order's note, or none, takes the new one; one counted at an extra stop keeps that stop's.
+    const note = x => String((x && x.instructions) || ''), colNoted = note(c) !== note(c0), dropNoted = note(d) !== note(d0);
+    const extraIds = (o.extraCollections || []).map(x => x.id);
     (o.packages || []).forEach(pkg => {
       if (pkg.pickup && o.collection) {
         if (colMoved && (!pkg.pickup.address || pkg.pickup.address === c0.address)) { Object.assign(pkg.pickup, { address: c.address, zone: c.zone, landmark: c.landmark }); delete pkg.pickup.lat; delete pkg.pickup.lng; touched.movedPickup.add(pkg.id); }
         if (colChanged && was(pkg.pickup.contact, colFrom)) { pkg.pickup.contact = clone(col); touched.pickup.add(pkg.id); }
+        if (colNoted && extraIds.indexOf(pkg.collectionId) < 0 && (!pkg.pickup.instructions || pkg.pickup.instructions === note(c0))) { pkg.pickup.instructions = note(c); touched.notedPickup.add(pkg.id); }
       }
       if (!pkg.dropoff || !o.delivery) return;
+      if (dropNoted && (!home || !pkg.dropoff.instructions || pkg.dropoff.instructions === note(d0))) { pkg.dropoff.instructions = note(d); touched.notedDrop.add(pkg.id); }
       if (!home) { const end = deliveryEndpoint(d); Object.assign(pkg.dropoff, end, { recipient: pkg.dropoff.recipient || end.recipient }); }
       else if (homeMoved && (!pkg.dropoff.address || pkg.dropoff.address === d0.address)) {
         // The old pin belongs to the old address; the stop is placed again from the new address and zone.
@@ -1069,6 +1075,7 @@
           const end = s.type === 'pickup' ? pkg.pickup : s.type === 'dropoff' ? pkg.dropoff : null;
           if (!end) return;
           if (s.type === 'pickup' ? touched.pickup.has(pkg.id) : touched.dropoff.has(pkg.id)) s.contact = clone(s.type === 'pickup' ? end.contact : end.recipient);
+          if (s.type === 'pickup' ? touched.notedPickup.has(pkg.id) : touched.notedDrop.has(pkg.id)) s.instructions = end.instructions || '';
           if (s.type === 'pickup' ? touched.movedPickup.has(pkg.id) : touched.movedDrop.has(pkg.id)) {
             const pt = pointFor(end, end.zone || 'male', end.address || s.label);
             Object.assign(s, { address: end.address || '', zone: end.zone || 'male', landmark: end.landmark || '', lat: pt.lat, lng: pt.lng });
@@ -1467,25 +1474,31 @@
     return save(o);
   }
   function applySizes(o, sizes, by) {
-    // sizes: { packageId: { size, dims } } from the driver or operator; prices are re-derived from the rate card.
+    // sizes: { packageId: { size, dims } } from the driver or operator; the price of each package whose category changed is
+    // re-derived from the rate card.
     const s = settings(); const before = o.totals.total;
     const acc = o.service === 'business' && o.accountId ? readCol('business_accounts').find(a => a.id === o.accountId) : null;
+    const again = {};
     o.packages.forEach(pkg => {
       const u = sizes[pkg.id]; if (!u) return;
       // Business packages are priced by size category (§5.2): a new size moves the package to that category at the account's agreed rate.
       if (o.service === 'business' && (u.tier || (u.size && u.size !== pkg.size))) {
         const tiers = MDM.pricing.businessTiers(s);
         const t = u.tier ? tiers.find(x => x.value === u.tier) : (tiers.find(x => x.size === u.size && acc && acc.rates && acc.rates[x.value] != null) || tiers.find(x => x.size === u.size));
-        if (t) { if (pkg.tier !== t.value) o.changes = (o.changes || []).concat([{ at: now(), by, field: 'package ' + pkg.id + ' size category', from: pkg.tier || '', to: t.value }]); pkg.tier = t.value; pkg.tierRate = MDM.pricing.businessRate(acc, t.value, s); if (!u.size) u.size = t.size; }
+        if (t) { if (pkg.tier !== t.value) o.changes = (o.changes || []).concat([{ at: now(), by, field: 'package ' + pkg.id + ' size category', from: pkg.tier || '', to: t.value }]); pkg.tier = t.value; pkg.tierRate = MDM.pricing.businessRate(acc, t.value, s); if (!u.size) u.size = t.size; again[pkg.id] = true; }
       }
-      if (u.size && u.size !== pkg.size) u.from = pkg.size;
+      if (u.size && u.size !== pkg.size) { u.from = pkg.size; again[pkg.id] = true; }
       if (u.size && u.size !== pkg.size) o.changes = (o.changes || []).concat([{ at: now(), by, field: 'package ' + pkg.id + ' size', from: pkg.size, to: u.size }]);
       if (u.size) pkg.size = u.size;
       if (u.dims) pkg.dims = u.dims;
       pkg.sizeSource = by && by.indexOf('driver') === 0 ? 'driver' : 'operator';
     });
-    const q = MDM.pricing.quote({ service: o.service, packages: o.packages }, s);
-    o.packages = q.packages.map((p, i) => Object.assign({}, o.packages[i], { price: p.price }));
+    // Only those packages are priced again (24/11/2026: one category change used to price every package of the order at today's
+    // rate card): the others keep the price they were booked at, as when a package is added.
+    const priced = {};
+    MDM.pricing.quote({ service: o.service, packages: o.packages.filter(k => again[k.id] || !k.price) }, s).packages.forEach(k => { priced[k.id] = k.price; });
+    o.packages = o.packages.map(k => (priced[k.id] ? Object.assign({}, k, { price: priced[k.id] }) : k));
+    if (Object.keys(again).length) tierInStep(o);
     recalc(o);
     const changed = Object.keys(sizes).filter(id => sizes[id] && sizes[id].from && sizes[id].size && sizes[id].from !== sizes[id].size).map(id => MDM.pricing.sizeLabel(sizes[id].from) + ' to ' + MDM.pricing.sizeLabel(sizes[id].size));
     if (o.totals.total !== before || changed.length) {
@@ -1533,6 +1546,175 @@
     priceHistory(o, before, o.totals.total, 'added a package: ' + name, by);
     pushEvent(o, makeEvent('package_added', 'Package added' + (byDriver ? ' at collection' : '') + ': ' + name + (pkg.description ? ', ' + pkg.description : '') + ' (' + fmt(priced.price.lineTotal) + ')', by, 'public'));
     invoiceFollows(o, before, by);
+    return save(o);
+  }
+  // ---- Package information corrected after booking (client, 24/11/2026: "After placing the orders, sometime we have to update some
+  // package information") ------------------------------------------------------------------------------------------------------------
+  // A single business order names its size category in its details (details.tier, printed with the order's details): it follows the
+  // packages while they are all one category and is left empty when they are not (each package row then says its own).
+  function tierInStep(o) {
+    const all = (o.packages || []).map(k => k.tier);
+    if (!o.details || o.details.tier == null || !all.length || all.some(v => !v)) return;
+    const tier = all.every(v => v === all[0]) ? all[0] : '';
+    if (tier !== o.details.tier) o.details = Object.assign({}, o.details, { tier });
+  }
+  // An order already paid keeps its price: another size category, or one package fewer, would leave what was paid wrong.
+  function priceStillOpen(o) { const st = (o.payment || {}).status; if (st === 'paid' || st === 'refunded') throw new StoreError('validation', 'This order is already ' + st + ': its price cannot change here'); }
+  // editPackage(orderId, packageId, patch, { by, remarks }): patch carries only what changes.
+  //   description, fragile   what the package is, as the label, the driver's job and a business invoice line print it
+  //   tier                   a business or bulk order's size category: this package alone is priced again, at the account's rate (as
+  //                          addPackage prices the one it adds); the others keep the price they were booked at. A customer order's
+  //                          category (Bag, Box, XL) changes through updatePackages, the office's "Change category", not here.
+  //   reference, cod         a business or bulk order's reference and cash to collect (0 for none). They belong to the whole order
+  //                          and travel in the same call, so the office's dialog is saved as one change.
+  // Until the order is delivered, returned or cancelled; the cash only while none of it is recorded, a size category only while the
+  // order is not paid. Words, reference and cash never touch the price. The same edit again writes nothing.
+  function editPackage(orderId, packageId, patch, p) {
+    p = p || {}; patch = patch || {};
+    const o = orderOrThrow(orderId);
+    if (['delivered', 'cancelled', 'returned'].indexOf(o.status) >= 0) throw new StoreError('transition', 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase());
+    if (o.service === 'store') throw new StoreError('validation', 'E-store orders keep their packages');
+    const idx = (o.packages || []).findIndex(k => k.id === packageId);
+    if (idx < 0) throw new StoreError('not_found', 'This package is no longer on the order');
+    const s = settings(), by = p.by || 'admin', business = o.service === 'business', before = o.totals.total;
+    const txt = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+    // mine: what changed on this package; whole: what changed for the whole order.
+    const pkg = Object.assign({}, o.packages[idx]), changes = [], mine = [], whole = [];
+    const log = (field, from, to) => changes.push({ at: now(), by, field, from: from == null ? '' : from, to });
+    if (patch.description != null && txt(patch.description, 200) !== (pkg.description || '')) {
+      const v = txt(patch.description, 200);
+      log('package ' + pkg.id + ' description', pkg.description || '', v); mine.push(v ? 'contents "' + v + '"' : 'contents removed'); pkg.description = v;
+    }
+    if (patch.fragile != null && !!patch.fragile !== !!pkg.fragile) { log('package ' + pkg.id + ' fragile', !!pkg.fragile, !!patch.fragile); mine.push(patch.fragile ? 'fragile' : 'not fragile'); pkg.fragile = !!patch.fragile; }
+    if (patch.size != null && patch.size !== '' && patch.size !== pkg.size && !(business && patch.tier)) throw new StoreError('validation', 'Change the category of this package with "Change category"');
+    let sized = '';
+    if (patch.tier != null && patch.tier !== '' && patch.tier !== pkg.tier) {
+      if (!business) throw new StoreError('validation', 'Only a business order has size categories');
+      priceStillOpen(o);
+      const tiers = MDM.pricing.businessTiers(s), t = tiers.find(x => x.value === patch.tier), from = tiers.find(x => x.value === pkg.tier);
+      if (!t) throw new StoreError('validation', 'Choose the package size');
+      log('package ' + pkg.id + ' size category', pkg.tier || '', t.value);
+      if (t.size !== pkg.size) log('package ' + pkg.id + ' size', pkg.size, t.size);
+      sized = (from ? from.label : MDM.pricing.sizeLabel(pkg.size)) + ' to ' + t.label;
+      const acc = readCol('business_accounts').find(a => a.id === o.accountId);
+      Object.assign(pkg, { tier: t.value, tierRate: MDM.pricing.businessRate(acc, t.value, s), size: t.size, underOneFt: t.size === 'bag', sizeSource: String(by).indexOf('driver') === 0 ? 'driver' : 'operator' });
+      pkg.price = MDM.pricing.quote({ service: o.service, packages: [pkg] }, s).packages[0].price;   // this package only
+    }
+    o.packages = o.packages.map((k, i) => (i === idx ? pkg : k));
+    if (patch.reference != null) {
+      const ref = txt(patch.reference, 80), cur = String((o.details || {}).reference || '');
+      if (ref !== cur) {
+        if (!o.accountId) throw new StoreError('validation', 'Only a business order has a reference to change here');
+        log('details.reference', cur, ref); whole.push(ref ? 'reference ' + ref : 'reference removed');
+        o.details = Object.assign({}, o.details, { reference: ref });
+        // A single business order's packages carry a copy (package.notes, which the label prints when the order has none).
+        o.packages = o.packages.map(k => (k.notes != null ? Object.assign({}, k, { notes: ref }) : k));
+      }
+    }
+    let cash = '';
+    if (patch.cod != null && patch.cod !== '') {
+      const amount = Math.round(Number(patch.cod)), cur = o.cod && o.cod.amount > 0 ? Math.round(o.cod.amount) : 0;
+      if (!(amount >= 0)) throw new StoreError('validation', 'Enter the cash to collect, 0 for none');
+      if (amount !== cur) {
+        if (!o.accountId) throw new StoreError('validation', 'Cash on delivery is for business orders');
+        if (o.cod && o.cod.status && o.cod.status !== 'pending') throw new StoreError('transition', 'The cash for this order is already recorded');
+        log('cod.amount', cur, amount);
+        o.cod = amount > 0 ? Object.assign({ status: 'pending', collectedAmount: null }, o.cod, { amount }) : null;
+        cash = amount > 0 ? 'cash to collect ' + (cur ? fmt(cur) + ' to ' : '') + fmt(amount) : 'no cash to collect (was ' + fmt(cur) + ')';
+        whole.push(cash);
+      }
+    }
+    if (!changes.length) return clone(o);
+    o.changes = (o.changes || []).concat(changes);
+    const confirmed = !!(o.pricing && o.pricing.status === 'confirmed'), n = idx + 1;
+    if (sized) {
+      tierInStep(o);
+      recalc(o);
+      if (!confirmed) o.estimate = MDM.pricing.estimateRange(o.packages, s, o.service, o.extraCollections);
+      // The wording "Change category" writes (applySizes): the office's list of category changes and the customer's price read it.
+      priceHistory(o, before, o.totals.total, 'Package category changed: ' + sized, by);
+      pushEvent(o, makeEvent('size_updated', 'Package category changed (' + sized + ')' + (o.totals.total !== before ? ', price ' + fmt(before) + ' to ' + fmt(o.totals.total) : ''), by, confirmed ? 'public' : 'internal'));
+    }
+    const remarks = txt(p.remarks, 200);
+    if (mine.length || whole.length) pushEvent(o, makeEvent('package_updated', (mine.length ? 'Package ' + n + ' updated: ' + mine.join(', ') + (whole.length ? '. For the whole order: ' : '') : 'Order updated: ') + whole.join(', ') + (remarks ? ' (' + remarks + ')' : ''), by, 'internal'));
+    // Whoever carries it reads the new details on the job; the business hears when our office changes the cash its receiver pays.
+    const told = [mine.concat(sized ? ['size ' + sized] : []).join(', '), whole.join(', ')];
+    if (o.driverId && MDM.ACTIVE_STATUSES.indexOf(o.status) >= 0 && String(by).indexOf('driver:') !== 0) notifyStaff(o, 'driver', 'Package details changed', (told[0] ? 'package ' + n + ': ' + told[0] : '') + (told[0] && told[1] ? '; ' : '') + told[1]);
+    if (cash && String(by).indexOf('business:') !== 0) notifyStaff(o, 'business', 'Cash to collect changed', cash + ', changed by our office');
+    if (sized) invoiceFollows(o, before, by);
+    return save(o);
+  }
+  // Why a package cannot come off its order, or null when it can: the rule store.removePackage keeps, and the one the office's
+  // order page reads (MDM.packageRemovable) to offer "Remove" on a package.
+  function removalBlock(o, pkg) {
+    const no = (code, message) => ({ code, message });
+    if (!pkg) return no('not_found', 'This package is no longer on the order');
+    if (['delivered', 'cancelled', 'returned'].indexOf(o.status) >= 0) return no('transition', 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase());
+    if (MDM.CANCELLABLE.indexOf(o.status) < 0) return no('transition', o.status === 'failed' ? 'Decide the failed attempt first' : 'The packages are already collected');
+    if (o.service === 'store') return no('validation', 'E-store orders keep their packages');
+    if ((o.packages || []).length < 2) return no('validation', 'This is the only package: cancel the order instead');
+    if (pkg.shop) return no('validation', 'This package carries the shopping: it cannot be removed');
+    const st = (o.payment || {}).status;
+    if (st === 'paid' || st === 'refunded') return no('validation', 'This order is already ' + st + ': its price cannot change here');
+    const idsOf = x => (x.packageIds || [x.packageId]).filter(Boolean);
+    const pick = ((o.route && o.route.stops) || []).find(x => x.type === 'pickup' && idsOf(x).indexOf(pkg.id) >= 0);
+    if (pick && pick.status === 'done') return no('transition', 'This package is already collected');
+    // Without a route yet, the collection point it is counted at, as buildStops will group them: an extra stop, the shop, else the
+    // address it is collected from.
+    const extraIds = (o.extraCollections || []).map(c => c.id);
+    const point = k => (k.collectionId && extraIds.indexOf(k.collectionId) >= 0 ? 'extra|' + k.collectionId
+      : o.service === 'shop' && k.shop ? 'pickup|' + (k.shop.address || MDM.shopName(k.shop)) + '|' + (k.shop.zone || 'male')
+      : 'pickup|' + ((k.pickup || {}).address || '') + '|' + ((k.pickup || {}).zone || 'male'));
+    if (pick ? idsOf(pick).length < 2 : !o.packages.some(k => k.id !== pkg.id && point(k) === point(pkg))) return no('validation', 'It is the only package at that collection: the driver would go there for nothing');
+    return null;
+  }
+  MDM.packageRemovable = (o, pkg) => !!o && !removalBlock(o, pkg);
+  // removePackage(orderId, packageId, { by, reason }): a package booked by mistake comes off the order while it is still to collect.
+  // The total goes down by exactly what that package's row showed and the other rows keep their amounts; the driver's stops stay
+  // the same stops (same ids), without this package.
+  function removePackage(orderId, packageId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId);
+    const idx = (o.packages || []).findIndex(k => k.id === packageId), pkg = (o.packages || [])[idx];
+    const no = removalBlock(o, pkg); if (no) throw new StoreError(no.code, no.message);
+    const reason = String(p.reason || '').trim().slice(0, 200);
+    if (!reason) throw new StoreError('validation', 'Say why the package is removed');
+    const s = settings(), by = p.by || 'admin', before = o.totals.total, whole = v => Math.round(Number(v) || 0);
+    // A price our team confirmed is read in the package rows (pricing.packageAmounts), a confirmation of the total shared out between
+    // them. It is written again as each remaining package's own difference, so those rows keep the amounts they show.
+    const shown = MDM.pricing.packageAmounts(o), gone = shown.amounts[idx];
+    if (Object.keys(shown.folded).length) {
+      const split = {}; let diff = 0;
+      o.packages.forEach((k, i) => { if (i === idx) return; const d = shown.amounts[i] - whole(k.price && k.price.lineTotal); if (d) { split[k.id] = d; diff += d; } });
+      const old = (o.fees.adjustments || []).find(a => shown.folded[a.id]);
+      const adjs = (o.fees.adjustments || []).filter(a => !shown.folded[a.id]);
+      if (Object.keys(split).length) adjs.push({ id: MDM.id('adj'), preset: 'quote', label: 'Price confirmation', amount: diff, at: now(), by, remarks: (old && old.remarks) || '', confirm: true, split });
+      o.fees = Object.assign({}, o.fees, { adjustments: adjs });
+    }
+    o.packages = o.packages.filter(k => k.id !== pkg.id);
+    const stops = (o.route && o.route.stops) || [], idsOf = x => (x.packageIds || [x.packageId]).filter(Boolean);
+    if (stops.length) {
+      // It comes off its collection and its delivery; a delivery left with nothing to hand over goes.
+      const kept = stops.map(x => { if (idsOf(x).indexOf(pkg.id) < 0) return x; const ids = idsOf(x).filter(id => id !== pkg.id); return Object.assign({}, x, { packageIds: ids, packageId: x.packageId === pkg.id ? ids[0] || null : x.packageId }); })
+        .filter(x => x.type !== 'dropoff' || idsOf(x).length);
+      o.route = Object.assign({}, o.route, { stops: kept });
+      if (kept.length < stops.length) {
+        const drops = kept.filter(x => x.type === 'dropoff'), open = kept.filter(x => x.status !== 'done' && x.status !== 'skipped');
+        drops.forEach((x, i) => { x.label = drops.length > 1 ? 'Delivery ' + (i + 1) : 'Delivery'; });
+        o.route.polyline = MDM.geo.routeThrough(open.length >= 2 ? open : kept.filter(x => x.status !== 'skipped'));
+      }
+    }
+    tierInStep(o);
+    recalc(o);
+    if (o.totals.total < 0) throw new StoreError('validation', 'The price would go below zero: change the price rows first');
+    if (!(o.pricing && o.pricing.status === 'confirmed')) o.estimate = MDM.pricing.estimateRange(o.packages, s, o.service, o.extraCollections);
+    const name = (pkg.tier ? (MDM.pricing.businessTiers(s).find(x => x.value === pkg.tier) || {}).label || pkg.tier : MDM.pricing.sizeLabel(pkg.size)) + (pkg.description ? ', ' + pkg.description : '');
+    const left = o.packages.length + ' package' + (o.packages.length > 1 ? 's' : '');
+    o.changes = (o.changes || []).concat([{ at: now(), by, field: 'package ' + pkg.id + ' removed', from: name, to: '' }]);
+    priceHistory(o, before, o.totals.total, 'removed a package: ' + name + ' (' + reason + ')', by);
+    pushEvent(o, makeEvent('package_removed', 'Package removed: ' + name + ' (' + fmt(gone) + ')', by, 'public'));
+    pushEvent(o, makeEvent('note', 'Package removed: ' + reason, by, 'internal'));
+    if (o.driverId && MDM.ACTIVE_STATUSES.indexOf(o.status) >= 0) notifyStaff(o, 'driver', 'Package removed', name + ' is off the order: now ' + left + ' to collect');
     return save(o);
   }
   // addReceipt(orderId, { shop: 'main' | <collection id>, amount, note, photoId, by }): another receipt from a shop of the order,
@@ -2606,6 +2788,7 @@
     audit: P(audit), transition: P(transition), addEvent: P(addEvent), addNote: P(addNote),
     createOrder: P(createOrder), modifyOrder: P(modifyOrder), addAdjustment: P(addAdjustment), confirmPrice: P(confirmPrice), updatePackages: P(updatePackages),
     addPackage: P(addPackage), addReceipt: P(addReceipt), markInvoicePaid: P(markInvoicePaid), submitInvoicePayment: P(submitInvoicePayment), rejectInvoicePayment: P(rejectInvoicePayment),
+    editPackage: P(editPackage), removePackage: P(removePackage),
     addBusinessPackage: P(addBusinessPackage), removeBusinessPackage: P(removeBusinessPackage),
     requestPayment: P(requestPayment), submitPayment: P(submitPayment), verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), recordRefund: P(recordRefund), markSettled: P(markSettled),
     cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),

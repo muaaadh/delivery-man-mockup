@@ -654,6 +654,11 @@
       const photo = [thumbButton(ctx.fileById[pkg.photoId], pkg.photoSource === 'driver' ? 'proof of collection' : 'package photo'),
         pkg.collectionPhotoId && pkg.collectionPhotoId !== pkg.photoId ? thumbButton(ctx.fileById[pkg.collectionPhotoId], 'proof of collection') : null].filter(Boolean);
       const canChange = (open(o) || correctable(o)) && o.service !== 'store';
+      // Package information corrected after booking (client, 24/11/2026): what it is and fragile, a business order's size, reference
+      // and cash, until the order is delivered. A package still to collect can come off the order (the store's rule,
+      // MDM.packageRemovable). E-store orders keep their packages.
+      const canEdit = open(o) && o.service !== 'store', canRemove = MDM.packageRemovable(o, pkg);
+      const which = { 'data-package-id': pkg.id };
       return el('div', { class: 'list__item', 'data-testid': 'drawer-package', 'data-package-id': pkg.id, 'data-size': pkg.size },
         el('div', { class: 'list__main' },
           el('div', { class: 'list__title' }, (i + 1) + '. ' + MDM.pricing.sizeLabel(pkg.size) + (pkg.description ? ' · ' + pkg.description : '')),
@@ -662,7 +667,10 @@
           tags.length ? el('div', { class: 'tags' }, tags.map(f => el('span', { class: 'tag' }, f))) : null,
           photo.length ? el('div', { class: 'thumbs' }, photo) : null),
         el('div', { class: 'list__aside' }, el('span', { class: 'mono' }, money(pkg.price ? shown[i] : 0)),
-          canChange ? el('div', { class: 'row' }, rowBtn('Change category', 'drawer-change-category', () => changeCategory(o, pkg.id), 'btn--secondary', { 'data-package-id': pkg.id })) : null));
+          canChange ? el('div', { class: 'row' }, rowBtn('Change category', 'drawer-change-category', () => changeCategory(o, pkg.id), 'btn--secondary', { 'data-package-id': pkg.id })) : null,
+          canEdit || canRemove ? el('div', { class: 'row' },
+            canEdit ? rowBtn('Edit', 'drawer-edit-package', () => editPackage(o, pkg.id, ctx), 'btn--secondary', Object.assign({ 'aria-label': 'Edit package ' + (i + 1) }, which)) : null,
+            canRemove ? rowBtn('Remove', 'drawer-remove-package', () => removePackage(o, pkg.id), 'btn--ghost', Object.assign({ 'aria-label': 'Remove package ' + (i + 1) }, which)) : null) : null));
     });
     // A package on top of the booked ones (client, 20/11/2026): the customer hands one more over at the collection, or says so on
     // the phone. Until the order is delivered.
@@ -997,15 +1005,26 @@
     if (!ch.length) return null;
     const index = {}; (o.packages || []).forEach((p, i) => { index[p.id] = i + 1; });
     // Readable names for the machine paths: 'package pkg_x size' → 'Package 1 category', 'package pkg_x size category' → 'Package 1
-    // business size category' (tier keys become their labels), 'delivery boat name' → 'Boat: name'.
+    // business size category' (tier keys become their labels), 'delivery boat name' → 'Boat: name'. What store.editPackage and
+    // removePackage record reads the same way: 'Package 1 contents', 'Package 1 fragile', 'Package removed', 'Reference', 'Cash to
+    // collect'. A package that has since come off the order is 'Removed package'.
     const tiers = MDM.pricing.businessTiers(state.settings);
+    const pkgName = id => (index[id] ? 'Package ' + index[id] : 'Removed package');
     const name = f => {
-      let m = /^package (.+) size$/.exec(f); if (m) return 'Package ' + (index[m[1]] || '') + ' category';
-      m = /^package (.+) size category$/.exec(f); if (m) return 'Package ' + (index[m[1]] || '') + ' business size category';
+      let m = /^package (.+) size$/.exec(f); if (m) return pkgName(m[1]) + ' category';
+      m = /^package (.+) size category$/.exec(f); if (m) return pkgName(m[1]) + ' business size category';
+      m = /^package (.+) description$/.exec(f); if (m) return pkgName(m[1]) + ' contents';
+      m = /^package (.+) fragile$/.exec(f); if (m) return pkgName(m[1]) + ' fragile';
+      if (/^package .+ removed$/.test(f)) return 'Package removed';
+      if (f === 'details.reference') return 'Reference';
+      if (f === 'cod.amount') return 'Cash to collect';
       m = /^delivery boat (.+)$/.exec(f); if (m) return 'Boat: ' + (BOAT_FIELD[m[1]] || m[1]).toLowerCase();
       return f.replace(/\./g, ' ').replace(/^./, c => c.toUpperCase());
     };
     const v = (f, x) => {
+      if (/^package .+ removed$/.test(f) && (x === '' || x == null)) return 'removed';
+      if (f === 'cod.amount') return Number(x) > 0 ? money(x) : 'none';
+      if (/^package .+ fragile$/.test(f)) return x ? 'Yes' : 'No';
       if (x === '' || x == null) return 'empty';
       if (/^package .+ size$/.test(f)) return MDM.pricing.sizeLabel(x);
       if (/^package .+ size category$/.test(f)) return (tiers.find(t => t.value === x) || {}).label || String(x);
@@ -1081,6 +1100,61 @@
     const photoId = v.photo ? await storePhoto(v.photo, o.id, 'package') : null;
     const saved = await MDM.store.addPackage(o.id, Object.assign({ description: v.description || '', fragile: !!v.fragile, photoId, stopId: v.stopId || (pickups[0] || {}).id || null, by: by() }, business ? { tier: v.size } : { size: v.size }));
     toast('Package added: ' + o.code + ' is now ' + money(saved.totals.total), 'ok');
+  }
+  // A label already printed is out of date once its package changes: say so when the order has labels in use (a business sticks
+  // them on before we collect; any order with a driver may carry them).
+  const printAgain = (o, several) => (o.service === 'business' || o.driverId ? '. Print ' + (several ? 'the labels' : 'its label') + ' again' : '');
+  // "Edit" on a package (client, 24/11/2026: "After placing the orders, sometime we have to update some package information"): what
+  // it is and fragile; on a business or bulk order also its size at the account's rates and, for the whole order, the reference and
+  // the cash to collect. A customer order's category stays with "Change category". Saved in one go by store.editPackage.
+  async function editPackage(o, pkgId, ctx) {
+    o = await fresh(o);
+    const idx = (o.packages || []).findIndex(p => p.id === pkgId), pkg = (o.packages || [])[idx];
+    if (!pkg) { toast('This package is no longer on the order', 'warn'); return; }
+    if (!open(o)) { toast(o.code + ' is ' + MDM.STATUS[o.status].label.toLowerCase() + ': its packages can no longer change', 'warn'); return; }
+    const business = o.service === 'business';
+    // The size no longer changes once the order is paid, nor the cash once the driver has recorded it (the store refuses both).
+    const paid = ['paid', 'refunded'].indexOf((o.payment || {}).status) >= 0, cashOpen = !o.cod || !o.cod.status || o.cod.status === 'pending';
+    const fields = [];
+    if (business && !paid) {
+      // Each size at the account's rate today; the package's own size at the rate it was booked at, which it keeps.
+      const sizes = MDM.pricing.businessTiers(state.settings).map(t => ({ value: t.value, label: t.label + ' · ' + money(t.value === pkg.tier && pkg.tierRate != null ? pkg.tierRate : MDM.pricing.businessRate(ctx.account, t.value, state.settings)) }));
+      // A size the rate card no longer lists stays the package's until the office picks another.
+      if (pkg.tier && !sizes.some(x => x.value === pkg.tier)) sizes.unshift({ value: pkg.tier, label: pkg.tier + (pkg.tierRate != null ? ' · ' + money(pkg.tierRate) : '') });
+      fields.push(Object.assign({ name: 'tier', label: 'Package size', type: 'select', options: sizes, value: pkg.tier || '' }, pkg.tier ? { required: true } : { placeholder: 'Not set' }));
+    }
+    fields.push({ name: 'description', label: business ? 'Contents' : 'What is it', type: 'text', maxlength: 200, value: pkg.description || '', placeholder: business ? 'Phone case' : 'A bag of clothes' },
+      { name: 'fragile', label: 'Fragile', type: 'checkbox', value: !!pkg.fragile });
+    if (business) fields.push({ name: 'reference', label: 'Reference', type: 'text', maxlength: 80, value: (o.details || {}).reference || '' });
+    if (business && cashOpen) fields.push({ name: 'cod', label: 'Cash to collect (MVR)', type: 'number', min: 0, step: 1, value: o.cod && o.cod.amount > 0 ? o.cod.amount : '', hint: 'What the driver collects from the receiver. Empty or 0 for none' });
+    const several = (o.packages || []).length > 1;
+    const v = await withDialog(dialog({ title: 'Edit package ' + (idx + 1) + ' · ' + o.code, okLabel: 'Save changes', fields,
+      message: 'The label and the driver show what you save here.' + (!business ? ' The category changes with "Change category".' : paid ? ' The order is paid, so the size stays.' : ' Another size changes the price of this package' + (several ? ' only.' : '.'))
+        + (business && !cashOpen ? ' The cash for this order is already recorded.' : '') }),
+    dlg => { const ref = dlg.querySelector('[data-field="reference"]'); if (ref) ref.parentNode.insertBefore(el('h3', { class: 'field__label', 'data-testid': 'dialog-whole-order', style: { marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border)', fontWeight: '600' } }, 'For the whole order'), ref); });
+    if (!v) return;
+    const patch = { description: v.description || '', fragile: !!v.fragile };
+    if (business) { if (v.tier) patch.tier = v.tier; patch.reference = v.reference || ''; if (cashOpen) patch.cod = v.cod || 0; }
+    const upd = await MDM.store.editPackage(o.id, pkgId, patch, { by: by() });
+    const made = (upd.changes || []).slice((o.changes || []).length);
+    if (!made.length) { toast('Nothing changed', 'ok'); return; }
+    // The reference and the cash are on every label of the order.
+    toast('Package ' + (idx + 1) + ' updated' + (upd.totals.total !== o.totals.total ? ': ' + o.code + ' is now ' + money(upd.totals.total) : '') + printAgain(o, several && made.some(c => /^(details|cod)\./.test(c.field))), 'ok', { timeout: 7000 });
+  }
+  // "Remove" on a package still to collect (booked twice, or the customer keeps one back): store.removePackage takes it off the
+  // price and off the driver's stops, with the reason on the order.
+  async function removePackage(o, pkgId) {
+    o = await fresh(o);
+    const idx = (o.packages || []).findIndex(p => p.id === pkgId), pkg = (o.packages || [])[idx];
+    if (!pkg) { toast('This package is no longer on the order', 'warn'); return; }
+    if (!MDM.packageRemovable(o, pkg)) { toast('Package ' + (idx + 1) + ' can no longer be removed from ' + o.code, 'warn'); return; }
+    const left = o.packages.length - 1;
+    const v = await dialog({ title: 'Remove package ' + (idx + 1) + ' from ' + o.code, okLabel: 'Remove package', danger: true,
+      message: MDM.pricing.sizeLabel(pkg.size) + (pkg.description ? ', ' + pkg.description : '') + ', ' + money(MDM.pricing.packageAmounts(o).amounts[idx]) + '. It comes off the order and off its price; the other ' + (left > 1 ? left + ' packages keep theirs.' : 'package keeps its own.') + (o.driverId ? ' The driver is told.' : ''),
+      fields: [{ name: 'reason', label: 'Why it is removed', type: 'text', required: true, maxlength: 200, placeholder: 'Booked twice' }] });
+    if (!v) return;
+    const upd = await MDM.store.removePackage(o.id, pkgId, { reason: v.reason, by: by() });
+    toast('Package removed: ' + o.code + ' is now ' + money(upd.totals.total) + printAgain(o, true), 'ok', { timeout: 7000 });
   }
 
   // ---- Drawer footer: the next step for this status ---------------------------------------------------------------------------
