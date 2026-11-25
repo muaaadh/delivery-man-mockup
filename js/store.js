@@ -207,6 +207,28 @@
   // Collected and with no driver: handed over to the office (store.handToOffice) or a bulk package sorted at the hub, waiting to be
   // given to a driver for the delivery.
   MDM.waitingAtOffice = o => !!o && o.status === 'collected' && !o.driverId;
+  // Deleted orders (client, 24/11/2026: "add a 'Delete order' option"). An order recorded by mistake, as a test or twice leaves every
+  // list, board, count, report, driver's jobs, portal and tracking link, and is kept: order.deleted = { at, by, reason } (on the live
+  // service inside orders.extra, no new column), with its status, files, messages and timeline, so Restore puts it back as it was.
+  // Only an order nothing has happened to: nothing collected, nothing paid or sent as a slip, no charge or cash on record, on no
+  // invoice. Any other order is cancelled instead (store.cancel), which keeps the record of the package and the money.
+  // deleteRefusal(o) → the sentence that says why this order cannot be deleted, or null when it can. The store method, the drawer's
+  // button and its dialog all ask this one function, so the office reads the sentence the store would refuse with.
+  MDM.deleteRefusal = function (o) {
+    if (!o) return 'Order not found';
+    if (o.deleted) return o.code + ' is already deleted';
+    const st = o.status, pay = (o.payment || {}).status, cod = (o.cod || {}).status;
+    const inv = readCol('invoices').find(i => (i.lines || []).some(l => l && l.orderCode === o.code));
+    // What can never be undone comes first, so the office is not sent to reject a slip or void a charge on an order that stays anyway.
+    const why = inv ? 'it is on invoice ' + inv.number
+      : ['collected', 'with_office', 'remitted'].indexOf(cod) >= 0 ? 'its cash on delivery was collected'
+      : pay === 'paid' ? 'it is paid' : pay === 'refunded' ? 'its payment was refunded'
+      : st === 'delivered' ? 'it is delivered' : st === 'returned' ? 'it was returned to the sender'
+      : ['collected', 'out_for_delivery'].indexOf(st) >= 0 || ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done') ? 'it is already collected'
+      : pay === 'received' ? 'a payment slip is waiting to be checked'
+      : (o.charges || []).some(c => !c.void) ? 'a charge is recorded on it' : '';
+    return why ? o.code + ' cannot be deleted: ' + why + '. ' + (MDM.CANCELLABLE.indexOf(st) >= 0 ? 'Cancel it instead' : 'It stays on record') : null;
+  };
   MDM.priceAfterCollection = o => !!(o && o.pricing && o.pricing.afterCollection && o.pricing.status !== 'confirmed');
   // priceToFinalise(o) → true once the proof of collection is in and the price still waits for the operator.
   MDM.priceToFinalise = o => MDM.priceAfterCollection(o) && ['cancelled', 'returned'].indexOf(o.status) < 0 && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
@@ -480,10 +502,15 @@
     const desc = order[0] === '-', field = desc ? order.slice(1) : order;
     return arr.slice().sort((a, b) => { const x = a[field] || '', y = b[field] || ''; return x < y ? (desc ? 1 : -1) : x > y ? (desc ? -1 : 1) : 0; });
   }
-  function get(col, id) { const doc = readCol(col).find(d => d.id === id); return doc ? clone(doc) : null; }
+  // The one filter for deleted orders (MDM.deleteRefusal above): a deleted order, and a bulk order whose packages are all deleted, is
+  // left out of every read unless it is asked for. get(col, id, { deleted: true }) returns it too; list(col, { deleted: true }) lists
+  // only the deleted ones, { deleted: 'all' } both. The methods below read orders through liveOrders() or orderOrThrow().
+  const hiddenDoc = (col, d) => (col === 'orders' || col === 'batches') && !!d.deleted;
+  const liveOrders = () => readCol('orders').filter(o => !o.deleted);
+  function get(col, id, opts) { const doc = readCol(col).find(d => d.id === id); return doc && (!hiddenDoc(col, doc) || (opts && opts.deleted)) ? clone(doc) : null; }
   function list(col, q) {
     q = q || {};
-    let arr = readCol(col).filter(d => matches(d, q.where));
+    let arr = readCol(col).filter(d => (q.deleted === 'all' || hiddenDoc(col, d) === !!q.deleted) && matches(d, q.where));
     arr = sortBy(arr, q.order || '-createdAt');
     if (q.limit) arr = arr.slice(0, q.limit);
     return clone(arr);
@@ -633,7 +660,11 @@
   MDM.byName = byName;
   // Audit entries that are not tied to one order (settings, HR, products, zones) go straight into the events log.
   function audit(type, label, by, extra) { insert('events', Object.assign({ orderId: null, code: null, at: now() }, extra || {}, { type, label, by: by || 'system', visibility: 'internal' })); }
-  function orderOrThrow(id) { const o = readCol('orders').find(x => x.id === id); if (!o) throw new StoreError('not_found', 'Order not found'); return clone(o); }
+  // deleted: true for the two methods that work on a deleted order (deleteOrder, restoreOrder). Every other method refuses one, so
+  // a drawer left open, a driver's phone or a customer's tracking page cannot change an order that was deleted meanwhile.
+  function orderOrThrow(id, deleted) { const o = readCol('orders').find(x => x.id === id); if (!o || (o.deleted && !deleted)) throw new StoreError('not_found', o ? o.code + ' was deleted' : 'Order not found'); return clone(o); }
+  // The stored bulk order, to read from only. One whose packages were all deleted is refused the same way.
+  function batchOrThrow(id) { const b = readCol('batches').find(x => x.id === id); if (!b || b.deleted) throw new StoreError('not_found', b ? b.code + ' was deleted' : 'Batch not found'); return b; }
   function makeEvent(type, label, by, visibility, meta_) { return { id: MDM.id('evt'), at: now(), type, label, by: by || 'system', visibility: visibility || 'internal', meta: meta_ || null }; }
   function pushEvent(order, ev) {
     order.events = (order.events || []).concat([ev]);
@@ -957,6 +988,45 @@
     else pushEvent(o, makeEvent('cancel_rejected', 'Cancellation declined' + (p.remarks ? ': ' + p.remarks : ''), p.by, 'public'));
     return save(o);
   }
+  // deleteOrder(orderId, { reason, by }): for an order recorded by mistake, as a test or twice (MDM.deleteRefusal says which may go).
+  // The customer is not told; the driver it was given to is, and so is the driver sent to collect a bulk package. The last package of a
+  // bulk order takes the bulk order with it. Deleting a deleted order changes nothing.
+  const toldDriver = o => o.driverId || (o.status === 'confirmed' && o.collectorId) || null;
+  function deleteOrder(orderId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId, true);
+    if (o.deleted) return o;
+    const why = MDM.deleteRefusal(o);
+    if (why) throw new StoreError('transition', why);
+    const by = p.by || 'admin', reason = String(p.reason || '').trim(), driverId = toldDriver(o);
+    if (!reason) throw new StoreError('validation', 'Say why the order is deleted');
+    o.deleted = { at: now(), by, reason };
+    pushEvent(o, makeEvent('order_deleted', 'Order deleted: ' + reason, by, 'internal'));
+    if (driverId) notifyStaff(Object.assign({}, o, { driverId }), 'driver', 'Order deleted', 'deleted by the office: do not collect it');
+    const saved = save(o);
+    if (o.driverId) releaseDriverIfIdle(o.driverId, o.id);
+    const batch = o.batchId ? readCol('batches').find(x => x.id === o.batchId) : null;
+    if (batch && !batch.deleted && !liveOrders().some(k => k.batchId === batch.id)) update('batches', batch.id, { deleted: { at: saved.deleted.at, by } });
+    return saved;
+  }
+  // restoreOrder(orderId, { by }): back on every list as it was, with its history. Restoring an order that is not deleted changes nothing.
+  function restoreOrder(orderId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId, true), by = p.by || 'admin';
+    if (!o.deleted) return o;
+    const batch = o.batchId ? readCol('batches').find(x => x.id === o.batchId) : null;
+    o.deleted = null;   // not `delete o.deleted`: update() merges, so a key that is missing would keep the stored mark
+    // A bulk package still to collect goes to whoever collects its bulk order now (the collector may have changed meanwhile).
+    if (batch && o.status === 'confirmed') o.collectorId = batch.collectorId || null;
+    pushEvent(o, makeEvent('order_restored', 'Order restored', by, 'internal'));
+    const driverId = toldDriver(o);
+    if (driverId) notifyStaff(Object.assign({}, o, { driverId }), 'driver', 'Order restored', 'restored by the office: it is back on your list');
+    if (batch && batch.deleted) update('batches', batch.id, { deleted: null });
+    // A driver released when it was deleted on the way is on the road again.
+    const d = o.driverId && ['on_the_way', 'arrived'].indexOf(o.status) >= 0 ? readCol('drivers').find(x => x.id === o.driverId) : null;
+    if (d && d.status === 'online') update('drivers', d.id, { status: 'on_route' });
+    return save(o);
+  }
   // modifyOrder: operator edits with a field-by-field change history. A corrected collection contact, receiver or home address also
   // reaches the packages (label, pricing), the boat contact or cargo consignee, and the driver's stops that are still to do. A package or
   // stop that had its own person or address (a multi-drop order) keeps it.
@@ -1265,7 +1335,7 @@
     return save(o);
   }
   function releaseDriverIfIdle(driverId, exceptOrderId) {
-    const active = readCol('orders').some(x => x.driverId === driverId && x.id !== exceptOrderId && ['on_the_way', 'arrived', 'collected', 'out_for_delivery'].indexOf(x.status) >= 0);
+    const active = liveOrders().some(x => x.driverId === driverId && x.id !== exceptOrderId && ['on_the_way', 'arrived', 'collected', 'out_for_delivery'].indexOf(x.status) >= 0);
     if (!active) { const d = readCol('drivers').find(x => x.id === driverId); if (d && d.status === 'on_route') update('drivers', driverId, { status: 'online' }); }
   }
   function startRoute(orderId, opts) {
@@ -1619,7 +1689,7 @@
     return save(o);
   }
   function driverRoute(driverId) {
-    const mine = readCol('orders').filter(o => o.driverId === driverId && ['dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery', 'failed'].indexOf(o.status) >= 0);
+    const mine = liveOrders().filter(o => o.driverId === driverId && ['dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery', 'failed'].indexOf(o.status) >= 0);
     // Priority and express jobs first, then oldest first.
     const rank = o => (o.priority && o.priority.status === 'approved' ? 0 : 1);
     const orders = sortBy(mine, 'createdAt').sort((a, b) => rank(a) - rank(b));
@@ -1630,7 +1700,7 @@
     const chain = (done.length ? [done[done.length - 1]] : []).concat(open);
     const polyline = chain.length >= 2 ? MDM.geo.routeThrough(chain) : (chain.length === 1 ? [[chain[0].lat, chain[0].lng]] : []);
     // Business cancellations after collection: the driver still holds the package and has to bring it back (§5.5).
-    const returns = readCol('orders').filter(o => o.driverId === driverId && o.status === 'cancelled' && o.cancellation && o.cancellation.returnStatus === 'pending');
+    const returns = liveOrders().filter(o => o.driverId === driverId && o.status === 'cancelled' && o.cancellation && o.cancellation.returnStatus === 'pending');
     return clone({ orders, stops, polyline, returns });
   }
 
@@ -1720,10 +1790,10 @@
   // until the office assigns them by zone at the hub.
   function assignCollector(batchId, driverId, p) {
     p = p || {};
-    const batch = readCol('batches').find(x => x.id === batchId); if (!batch) throw new StoreError('not_found', 'Batch not found');
+    const batch = batchOrThrow(batchId);
     const d = driverId ? readCol('drivers').find(x => x.id === driverId) : null;
     if (driverId && !d) throw new StoreError('not_found', 'Driver not found');
-    const waiting = readCol('orders').filter(o => o.batchId === batchId && o.status === 'confirmed');
+    const waiting = liveOrders().filter(o => o.batchId === batchId && o.status === 'confirmed');
     if (!waiting.length) throw new StoreError('transition', 'Every package of ' + batch.code + ' is already collected');
     const by = p.by || 'admin';
     waiting.forEach(o => { const x = clone(o); x.collectorId = driverId || null; save(x); });
@@ -1738,11 +1808,11 @@
   // collected. The collector driver ticks the packages off and the photo is their proof of collection (required from a driver).
   function batchCollected(batchId, p) {
     p = p || {};
-    const batch = readCol('batches').find(x => x.id === batchId); if (!batch) throw new StoreError('not_found', 'Batch not found');
+    const batch = batchOrThrow(batchId);
     const byDriver = String(p.by || '').indexOf('driver:') === 0 ? String(p.by).slice(7) : null;
     if (byDriver && batch.collectorId !== byDriver) throw new StoreError('validation', 'This bulk collection is not assigned to you');
     if (byDriver && !p.photoId) throw new StoreError('validation', 'Take a photo of the packages you collected');
-    const waiting = readCol('orders').filter(o => o.batchId === batchId && o.status === 'confirmed');
+    const waiting = liveOrders().filter(o => o.batchId === batchId && o.status === 'confirmed');
     const got = Array.isArray(p.orderIds) ? waiting.filter(o => p.orderIds.indexOf(o.id) >= 0) : waiting;
     if (waiting.length && !got.length) throw new StoreError('validation', 'Tick at least one package we received');
     got.forEach(o => {
@@ -1766,7 +1836,7 @@
   function assignByZone(batchId, p) {
     const zones = readCol('zones');
     const out = { assigned: 0, unmatched: 0 };
-    readCol('orders').filter(o => o.batchId === batchId && ['confirmed', 'collected'].indexOf(o.status) >= 0).forEach(o => {
+    liveOrders().filter(o => o.batchId === batchId && ['confirmed', 'collected'].indexOf(o.status) >= 0).forEach(o => {
       const z = zones.find(x => x.key === (o.delivery && o.delivery.zone));
       const drv = z && (z.driverIds || [])[0];
       if (!drv) { out.unmatched++; return; }
@@ -1779,7 +1849,7 @@
   // batchStatus → the bulk order's own status: confirmed, collected, out_for_delivery (a package is out), partly_delivered (some delivered,
   // none out, some still to go), delivered (every package finished) or paid. amount leaves out cancelled packages.
   function batchStatus(batch) {
-    const kids = readCol('orders').filter(o => o.batchId === batch.id);
+    const kids = liveOrders().filter(o => o.batchId === batch.id);
     const by = st => kids.filter(o => o.status === st).length;
     const n = kids.length;
     let status = 'confirmed';
@@ -1986,7 +2056,7 @@
     // Deliveries done in the period and not paid yet: delivered, or returned to the sender, which is charged the delivery once
     // (client, 20/11/2026). One the business already paid by itself is left out.
     const except = {}; ((opts && Array.isArray(opts.except) && opts.except) || []).forEach(c => { except[String(c)] = true; });
-    const orders = readCol('orders').filter(o => o.accountId === accountId && MDM.completedAt(o) && (o.payment || {}).status !== 'paid' && (o.payment || {}).status !== 'refunded' && !except[o.code]);
+    const orders = liveOrders().filter(o => o.accountId === accountId && MDM.completedAt(o) && (o.payment || {}).status !== 'paid' && (o.payment || {}).status !== 'refunded' && !except[o.code]);
     const lines = [], billed = [];
     orders.forEach(o => {
       const at = MDM.completedAt(o), back = o.status !== 'delivered';
@@ -2019,7 +2089,7 @@
   // The orders an invoice lists (by their numbers).
   function invoiceOrders(inv) {
     const codes = {}; (inv.lines || []).forEach(l => { if (l.orderCode) codes[l.orderCode] = true; });
-    return readCol('orders').filter(o => o.accountId === inv.accountId && codes[o.code]);
+    return liveOrders().filter(o => o.accountId === inv.accountId && codes[o.code]);
   }
   // markInvoicePaid(invoiceId, { paidAt, reference, slip, by }): the invoice is paid, and so is every order on it that was not paid
   // yet (client, 20/11/2026: "business payment link doesn't update after marking the generated invoice as paid"). slip: a transfer
@@ -2066,7 +2136,7 @@
     let c = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
     if (/^\d+$/.test(c)) c = 'MDM-' + c;
     if (/^MDM\d+$/.test(c)) c = 'MDM-' + c.slice(3);
-    const o = readCol('orders').find(x => x.code === c);
+    const o = liveOrders().find(x => x.code === c);
     return o ? clone(o) : null;
   }
 
@@ -2153,7 +2223,7 @@
     let total = 0, count = 0;
     const payer = (c, o) => c.by && String(c.by).indexOf('driver:') === 0 ? String(c.by).slice(7) : o.driverId;
     const owed = (c, o) => c.paidBy === 'driver' && !c.void && !c.reimbursedAt && payer(c, o) === driverId && (!p.chargeIds || p.chargeIds.indexOf(c.id) >= 0);
-    readCol('orders').filter(o => (o.charges || []).some(c => owed(c, o))).forEach(row => {
+    liveOrders().filter(o => (o.charges || []).some(c => owed(c, o))).forEach(row => {
       const o = clone(row);
       o.charges.forEach(c => {
         if (!owed(c, o)) return;
@@ -2264,7 +2334,7 @@
   // ---- Cash on delivery (§5.6): driver collects → hands to the office → office pays the business --------------------------
   function cashHandover(driverId, p) {
     p = p || {};
-    const ids = p.orderIds || readCol('orders').filter(o => o.driverId === driverId && o.cod && o.cod.status === 'collected').map(o => o.id);
+    const ids = p.orderIds || liveOrders().filter(o => o.driverId === driverId && o.cod && o.cod.status === 'collected').map(o => o.id);
     let total = 0, count = 0;
     ids.forEach(id => {
       const o = orderOrThrow(id);
@@ -2280,7 +2350,7 @@
   function remitCash(accountId, p) {
     p = p || {};
     const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
-    const ids = p.orderIds || readCol('orders').filter(o => o.accountId === accountId && o.cod && o.cod.status === 'with_office').map(o => o.id);
+    const ids = p.orderIds || liveOrders().filter(o => o.accountId === accountId && o.cod && o.cod.status === 'with_office').map(o => o.id);
     let total = 0, count = 0;
     ids.forEach(id => {
       const o = orderOrThrow(id);
@@ -2453,9 +2523,22 @@
 
   // ---- Public surface: every method returns a Promise -----------------------------------------------------------------
   const P = fn => function () { const args = arguments; return new Promise((resolve, reject) => { try { resolve(fn.apply(null, args)); } catch (e) { reject(e); } }); };
+  // The generic writes a page may still make on an order (a slip on the checkout page) stop at a deleted one, so they cannot clear
+  // the mark, cannot set it either, and never take an order or a bulk order out: that is deleteOrder, which keeps it.
+  const kept = col => col === 'orders' || col === 'batches';
+  function unmarked(col, id, patch) {
+    if (!kept(col)) return patch;
+    const cur = id ? readCol(col).find(x => x.id === id) : null;
+    if (cur && cur.deleted) throw new StoreError('not_found', cur.code + ' was deleted');
+    if (patch && typeof patch === 'object' && patch.deleted) throw new StoreError('validation', 'An order is deleted with Delete order, and restored with Restore order');
+    return patch;
+  }
+  const insertDoc = (col, doc) => insert(col, unmarked(col, doc && doc.id, doc));
+  function updateDoc(col, id, patch) { unmarked(col, id, patch); return update(col, id, typeof patch === 'function' ? cur => unmarked(col, null, patch(cur)) : patch); }
+  const removeDoc = (col, id) => { if (kept(col)) throw new StoreError('validation', 'An order is never removed: delete it with Delete order, which keeps it'); return remove(col, id); };
   MDM.store = {
     ready, get readyState() { return readyState; }, COLLECTIONS,
-    get: P(get), list: P(list), insert: P(insert), update: P(update), remove: P(remove),
+    get: P(get), list: P(list), insert: P(insertDoc), update: P(updateDoc), remove: P(removeDoc),
     settings: P(settings), saveSettings: P(saveSettings), subscribe,
     reset: P(reset), exportJSON: P(exportJSON), importJSON: P(importJSON),
     _boot: boot, get _tabId() { return getTabId(); },
@@ -2464,7 +2547,7 @@
     addPackage: P(addPackage), addReceipt: P(addReceipt), markInvoicePaid: P(markInvoicePaid), submitInvoicePayment: P(submitInvoicePayment), rejectInvoicePayment: P(rejectInvoicePayment),
     addBusinessPackage: P(addBusinessPackage), removeBusinessPackage: P(removeBusinessPackage),
     requestPayment: P(requestPayment), submitPayment: P(submitPayment), verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), recordRefund: P(recordRefund), markSettled: P(markSettled),
-    cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
+    cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), deleteOrder: P(deleteOrder), restoreOrder: P(restoreOrder), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
     assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep), addStopPhoto: P(addStopPhoto),
     handToOffice: P(handToOffice), changeDeliveryMethod: P(changeDeliveryMethod),
     driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
@@ -2475,6 +2558,7 @@
     offDayBalance: P(offDayBalance), saveAddress: P(saveAddress), removeAddress: P(removeAddress), saveCollectionPoint: P(saveCollectionPoint), removeCollectionPoint: P(removeCollectionPoint),
     approveBusinessRequest: P(approveBusinessRequest), createBusinessAccount: P(createBusinessAccount), setBusinessRates: P(setBusinessRates), deliveryEndpoint: P(d => deliveryEndpoint(d)),
     buildStops: P(o => buildStops(clone(o))),
-    _buildStops: buildStops, _batchStatus: batchStatus, _list: list, _settings: settings, _offDayBalance: offDayBalance,   // synchronous, for seed.js, geo zones and reports
+    // _list also returns deleted orders: the live service's js/remote.js matches and catches up the page's copy through it.
+    _buildStops: buildStops, _batchStatus: batchStatus, _list: (col, q) => list(col, Object.assign({}, q, { deleted: 'all' })), _settings: settings, _offDayBalance: offDayBalance,   // synchronous, for seed.js, geo zones and reports
   };
 })(window.MDM);

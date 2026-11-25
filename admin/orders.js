@@ -30,6 +30,9 @@
     { value: 'returns', label: 'Returns', test: o => F.returnPending(o) },
     { value: 'cash', label: 'Cash differences', test: o => F.cashDifference(o) },
     { value: 'done', label: 'Done', test: o => DONE.indexOf(o.status) >= 0 },
+    // Orders deleted with "Delete order" (client, 24/11/2026): the store's deleted ones, which no other tab or page lists, with who
+    // deleted each, when and why, and Restore (deletedTable).
+    { value: 'deleted', label: 'Deleted', test: () => true },
   ];
   const TYPES = MDM.REQUEST_TYPES.map(t => ({ value: t.value, label: t.legacy ? t.label + ' (older orders)' : t.label }))
     .concat([{ value: 'business', label: 'Business delivery' }, { value: 'bulk', label: 'Business bulk' }, { value: 'store', label: 'E-store order' }]);
@@ -190,12 +193,14 @@
     accounts.forEach(a => { ctx.accountName[a.id] = a.name; });
     batches.forEach(b => { ctx.batchCode[b.id] = b.code; ctx.batchById[b.id] = b; });
     const base = applyFilters(orders, ctx, true);
+    const gone = applyFilters(await MDM.store.list('orders', { deleted: true }), ctx, true);
+    if (!state.alive) return;
     state.slots.tabs.querySelectorAll('[data-tab]').forEach(t => {
       const def = TABS.find(x => x.value === t.dataset.tab);
-      const n = base.filter(def.test).length;
+      const n = def.value === 'deleted' ? gone.length : base.filter(def.test).length;
       t.setAttribute('aria-selected', f.tab === def.value ? 'true' : 'false');
       t.querySelector('.tab__count').textContent = def.value === 'all' || def.value === 'done' || def.value === 'active' ? String(n) : (n ? String(n) : '');
-      t.classList.toggle('is-hot', def.value !== 'all' && def.value !== 'done' && def.value !== 'active' && n > 0);
+      t.classList.toggle('is-hot', def.value !== 'all' && def.value !== 'done' && def.value !== 'active' && def.value !== 'deleted' && n > 0);
     });
     // Eleven queues do not fit a phone: bring the chosen tab into view inside the scrolling tab bar when the tab changes.
     // The view eases in when it is first mounted and the list when the tab changes; data re-renders do not replay it.
@@ -205,7 +210,7 @@
       const bar = state.slots.tabs, cur = bar.querySelector('[aria-selected="true"]');
       if (cur) { const br = bar.getBoundingClientRect(), cr = cur.getBoundingClientRect(); if (cr.left < br.left || cr.right > br.right) bar.scrollLeft += (cr.left - br.left) - (br.width - cr.width) / 2; }
     }
-    const rows = applyFilters(orders, ctx, false);
+    const rows = f.tab === 'deleted' ? gone : applyFilters(orders, ctx, false);
     const pages = Math.max(1, Math.ceil(rows.length / PAGE));
     if (state.page >= pages) state.page = pages - 1;
     const from = state.page * PAGE, slice = rows.slice(from, from + PAGE);
@@ -230,7 +235,8 @@
       const prev = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'orders-prev', disabled: state.page === 0, on: { click: () => { state.page -= 1; render(); } } }, 'Previous');
       const next = el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'orders-next', disabled: state.page >= pages - 1, on: { click: () => { state.page += 1; render(); } } }, 'Next');
       state.slots.table.replaceChildren(
-        el('div', { class: 'table-wrap' }, el('table', { class: 'table table--stack', 'data-testid': 'orders-table' }, F.orderTableHead(cols), el('tbody', null, slice.map(o => F.orderRow(o, cols, { drivers, narrow }))))),
+        el('div', { class: 'table-wrap' }, f.tab === 'deleted' ? deletedTable(slice, { drivers, narrow })
+          : el('table', { class: 'table table--stack', 'data-testid': 'orders-table' }, F.orderTableHead(cols), el('tbody', null, slice.map(o => F.orderRow(o, cols, { drivers, narrow }))))),
         el('div', { class: 'pagination', 'data-testid': 'orders-pagination' },
           el('span', null, 'Showing ' + (from + 1) + ' to ' + (from + slice.length) + ' of ' + rows.length),
           el('div', { class: 'pagination__actions' }, el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'orders-export', on: { click: () => exportRows(rows, ctx) } }, html(MDM.icon('download', 16)), 'Export CSV'), prev, next)));
@@ -239,12 +245,29 @@
     if (state.drawer.kind === 'order' && state.drawer.id) await renderOrderDrawer();
   }
   function exportRows(rows, ctx) {
-    const head = ['Order', 'Created', 'Type', 'Service level', 'Customer', 'Phone', 'Business', 'Collection', 'Extra collections', 'Delivery method', 'Delivery', 'Packages', 'Total MVR', 'Price', 'Payment', 'Cash to collect MVR', 'Cash status', 'Status', 'Driver'];
+    // The Deleted tab's file says so: when, by whom and why.
+    const gone = rows.some(o => o.deleted);
+    const head = ['Order', 'Created', 'Type', 'Service level', 'Customer', 'Phone', 'Business', 'Collection', 'Extra collections', 'Delivery method', 'Delivery', 'Packages', 'Total MVR', 'Price', 'Payment', 'Cash to collect MVR', 'Cash status', 'Status', 'Driver']
+      .concat(gone ? ['Deleted', 'Deleted by', 'Reason'] : []);
     F.downloadCsv([head].concat(rows.map(o => [o.code, o.createdAt.slice(0, 16).replace('T', ' '), F.typeLabel(o), F.LEVEL[o.serviceLevel] || 'Normal', o.customer.name, o.customer.phone, ctx.accountName[o.accountId] || '',
       (o.collection || {}).address || '', (o.extraCollections || []).length, F.methodText(o), (o.delivery || {}).address || '', (o.packages || []).length, o.totals.total, (o.pricing || {}).status === 'confirmed' ? 'Confirmed' : 'Estimated',
       (MDM.PAYMENT[(o.payment || {}).status] || {}).label || '', o.cod ? o.cod.amount : '', o.cod ? ((MDM.COD_STATUS[o.cod.status] || {}).label || o.cod.status) : '',
-      MDM.STATUS[o.status].label, F.driverName(o.driverId, ctx.drivers)])), 'mdm-orders-' + dayKey(new Date()) + '.csv');
+      MDM.STATUS[o.status].label, F.driverName(o.driverId, ctx.drivers)].concat(gone ? (o.deleted ? [String(o.deleted.at || '').slice(0, 16).replace('T', ' '), F.byLabel(o.deleted.by), o.deleted.reason || ''] : ['', '', '']) : []))),
+      (gone ? 'mdm-deleted-orders-' : 'mdm-orders-') + dayKey(new Date()) + '.csv');
     toast('Exported ' + plural(rows.length, 'order'), 'ok');
+  }
+  // Orders, Deleted: the order as the list shows it, then who deleted it, when and why, and Restore. A row opens the order, read only.
+  function deletedTable(rows, ctx) {
+    const cols = ['code', 'customer', 'route', 'status'];
+    const head = F.orderTableHead(cols);
+    head.firstChild.append(el('th', { scope: 'col' }, 'Deleted'), el('th', { scope: 'col' }, 'Reason'), el('th', { scope: 'col' }, el('span', { class: 'sr-only' }, 'Restore')));
+    return el('table', { class: 'table table--stack', 'data-testid': 'orders-table', 'data-deleted': 'true' }, head, el('tbody', null, rows.map(o => {
+      const tr = F.orderRow(o, cols, ctx), d = o.deleted || {};
+      tr.append(el('td', { 'data-label': 'Deleted', 'data-testid': 'orders-deleted-when' }, fmtDate(d.at), el('span', { class: 'table__sub', 'data-testid': 'orders-deleted-by' }, 'by ' + F.byLabel(d.by))),
+        el('td', { 'data-label': 'Reason', 'data-testid': 'orders-deleted-reason' }, d.reason || ''),
+        el('td', { class: 'table__actions' }, smallBtn('Restore', 'orders-restore', () => restoreOrder(o))));
+      return tr;
+    })));
   }
 
   // ---- Drawer building blocks ---------------------------------------------------------------------------------------------
@@ -314,6 +337,12 @@
     const out = [];
     const banner = (kind, title, body, actions, testid) => out.push(el('div', { class: 'alert alert--' + kind + ' drawer-alert', 'data-testid': testid }, html(MDM.icon(kind === 'danger' ? 'alert-circle' : 'alert-triangle', 16)),
       el('div', { class: 'alert__body' }, el('div', { class: 'alert__title' }, title), body ? el('div', null, body) : null, actions && actions.length ? el('div', { class: 'drawer-alert__actions' }, actions) : null)));
+    // A deleted order (client, 24/11/2026) says who deleted it, when and why, and nothing else needs a decision on it.
+    if (o.deleted) {
+      banner('danger', 'Deleted ' + fmtDate(o.deleted.at) + ' by ' + F.byLabel(o.deleted.by), [el('div', { 'data-testid': 'drawer-deleted-reason' }, o.deleted.reason || 'No reason given'),
+        el('div', { class: 'muted small' }, 'It is on no list, report or tracking link. Restore it to work on it again.')], [smallBtn('Restore order', 'alert-restore', () => restoreOrder(o), 'btn--primary')], 'drawer-alert-deleted');
+      return el('div', { class: 'drawer__section drawer-alerts', 'data-testid': 'drawer-alerts' }, out);
+    }
     const est = o.estimate ? money(o.estimate.min) + (o.estimate.max !== o.estimate.min ? ' to ' + money(o.estimate.max) : '') : money(o.totals.total);
     // §2.3: the customer's Extra vehicle request is the first thing the operator sees on a request, whichever way it is priced.
     const charged = F.vehicleCharged(o);
@@ -1071,10 +1100,15 @@
   }
   function footerFor(o, ctx) {
     const st = o.status, items = [];
+    if (o.deleted) return [btn('Restore order', 'drawer-restore', 'btn--primary', () => restoreOrder(o))];
     const cancelBtn = () => btn('Cancel order', 'drawer-cancel', 'btn--ghost', () => cancelOrder(o));
     const labels = el('a', { class: 'btn btn--ghost', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), target: '_blank', rel: 'noopener', 'data-testid': 'drawer-labels' }, html(MDM.icon('printer', 16)), 'Labels');
     items.push(labels);
     if (open(o) || st === 'delivered') items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
+    // Delete order (client, 24/11/2026): on every order. One that was collected, paid for, charged or invoiced stays on record: the
+    // button is greyed, its hint is the sentence the store would refuse with (MDM.deleteRefusal), and pressing it says the same.
+    const refusal = MDM.deleteRefusal(o);
+    items.push(btn('Delete order', 'drawer-delete', 'btn--ghost', () => deleteOrder(o), refusal ? { 'aria-disabled': 'true', title: refusal } : null));
     // A step marked done by mistake (client, 01/11/2026): the last delivery, or the collection while nothing is delivered yet.
     const doneStops = ((o.route && o.route.stops) || []).filter(x => x.status === 'done' && x.type !== 'return');
     if (st === 'delivered' || (doneStops.some(x => x.type !== 'pickup') && st === 'out_for_delivery')) items.push(btn('Undo delivered', 'drawer-undo-delivered', 'btn--ghost', () => undoLast(o, 'Delivered')));
@@ -1135,7 +1169,13 @@
     try { await fn(); }
     catch (e) { toast(e && e.message ? e.message : 'Something went wrong', 'danger'); }
   }
-  async function fresh(o) { return (await MDM.store.get('orders', o.id)) || o; }
+  // The order as it is now, before an action's dialog opens. One deleted meanwhile (another tab, another person) stops the action
+  // here with the store's own words; deleted: true is for Delete order itself, which then says it is already deleted.
+  async function fresh(o, deleted) {
+    const cur = (await MDM.store.get('orders', o.id, { deleted: true })) || o;
+    if (cur.deleted && !deleted) throw new MDM.StoreError('not_found', cur.code + ' was deleted');
+    return cur;
+  }
   // The live service's link carries the order's secret (MDM.remote.trackLink), so the customer opens it on any phone without signing in.
   function trackUrl(o) { return MDM.remote && MDM.remote.trackLink ? MDM.remote.trackLink(o) : o.trackToken ? MDM.href('track/?code=' + encodeURIComponent(o.code) + '&t=' + o.trackToken) : MDM.href('track/?order=' + encodeURIComponent(o.id)); }
   // A delivered order still to be paid says what is due, so Send update also works as a payment reminder.
@@ -1704,6 +1744,24 @@
     if (refund) await MDM.store.recordRefund(o.id, Object.assign({ by: by() }, refund));
     toast('Order cancelled' + (refund ? ', refund recorded' : ''), 'warn');
   }
+  // Delete order (client, 24/11/2026): for an order recorded by mistake, as a test or twice, while nothing has happened to it
+  // (MDM.deleteRefusal). It leaves every list and is kept under the Deleted tab of the list, where anyone with Orders restores it.
+  async function deleteOrder(o) {
+    o = await fresh(o, true);
+    const refusal = MDM.deleteRefusal(o);
+    if (refusal) { toast(refusal, 'warn'); return; }
+    const driver = F.driverName(o.driverId || (o.status === 'confirmed' && o.collectorId) || null, state.drivers);
+    const v = await dialog({ title: 'Delete ' + o.code, okLabel: 'Delete order', cancelLabel: 'Keep order', danger: true,
+      message: 'For an order recorded by mistake, as a test or twice. It leaves the board, the lists, the reports and its tracking link. The customer is not told.' + (driver ? ' ' + driver + ' is told not to collect it.' : '') + ' You can restore it from Orders, List, Deleted.',
+      fields: [{ name: 'reason', label: 'Reason', type: 'textarea', required: true, placeholder: 'Recorded twice, same as MDM-1041' }] });
+    if (!v) return;
+    await MDM.store.deleteOrder(o.id, { reason: v.reason, by: by() });
+    toast(o.code + ' deleted', 'warn');
+  }
+  async function restoreOrder(o) {
+    await MDM.store.restoreOrder(o.id, { by: by() });
+    toast(o.code + ' restored', 'ok');
+  }
   async function decideCancel(o, approve) {
     const v = await dialog({ title: (approve ? 'Approve' : 'Decline') + ' the cancellation of ' + o.code, message: approve ? 'The order is cancelled and the customer is told.' : 'The order carries on. Tell the customer why.', okLabel: approve ? 'Approve cancellation' : 'Decline', danger: approve,
       fields: [{ name: 'remarks', label: approve ? 'Remarks' : 'Reason', type: 'textarea', rows: 2, required: !approve, placeholder: approve ? 'No charge' : 'The driver has already collected it' }] });
@@ -1903,7 +1961,7 @@
   }
   async function renderOrderDrawer() {
     const id = state.drawer.id;
-    const o = await MDM.store.get('orders', id);
+    const o = await MDM.store.get('orders', id, { deleted: true });
     if (!state.alive || state.drawer.kind !== 'order' || state.drawer.id !== id) return;
     if (!o) { toast('No order with this id', 'warn'); closeOrderDrawer(); return; }
     const [drivers, files, account, batch, notifications, zones, attendance, settings] = await Promise.all([MDM.store.list('drivers'), MDM.store.list('files', { where: { orderId: id }, order: 'createdAt' }),
@@ -1922,7 +1980,9 @@
     const keepId = active && panel.contains(active) ? active.getAttribute('data-testid') : null;
     const keepSel = keepId && active.tagName === 'TEXTAREA' ? [active.selectionStart, active.selectionEnd] : null;
     const top = drawer.isOpen() ? bodyEl.scrollTop : 0;
-    drawer.open({ title: o.code, badge: MDM.badgeFor(o.status), body, footer, size: 'lg', onClose: () => onDrawerClosed('order') });
+    drawer.open({ title: o.code, badge: o.deleted ? MDM.ui.badge('danger', 'Deleted', { 'data-testid': 'drawer-deleted-badge' }) : MDM.badgeFor(o.status), body, footer, size: 'lg', onClose: () => onDrawerClosed('order') });
+    // A deleted order is there to read: every action in its sections is off (the store refuses them too), photos still open.
+    if (o.deleted) bodyEl.querySelectorAll('button:not([data-testid="alert-restore"]):not([data-testid="drawer-photo"]), textarea, select').forEach(n => { n.disabled = true; });
     bodyEl.scrollTop = top;
     if (keepId) { const n = panel.querySelector('[data-testid="' + keepId + '"]'); if (n && !n.disabled) { try { n.focus({ preventScroll: true }); } catch (e) { /* not focusable any more */ } if (keepSel && n.setSelectionRange) n.setSelectionRange(keepSel[0], keepSel[1]); } }
     state.drawer.order = o;
