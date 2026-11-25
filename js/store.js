@@ -208,8 +208,9 @@
   // given to a driver for the delivery.
   MDM.waitingAtOffice = o => !!o && o.status === 'collected' && !o.driverId;
   // Deleted orders (client, 24/11/2026: "add a 'Delete order' option"). An order recorded by mistake, as a test or twice leaves every
-  // list, board, count, report, driver's jobs, portal and tracking link, and is kept: order.deleted = { at, by, reason } (on the live
-  // service inside orders.extra, no new column), with its status, files, messages and timeline, so Restore puts it back as it was.
+  // list, board, count, report, driver's jobs, portal and tracking link, and is kept: order.deleted = { at, by } (on the live service
+  // inside orders.extra, no new column), with its status, files, messages and timeline, so Restore puts it back as it was. The reason
+  // is in the office's own timeline (MDM.deletedReason), not in the part of the order a customer may read.
   // Only an order nothing has happened to: nothing collected, nothing paid or sent as a slip, no charge or cash on record, on no
   // invoice. Any other order is cancelled instead (store.cancel), which keeps the record of the package and the money.
   // deleteRefusal(o) → the sentence that says why this order cannot be deleted, or null when it can. The store method, the drawer's
@@ -229,6 +230,7 @@
       : (o.charges || []).some(c => !c.void) ? 'a charge is recorded on it' : '';
     return why ? o.code + ' cannot be deleted: ' + why + '. ' + (MDM.CANCELLABLE.indexOf(st) >= 0 ? 'Cancel it instead' : 'It stays on record') : null;
   };
+  MDM.deletedReason = o => { const e = ((o && o.events) || []).filter(x => x.type === 'order_deleted').pop(); return (e && e.meta && e.meta.reason) || ''; };
   MDM.priceAfterCollection = o => !!(o && o.pricing && o.pricing.afterCollection && o.pricing.status !== 'confirmed');
   // priceToFinalise(o) → true once the proof of collection is in and the price still waits for the operator.
   MDM.priceToFinalise = o => MDM.priceAfterCollection(o) && ['cancelled', 'returned'].indexOf(o.status) < 0 && ((o.route && o.route.stops) || []).some(s => s.type === 'pickup' && s.status === 'done');
@@ -1046,8 +1048,8 @@
     if (why) throw new StoreError('transition', why);
     const by = p.by || 'admin', reason = String(p.reason || '').trim(), driverId = toldDriver(o);
     if (!reason) throw new StoreError('validation', 'Say why the order is deleted');
-    o.deleted = { at: now(), by, reason };
-    pushEvent(o, makeEvent('order_deleted', 'Order deleted: ' + reason, by, 'internal'));
+    o.deleted = { at: now(), by };
+    pushEvent(o, makeEvent('order_deleted', 'Order deleted: ' + reason, by, 'internal', { reason }));
     if (driverId) notifyStaff(Object.assign({}, o, { driverId }), 'driver', 'Order deleted', 'deleted by the office: do not collect it');
     const saved = save(o);
     if (o.driverId) releaseDriverIfIdle(o.driverId, o.id);

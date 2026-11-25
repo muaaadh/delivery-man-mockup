@@ -252,7 +252,7 @@
     F.downloadCsv([head].concat(rows.map(o => [o.code, o.createdAt.slice(0, 16).replace('T', ' '), F.typeLabel(o), F.LEVEL[o.serviceLevel] || 'Normal', o.customer.name, o.customer.phone, ctx.accountName[o.accountId] || '',
       (o.collection || {}).address || '', (o.extraCollections || []).length, F.methodText(o), (o.delivery || {}).address || '', (o.packages || []).length, o.totals.total, (o.pricing || {}).status === 'confirmed' ? 'Confirmed' : 'Estimated',
       (MDM.PAYMENT[(o.payment || {}).status] || {}).label || '', o.cod ? o.cod.amount : '', o.cod ? ((MDM.COD_STATUS[o.cod.status] || {}).label || o.cod.status) : '',
-      MDM.STATUS[o.status].label, F.driverName(o.driverId, ctx.drivers)].concat(gone ? (o.deleted ? [String(o.deleted.at || '').slice(0, 16).replace('T', ' '), F.byLabel(o.deleted.by), o.deleted.reason || ''] : ['', '', '']) : []))),
+      MDM.STATUS[o.status].label, F.driverName(o.driverId, ctx.drivers)].concat(gone ? (o.deleted ? [String(o.deleted.at || '').slice(0, 16).replace('T', ' '), F.byLabel(o.deleted.by), MDM.deletedReason(o)] : ['', '', '']) : []))),
       (gone ? 'mdm-deleted-orders-' : 'mdm-orders-') + dayKey(new Date()) + '.csv');
     toast('Exported ' + plural(rows.length, 'order'), 'ok');
   }
@@ -264,7 +264,7 @@
     return el('table', { class: 'table table--stack', 'data-testid': 'orders-table', 'data-deleted': 'true' }, head, el('tbody', null, rows.map(o => {
       const tr = F.orderRow(o, cols, ctx), d = o.deleted || {};
       tr.append(el('td', { 'data-label': 'Deleted', 'data-testid': 'orders-deleted-when' }, fmtDate(d.at), el('span', { class: 'table__sub', 'data-testid': 'orders-deleted-by' }, 'by ' + F.byLabel(d.by))),
-        el('td', { 'data-label': 'Reason', 'data-testid': 'orders-deleted-reason' }, d.reason || ''),
+        el('td', { 'data-label': 'Reason', 'data-testid': 'orders-deleted-reason' }, MDM.deletedReason(o)),
         el('td', { class: 'table__actions' }, smallBtn('Restore', 'orders-restore', () => restoreOrder(o))));
       return tr;
     })));
@@ -339,7 +339,7 @@
       el('div', { class: 'alert__body' }, el('div', { class: 'alert__title' }, title), body ? el('div', null, body) : null, actions && actions.length ? el('div', { class: 'drawer-alert__actions' }, actions) : null)));
     // A deleted order (client, 24/11/2026) says who deleted it, when and why, and nothing else needs a decision on it.
     if (o.deleted) {
-      banner('danger', 'Deleted ' + fmtDate(o.deleted.at) + ' by ' + F.byLabel(o.deleted.by), [el('div', { 'data-testid': 'drawer-deleted-reason' }, o.deleted.reason || 'No reason given'),
+      banner('danger', 'Deleted ' + fmtDate(o.deleted.at) + ' by ' + F.byLabel(o.deleted.by), [el('div', { 'data-testid': 'drawer-deleted-reason' }, MDM.deletedReason(o) || 'No reason given'),
         el('div', { class: 'muted small' }, 'It is on no list, report or tracking link. Restore it to work on it again.')], [smallBtn('Restore order', 'alert-restore', () => restoreOrder(o), 'btn--primary')], 'drawer-alert-deleted');
       return el('div', { class: 'drawer__section drawer-alerts', 'data-testid': 'drawer-alerts' }, out);
     }
