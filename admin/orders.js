@@ -2046,6 +2046,7 @@
     const cName = input('collection-contact-name');
     const cPhone = input('collection-contact-phone', { type: 'tel', inputmode: 'numeric', placeholder: '3XX XXXX or 7XX XXXX' });
     const cTime = input('collection-time', { type: 'time' });
+    const kept = { collect: '', deliver: '' };   // the day each typed time was typed for ('' for the collection point's usual time)
     const cNote = input('collection-instructions', { placeholder: 'Ask for the dispatch shelf' });
     const cFields = {
       address: clearOnInput(cAddress, field(cAddress.id, 'Collection address', cAddress)),
@@ -2074,7 +2075,7 @@
       const p = point(), a = account() || {};
       onceBlock.hidden = !!p; pointSummary.hidden = !p;
       if (p) pointSummary.textContent = [p.address, MDM.geo.zoneLabel(p.zone), p.landmark, [p.contactName || a.contactName, phone.format(p.contactPhone || a.phone)].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
-      if (setTime) cTime.value = p ? (p.preferredTime || '') : '';
+      if (setTime) { cTime.value = p ? (p.preferredTime || '') : ''; kept.collect = ''; showDays(); }
       setError(cFields.address, null); setError(cFields.phone, null);
     }
     pointSel.addEventListener('change', () => syncPoint(true));
@@ -2096,21 +2097,49 @@
       if (!phone.valid(cPhone.value, { landline: true, intl: true })) { setError(cFields.phone, 'Enter a valid contact number'); ok = false; }
       return ok;
     }
-    // Timing: normal, express or an advance collection date and time.
+    // Timing: normal, express or an advance order: a collection date and time and, since 21/11/2026, a delivery date and time too
+    // ("collect tonight, deliver tomorrow at 10:00"). Left empty, the delivery is on the collection day at no set time, as before.
     const dateIn = el('input', { class: 'input', id: uid + '-date', type: 'date', value: n.schedule.date, min: dayKey(new Date()), 'data-testid': 'neworder-date' });
     const timeIn = el('input', { class: 'input', id: uid + '-time', type: 'time', value: n.schedule.time, 'data-testid': 'neworder-time' });
     const dateField = clearOnInput(dateIn, field(dateIn.id, 'Collection date', dateIn));
-    const advBlock = el('div', { class: 'grid-2', hidden: true }, dateField, field(timeIn.id, 'Collection time', timeIn));
-    // Normal or express, today (client, 12/11/2026): the preferred collection time above and an optional delivery time; an express
-    // order needs one of the two, so it can be worked in time order.
+    const byDateIn = el('input', { class: 'input', id: uid + '-deliver-date', type: 'date', min: dayKey(new Date()), 'data-testid': 'neworder-deliver-date' });
+    const byTimeIn = el('input', { class: 'input', id: uid + '-deliver-by', type: 'time', 'data-testid': 'neworder-deliver-by' });
+    const byDateField = clearOnInput(byDateIn, field(byDateIn.id, 'Delivery date', byDateIn, { optional: true, hint: 'Empty: the collection day' }));
+    const byTimeField = clearOnInput(byTimeIn, field(byTimeIn.id, 'Deliver by', byTimeIn, { optional: true }));
+    [dateIn, timeIn, byDateIn, byTimeIn].forEach(x => x.addEventListener('input', () => { setError(byDateField, null); setError(byTimeField, null); }));
+    const advBlock = el('div', { class: 'stack-4', hidden: true }, el('div', { class: 'grid-2' }, dateField, field(timeIn.id, 'Collection time', timeIn)), el('div', { class: 'grid-2' }, byDateField, byTimeField));
+    // An advance delivery before its collection is a mistake: the message names both, on the field to change.
+    function checkAdvance() {
+      const day = byDateIn.value || dateIn.value, said = (d, t) => [d.split('-').reverse().join('/'), t].filter(Boolean).join(' ');
+      if (!day || !dateIn.value || !(byDateIn.value || byTimeIn.value)) return true;
+      if ((day + 'T' + (byTimeIn.value || '23:59')) >= (dateIn.value + 'T' + (timeIn.value || '00:00'))) return true;
+      setError(day < dateIn.value ? byDateField : byTimeField, 'Delivery must be after collection: collection is ' + said(dateIn.value, timeIn.value) + ', delivery ' + said(day, byTimeIn.value));
+      return false;
+    }
+    // Normal or express (client, 12/11/2026): the preferred collection time above and an optional delivery time; an express order needs
+    // one of the two, so it can be worked in time order. Each time is read against the clock (MDM.todayTimes, our team may record
+    // a time that has passed): a delivery after midnight is tomorrow's, and the line under each field says which day it is read as.
+    // A typed time keeps the day it was typed for; the collection point's usual time has none of its own.
     const deliverIn = input('deliver-time', { type: 'time' });
-    const deliverField = clearOnInput(deliverIn, field(deliverIn.id, 'Delivery time', deliverIn, { optional: true, hint: 'Today. Express: this or the collection time' }));
-    cTime.addEventListener('input', () => setError(deliverField, null));
+    const dayNote = (ctrl, key) => { const h = el('div', { class: 'field__hint', id: ctrl.id + '-note', 'data-testid': 'neworder-' + key + '-note' }); ctrl.setAttribute('aria-describedby', h.id); return h; };
+    const cTimeNote = dayNote(cTime, 'collection-time'), deliverNote = dayNote(deliverIn, 'deliver-time');
+    const cTimeField = field(cTime.id, 'Preferred collection time', cTime, { optional: true });
+    cTimeField.appendChild(cTimeNote);
+    const deliverField = clearOnInput(deliverIn, field(deliverIn.id, 'Delivery time', deliverIn, { optional: true }));
+    deliverField.appendChild(deliverNote);
+    function timesNow() { return MDM.todayTimes({ collectTime: cTime.value, deliverTime: deliverIn.value, collectDay: kept.collect, deliverDay: kept.deliver }, { lenient: true }); }
+    function showDays() {
+      const t = timesNow();
+      cTimeNote.textContent = cTime.value ? t.notes.collectTime || 'Today' : ''; cTimeNote.hidden = n.level === 'advance' || !cTimeNote.textContent;
+      deliverNote.textContent = deliverIn.value ? t.notes.deliverTime || 'Today' : 'Express: this or the collection time';
+    }
+    const dayTyped = (ctrl, which, one) => ctrl.addEventListener('input', () => { const t = MDM.todayTimes(one(ctrl.value), { lenient: true })[which]; kept[which] = t ? t.day : ''; setError(deliverField, null); showDays(); });
+    dayTyped(cTime, 'collect', v => ({ collectTime: v })); dayTyped(deliverIn, 'deliver', v => ({ deliverTime: v }));
     const todayBlock = el('div', { class: 'grid-2' }, deliverField);
-    const levelSeg = segmented(uid + '-level', MDM.SERVICE_LEVELS, 'normal', 'neworder-level', v => { n.level = v; advBlock.hidden = v !== 'advance'; todayBlock.hidden = v === 'advance'; setError(deliverField, null); });
+    const levelSeg = segmented(uid + '-level', MDM.SERVICE_LEVELS, 'normal', 'neworder-level', v => { n.level = v; advBlock.hidden = v !== 'advance'; todayBlock.hidden = v === 'advance'; setError(deliverField, null); showDays(); });
     const collectionBlock = el('div', { class: 'stack-4', 'data-testid': 'neworder-collection' },
       pointField, onceBlock,
-      el('div', { class: 'grid-2' }, field(cTime.id, 'Preferred collection time', cTime, { optional: true }), field(cNote.id, 'Collection instructions', cNote, { optional: true })),
+      el('div', { class: 'grid-2' }, cTimeField, field(cNote.id, 'Collection instructions', cNote, { optional: true })),
       groupField('When', levelSeg), advBlock, todayBlock);
 
     // The orders (client, 01/11/2026): a card like the business portal's bulk order (MDM.bizKit.rowFields): the receiver, the delivery
@@ -2329,14 +2358,17 @@
       });
       if (n.level === 'advance' && !(dateIn.value && dateIn.value >= dayKey(new Date()))) { setError(dateField, 'Choose today or a later date'); ok = false; }
       if (n.level === 'express' && !cTime.value && !deliverIn.value) { setError(deliverField, 'Give a collection or a delivery time'); ok = false; }
-      if (n.level !== 'advance' && cTime.value && deliverIn.value && deliverIn.value < cTime.value) { setError(deliverField, 'Delivery must be after collection'); ok = false; }
+      if (n.level === 'advance' && !checkAdvance()) ok = false;
+      const times = timesNow();
+      if (n.level !== 'advance' && times.errors.deliverTime) { setError(deliverField, times.errors.deliverTime); ok = false; }
       if (!ok) { MDM.ui.focusFirstInvalid(drawer.el()); return; }
       MDM.ui.setLoading(createBtn, true);
       const made = [];
       try {
         const collection = collectionFor();
-        const schedule = n.level === 'advance' ? { type: 'advance', collectDate: dateIn.value, collectTime: timeIn.value, deliverDate: dateIn.value, deliverTime: '' }
-          : Object.assign({ type: 'asap' }, deliverIn.value || cTime.value ? { day: dayKey(new Date()) } : {}, deliverIn.value ? { deliverTime: deliverIn.value } : {});
+        // The collection time of a business order stays in collection.preferredTime; the schedule carries its day (collectDay).
+        const asap = Object.assign({}, times.schedule); delete asap.collectTime;
+        const schedule = n.level === 'advance' ? { type: 'advance', collectDate: dateIn.value, collectTime: timeIn.value, deliverDate: byDateIn.value || dateIn.value, deliverTime: byTimeIn.value || '' } : asap;
         if (asBulk()) {
           const b = await MDM.store.createBatch({ accountId: acc.id, collection, serviceLevel: n.level, schedule, notes: '', source: n.source, by: by(), separate: true, rows: cards.map(batchRowFor) });
           const count = (b.orderIds || []).length;

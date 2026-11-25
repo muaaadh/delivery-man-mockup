@@ -301,6 +301,9 @@
     }
     return a;
   }
+  // The office's own order form (request/?office=1) is a public page with our team typing: the opening hours are for customers, and
+  // "Closed now · opens 9am" there read as "the system takes no orders" (client, 21/11/2026).
+  const officeForm = () => document.body.dataset.page === 'request' && new URLSearchParams(location.search).get('office') === '1';
   function renderFooter(footer, s) {
     footer.classList.add('site-footer');
     footer.textContent = '';
@@ -313,7 +316,7 @@
       footerLogo(),
       el('p', { class: 'site-footer__tagline' }, 'Pick, Shop, Deliver across Greater Malé.'),
       reach,
-      el('p', { class: 'site-footer__hours', 'data-shell': 'hours' }, hoursLine(s)),
+      officeForm() ? null : el('p', { class: 'site-footer__hours', 'data-shell': 'hours' }, hoursLine(s)),
       c.mailto ? el('p', { class: 'site-footer__mail' }, el('a', { href: c.mailto }, c.email)) : null);
     const cols = el('div', { class: 'site-footer__cols' }, FOOTER_COLUMNS.map(col => el('nav', { class: 'site-footer__col', 'aria-label': col.title },
       el('h2', { class: 'site-footer__title' }, col.title), el('ul', null, col.links.map(l => el('li', null, el('a', { href: MDM.href(l.href) }, l.label)))))));

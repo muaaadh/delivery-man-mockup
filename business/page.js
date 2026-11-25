@@ -594,8 +594,8 @@
   }
 
   // ---- Collection (shared by New order, Bulk order and Excel import) --------------------------------------------------------------
-  // collectionBlock(acc, { once }) → { el, value(), validate(), zone() }: a saved collection point (default preselected) or a one-off
-  // address, the optional preferred collection time (prefilled from the point) and collection instructions.
+  // collectionBlock(acc, { once }) → { el, time, value(), validate(), zone() }: a saved collection point (default preselected) or a
+  // one-off address, the optional preferred collection time (prefilled from the point; `time` is its field) and collection instructions.
   function collectionBlock(acc, opts) {
     opts = opts || {};
     const pts = acc.collectionPoints || [];
@@ -632,7 +632,7 @@
         field('cTime', 'Preferred time', time, { optional: true }),
         field('cNote', 'Pickup note', note, { optional: true })));
     return {
-      el: node,
+      el: node, time,
       zone: () => { const p = point(); return p ? p.zone : cZone.value; },
       value() {
         const p = point(), extra = { instructions: note.value.trim(), preferredTime: time.value || '' };
@@ -658,22 +658,27 @@
     const seg = segmented('level', MDM.SERVICE_LEVELS.map(l => ({ value: l.value, label: l.label, hint: l.value === 'normal' ? 'Same day' : l.value === 'express' ? 'Confirmed by us' : 'Pick a date' })), 'normal', 'biz-level');
     // Normal or express, today (client, 12/11/2026): an optional delivery time beside the preferred collection time; an express order
     // needs one of the two, so it is worked in time order.
-    const today = el('div', { class: 'grid-2 biz-today' }, field('todayDeliver', 'Delivery time', input({ type: 'time', 'data-testid': 'biz-deliver-time' }), { optional: true, hint: 'Today. Express: this or the preferred collection time' }));
+    const today = el('div', { class: 'grid-2 biz-today' }, field('todayDeliver', 'Delivery time', input({ type: 'time', 'data-testid': 'biz-deliver-time' }), { optional: true, hint: 'Express: this or the preferred collection time' }));
     seg.addEventListener('change', () => { const level = form.elements.level.value; adv.hidden = level !== 'advance'; today.hidden = level === 'advance'; setError(form.elements.todayDeliver, null); });
     return [MDM.ui.field({ label: 'Service', control: seg }), adv, today];
   }
-  function scheduleValue(v) {
+  // times: MDM.todayTimes of the preferred collection time and the delivery time (a delivery after midnight is tomorrow's). The
+  // collection time itself stays in collection.preferredTime; the schedule carries its day (collectDay).
+  function scheduleValue(v, times) {
     if (v.level === 'advance') return { type: 'advance', collectDate: v.collectDate, collectTime: v.collectTime, deliverDate: v.deliverDate || v.collectDate, deliverTime: v.deliverTime };
-    return Object.assign({ type: 'asap' }, v.todayDeliver || v.cTime ? { day: MDM.ui.dayKey() } : {}, v.todayDeliver ? { deliverTime: v.todayDeliver } : {});
+    const out = Object.assign({}, times.schedule); delete out.collectTime;
+    return out;
   }
-  function advanceRules(v) {
+  function advanceRules(v, times) {
     if (v.level !== 'advance') {
-      return { todayDeliver: v.level === 'express' && !v.todayDeliver && !v.cTime ? 'Give a delivery time or a preferred collection time'
-        : v.todayDeliver && v.cTime && v.todayDeliver < v.cTime ? 'Delivery must be after collection' : null };
+      return { todayDeliver: v.level === 'express' && !v.todayDeliver && !v.cTime ? 'Give a delivery time or a preferred collection time' : times.errors.deliverTime || null };
     }
-    const today = MDM.ui.dayKey();
+    // An advance delivery before its collection is a mistake, by the date or by the time on the same day: the message names both.
+    const today = MDM.ui.dayKey(), day = v.deliverDate || v.collectDate, said = (d, t) => [d.split('-').reverse().join('/'), t].filter(Boolean).join(' ');
+    const before = !!v.collectDate && (day + 'T' + (v.deliverTime || '23:59')) < (v.collectDate + 'T' + (v.collectTime || '00:00'));
+    const text = before ? 'Delivery must be after collection: collection is ' + said(v.collectDate, v.collectTime) + ', delivery ' + said(day, v.deliverTime) : null;
     return { collectDate: !v.collectDate ? 'Choose the collection date' : (v.collectDate < today ? 'Choose today or a later date' : null),
-      deliverDate: v.deliverDate && v.deliverDate < v.collectDate ? 'Delivery cannot be before collection' : null };
+      deliverDate: before && day < v.collectDate ? text : null, deliverTime: before && day >= v.collectDate ? text : null };
   }
   // ---- New order: one package card, filled the way the bulk order is (client, 01/11/2026), then how many, fragile and when -------
   // "Add another order" (client, 09/11/2026: a second receiver on the business order, like "Add a stop" on a customer order) adds the
@@ -696,7 +701,7 @@
     const failure = failBox();
     const submit = el('button', { type: 'submit', class: 'btn btn--primary btn--lg btn--block', 'data-testid': 'biz-new-submit' }, 'Book delivery');
     const cards = [];
-    const collection = collectionBlock(acc, { onChange: () => { cards.forEach(drawRate); updatePrice(); } });
+    const collection = collectionBlock(acc, { onChange: () => { cards.forEach(drawRate); updatePrice(); kept.collect = ''; showDays(); } });
     const ctx = { tiers, allTiers: allTiers(), pickupZone: () => collection.zone() };
     const cardHost = el('div', { class: 'bulk-items' });
     // One card: its packages, fragile and extra vehicle sit below it, as before; with several each card has its own.
@@ -810,6 +815,25 @@
       v.level = form.elements.level.value;
       return v;
     };
+    // Normal or express: each time is read against the clock (MDM.todayTimes; a business may book with a time that has passed), so a
+    // delivery after midnight is tomorrow's (client, 21/11/2026). The line under each field says which day it is read as. A typed
+    // time keeps the day it was typed for; the collection point's usual time has none of its own.
+    const kept = { collect: '', deliver: '' };
+    const timesNow = v => MDM.todayTimes({ collectTime: v.cTime, deliverTime: v.todayDeliver, collectDay: kept.collect, deliverDay: kept.deliver }, { lenient: true });
+    const cNote = el('div', { class: 'field__hint', id: collection.time.id + '-note', 'data-testid': 'biz-c-time-note', hidden: true });
+    collection.time.closest('.field').insertBefore(cNote, collection.time.closest('.field').querySelector('.field__error'));
+    collection.time.setAttribute('aria-describedby', cNote.id);
+    const dNote = form.elements.todayDeliver.closest('.field').querySelector('.field__hint');
+    dNote.setAttribute('data-testid', 'biz-deliver-time-note');
+    function showDays() {
+      const v = values(), t = timesNow(v);
+      cNote.textContent = v.cTime ? t.notes.collectTime || 'Today' : ''; cNote.hidden = v.level === 'advance' || !cNote.textContent;
+      dNote.textContent = v.todayDeliver ? t.notes.deliverTime || 'Today' : 'Express: this or the preferred collection time';
+    }
+    const dayTyped = (ctrl, which, one) => ctrl.addEventListener('input', () => { const t = MDM.todayTimes(one(ctrl.value), { lenient: true })[which]; kept[which] = t ? t.day : ''; setError(form.elements.todayDeliver, null); showDays(); });
+    dayTyped(collection.time, 'collect', x => ({ collectTime: x })); dayTyped(form.elements.todayDeliver, 'deliver', x => ({ deliverTime: x }));
+    form.elements.level.forEach(r => r.addEventListener('change', showDays));
+    showDays();
     function updatePrice() {
       cards.forEach(c => { c.s.qty = c.qty.value; c.s.fragile = c.fragile.checked; });
       const quotes = cards.map(c => {
@@ -860,8 +884,8 @@
         if (qErr) ok = false;
       });
       const cOk = collection.validate();
-      const v = values();
-      const extra = advanceRules(v);
+      const v = values(), times = timesNow(v);
+      const extra = advanceRules(v, times);
       Object.keys(extra).forEach(k => { if (form.elements[k]) setError(form.elements[k], extra[k]); });
       if (!ok || !cOk || Object.keys(extra).some(k => extra[k])) {
         const first = form.querySelector('[aria-invalid="true"]');
@@ -879,7 +903,7 @@
             source: 'business', requestType: 'business', service: 'business', serviceLevel: v.level, accountId: acc.id, by: 'business:' + acc.id,
             customer: { name: acc.name, phone: acc.phone, email: acc.email || '', notify: 'whatsapp' },
             collection: { pointId: co.pointId, address: co.address, zone: co.zone, landmark: co.landmark, contactName: co.contactName, contactPhone: co.contactPhone, instructions: co.instructions, preferredTime: co.preferredTime },
-            delivery: K.delivery(c.row), details: { reference: String(c.row.reference || '').trim(), tier: t.value }, packages: packagesFor(c), schedule: scheduleValue(v),
+            delivery: K.delivery(c.row), details: { reference: String(c.row.reference || '').trim(), tier: t.value }, packages: packagesFor(c), schedule: scheduleValue(v, times),
             payment: { method: 'invoice', status: 'invoiced' }, cod: K.parseMoney(c.row.cod) || 0, extraVehicle,
             // An extra vehicle needs its charge confirmed first; everything else is priced at the agreed rate.
             status: extraVehicle ? 'requested' : 'confirmed',

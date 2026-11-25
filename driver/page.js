@@ -198,11 +198,12 @@
       if (s.deliverDate && (s.deliverTime || s.deliverDate !== s.collectDate)) parts.push(('deliver by ' + (s.deliverDate !== s.collectDate ? MDM.ui.fmtDate(s.deliverDate + 'T00:00', { time: false }) + ' ' : '') + (s.deliverTime || '')).trim());
     } else if (s.type === 'slot' && s.date) parts.push('Slot ' + MDM.ui.fmtDate(s.date + 'T00:00', { time: false }) + (s.window ? ' ' + s.window : ''));
     else {
-      // A normal or express order's optional times (client, 12/11/2026) and a business's preferred collection time.
-      const day = s.day && s.day !== MDM.ui.dayKey(new Date()) ? MDM.ui.timeText({ day: s.day }) + ' ' : '';
+      // A normal or express order's optional times (client, 12/11/2026) and a business's preferred collection time, each with its own
+      // day (21/11/2026: a delivery after midnight is tomorrow's; older orders have one day for both).
+      const today = MDM.ui.dayKey(new Date()), day = d => (d && d !== today ? MDM.ui.timeText({ day: d }) + ' ' : '');
       const ct = s.collectTime || (o.collection || {}).preferredTime;
-      if (ct) parts.push((s.collectTime ? 'Collect at ' : 'Collect around ') + day + ct);
-      if (s.deliverTime) parts.push((parts.length ? 'deliver by ' : 'Deliver by ') + day + s.deliverTime);
+      if (ct) parts.push((s.collectTime ? 'Collect at ' : 'Collect around ') + day(s.collectDay || s.day) + ct);
+      if (s.deliverTime) parts.push((parts.length ? 'deliver by ' : 'Deliver by ') + day(s.deliverDay || s.day) + s.deliverTime);
     }
     if (s.rescheduledFor) parts.push('Rescheduled for ' + s.rescheduledFor);
     return parts.join(', ');
