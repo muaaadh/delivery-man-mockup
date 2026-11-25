@@ -1217,10 +1217,11 @@
     const labels = el('a', { class: 'btn btn--ghost', href: MDM.href('labels/?order=' + encodeURIComponent(o.id)), target: '_blank', rel: 'noopener', 'data-testid': 'drawer-labels' }, html(MDM.icon('printer', 16)), 'Labels');
     items.push(labels);
     if (open(o) || st === 'delivered') items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
-    // Delete order (client, 24/11/2026): on every order. One that was collected, paid for, charged or invoiced stays on record: the
-    // button is greyed, its hint is the sentence the store would refuse with (MDM.deleteRefusal), and pressing it says the same.
+    // Delete order (client, 24/11/2026): on every order that is not finished. One that was collected, paid for, charged or invoiced
+    // stays on record: the button is greyed, its hint is the sentence the store would refuse with (MDM.deleteRefusal), and pressing it
+    // says the same. A delivered or returned order can never be deleted, so it has no button beside its payment step.
     const refusal = MDM.deleteRefusal(o);
-    items.push(btn('Delete order', 'drawer-delete', 'btn--ghost', () => deleteOrder(o), refusal ? { 'aria-disabled': 'true', title: refusal } : null));
+    if (st !== 'delivered' && st !== 'returned') items.push(btn('Delete order', 'drawer-delete', 'btn--ghost', () => deleteOrder(o), refusal ? { 'aria-disabled': 'true', title: refusal } : null));
     // A step marked done by mistake (client, 01/11/2026): the last delivery, or the collection while nothing is delivered yet.
     const doneStops = ((o.route && o.route.stops) || []).filter(x => x.status === 'done' && x.type !== 'return');
     if (st === 'delivered' || (doneStops.some(x => x.type !== 'pickup') && st === 'out_for_delivery')) items.push(btn('Undo delivered', 'drawer-undo-delivered', 'btn--ghost', () => undoLast(o, 'Delivered', ctx)));
