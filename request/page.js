@@ -1781,8 +1781,12 @@
     // half typed in this tab earlier. The flag works once and is taken off the address, so a reload keeps what is being typed.
     if (OFFICE && q.get('new') === '1') { clearDraft(); q.delete('new'); history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash); }
     // Office mode needs an office sign-in; anyone else is sent to it and comes back here.
-    if (OFFICE && !officeSession()) { location.replace(MDM.href('login/?as=admin&next=' + encodeURIComponent('request/?office=1'))); return; }
+    const toSignIn = () => { location.replace(MDM.href('login/?as=admin&next=' + encodeURIComponent('request/?office=1'))); };
+    if (OFFICE && !officeSession()) { toSignIn(); return; }
     await MDM.store.ready;
+    // The live service has now said who this is: an employee made inactive, or signed out elsewhere, is no longer the office (until
+    // 24/11/2026 they filled in the whole order before reading it).
+    if (OFFICE && !officeSession()) { toSignIn(); return; }
     settings = await MDM.store.settings();
     dom.form = document.querySelector('[data-testid="request-form"]');
     dom.form.id = 'request-form';
