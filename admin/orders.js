@@ -690,6 +690,12 @@
   }
   // Photos show as thumbnails; other uploads (a PDF invoice, quotation or payment slip for a shop collection, §1.1) are listed with a
   // download link so the office can still open them.
+  // A photo of the wrong package (client, 21/11/2026): every photo of a collection, a delivery or a failed attempt has "Remove", and
+  // a receipt or bill that nothing rests on any more (MDM.photoRemovable). A proof the order no longer points to (its step was taken
+  // back) says so, so it is not read as the current one; the only proof of a done step also has "Replace".
+  const PROOF_KINDS = ['proof_collection', 'proof', 'failed', 'receipt', 'cargo_bill'];
+  const proofStop = (o, f) => ['proof_collection', 'proof'].indexOf(f.kind) < 0 ? null
+    : ((o.route && o.route.stops) || []).find(s => s.status === 'done' && (s.type === 'pickup' ? !s.shop && s.proofPhotoId === f.id && (s.proofPhotoIds || [f.id]).length === 1 : s.photoId === f.id)) || null;
   function filesSection(o, ctx) {
     const doc = id => (o.documents || []).find(d => d.fileId === id) || {};
     const item = id => (((o.details || {}).items) || []).find(i => i && i.photoId === id);
@@ -697,10 +703,15 @@
     const images = ctx.files.filter(f => /^image\//.test(f.type || ''));
     const others = ctx.files.filter(f => !/^image\//.test(f.type || '') && f.dataUrl);
     if (!images.length && !others.length) return null;
+    const takenBack = ((o.route && o.route.stops) || []).some(s => (s.undone || []).length);
     return sec('Photos and documents', 'drawer-files',
       images.length ? el('div', { class: 'file-grid' }, images.map(f => {
-        const text = textOf(f);
-        return el('figure', { class: 'file-grid__item', 'data-kind': f.kind }, thumbButton(f, text), el('figcaption', null, text, el('small', null, fmtDate(f.at || f.createdAt))));
+        const text = textOf(f), old = PROOF_KINDS.indexOf(f.kind) >= 0 && !MDM.photoOnOrder(o, f.id), s = proofStop(o, f);
+        return el('figure', { class: ['file-grid__item', old && 'is-old'], 'data-testid': 'drawer-file', 'data-file-id': f.id, 'data-kind': f.kind, 'data-on-order': old ? 'false' : 'true' }, thumbButton(f, text),
+          el('figcaption', null, text, old ? el('small', { class: 'file-grid__old', 'data-testid': 'drawer-file-old' }, takenBack && ['proof_collection', 'proof', 'receipt'].indexOf(f.kind) >= 0 ? 'From a step that was taken back' : 'Not used on this order') : null, el('small', null, fmtDate(f.at || f.createdAt))),
+          MDM.photoRemovable(o, f) ? el('div', { class: 'file-grid__actions' },
+            s ? rowBtn('Replace', 'drawer-photo-replace', () => replacePhoto(o, f, s), 'btn--secondary', { 'data-file-id': f.id }) : null,
+            rowBtn('Remove', 'drawer-photo-remove', () => removePhoto(o, f, old), 'btn--ghost', { 'data-file-id': f.id })) : null);
       })) : null,
       others.length ? el('div', { class: 'list file-list', 'data-testid': 'drawer-documents' }, others.map(f => el('div', { class: 'list__item', 'data-testid': 'drawer-document', 'data-kind': f.kind },
         el('div', { class: 'list__main' }, el('div', { class: 'list__title wrap-anywhere' }, textOf(f)), el('div', { class: 'list__meta' }, fmtDate(f.at || f.createdAt))),
@@ -743,6 +754,33 @@
     const photoId = await storePhoto(v.photo, o.id, s.type === 'pickup' ? 'proof_collection' : 'proof');
     await MDM.store.addStopPhoto(o.id, s.id, { photoId, by: by() });
     toast((s.type === 'pickup' ? 'Proof of collection' : 'Proof of delivery') + ' added to ' + o.code, 'ok');
+  }
+  // store.removePhoto takes the photo off the stop, the packages and the tracking page and deletes the file; the reason goes in the
+  // order's activity and the customer is told nothing. A done step left without a photo then shows "Add photo" in Route.
+  const WHY_PHOTO = { name: 'reason', label: 'Why', type: 'textarea', rows: 2, required: true, placeholder: 'Photo of another order\'s package', requiredMessage: 'Say why' };
+  async function removePhoto(o, f, old) {
+    const what = FILE_KIND[f.kind] || 'Photo';
+    const v = await dialog({ title: 'Remove this photo from ' + o.code, okLabel: 'Remove photo', danger: true,
+      message: what + ' of ' + fmtDate(f.at || f.createdAt) + '. It is deleted for good. ' + (old ? 'The order does not use it any more.' : 'The customer no longer sees it on the tracking page, and you can add the right one under Route.'),
+      fields: [WHY_PHOTO] });
+    if (!v) return;
+    await MDM.store.removePhoto(o.id, { photoId: f.id, reason: v.reason, by: by() });
+    toast(what + ' removed from ' + o.code, 'ok');
+  }
+  // Replace: the same removal, then the new photo on the step (store.addStopPhoto), in one dialog. If the old one cannot go, the new
+  // file is not kept.
+  async function replacePhoto(o, f, s) {
+    const what = FILE_KIND[f.kind] || 'Photo';
+    const v = await dialog({ title: 'Replace the ' + what.toLowerCase() + ' of ' + o.code, okLabel: 'Replace photo',
+      message: s.label + ' · ' + s.address + '. The photo there now is deleted for good and the new one takes its place, on the tracking page too.',
+      fields: [{ name: 'photo', label: 'New photo', type: 'file', accept: 'image/*', required: true, requiredMessage: 'Choose the photo' }, WHY_PHOTO] });
+    if (!v) return;
+    const photoId = await storePhoto(v.photo, o.id, f.kind);
+    try {
+      await MDM.store.removePhoto(o.id, { photoId: f.id, reason: v.reason, by: by() });
+      await MDM.store.addStopPhoto(o.id, s.id, { photoId, by: by() });
+    } catch (e) { await MDM.store.remove('files', photoId).catch(() => {}); throw e; }
+    toast(what + ' replaced on ' + o.code, 'ok');
   }
   function pricingSection(o) {
     const t = o.totals || {}, p = o.pricing || {};
@@ -1077,8 +1115,8 @@
     if (open(o) || st === 'delivered') items.push(btn('Send update', 'drawer-send-update', 'btn--ghost', () => sendUpdate(o, statusMessage(o))));
     // A step marked done by mistake (client, 01/11/2026): the last delivery, or the collection while nothing is delivered yet.
     const doneStops = ((o.route && o.route.stops) || []).filter(x => x.status === 'done' && x.type !== 'return');
-    if (st === 'delivered' || (doneStops.some(x => x.type !== 'pickup') && st === 'out_for_delivery')) items.push(btn('Undo delivered', 'drawer-undo-delivered', 'btn--ghost', () => undoLast(o, 'Delivered')));
-    else if (['collected', 'out_for_delivery'].indexOf(st) >= 0 && doneStops.length) items.push(btn('Undo collected', 'drawer-undo-collected', 'btn--ghost', () => undoLast(o, 'Collected')));
+    if (st === 'delivered' || (doneStops.some(x => x.type !== 'pickup') && st === 'out_for_delivery')) items.push(btn('Undo delivered', 'drawer-undo-delivered', 'btn--ghost', () => undoLast(o, 'Delivered', ctx)));
+    else if (['collected', 'out_for_delivery'].indexOf(st) >= 0 && doneStops.length) items.push(btn('Undo collected', 'drawer-undo-collected', 'btn--ghost', () => undoLast(o, 'Collected', ctx)));
     const payStep = paymentStep(o);
     if (payStep) items.push(btn(payStep.label, payStep.testid, 'btn--primary', payStep.run, { 'data-pay-step': payStep.key }));
     // Cancel order (client, 12/11/2026 evening: customers cancel before anyone is assigned, and after): on every order that is not
@@ -1742,14 +1780,21 @@
     toast('Driver changed to ' + F.driverName(v.driverId, ctx.drivers), 'ok');
   }
   // Take back the last collection or delivery a driver marked done by mistake (store.undoStep): then reschedule or reassign it.
-  async function undoLast(o, what) {
+  // The photos of that step come off the order either way and the driver takes a new one. They stay under "Photos and documents"
+  // unless the tick removes them with the step (client, 21/11/2026); the tick is there when the step has a photo of this order's own
+  // (not the one photo of a whole bulk order).
+  async function undoLast(o, what, ctx) {
     const delivered = what === 'Delivered';
+    const photoIds = MDM.stepPhotoIds(o).filter(id => ctx.fileById[id]), n = photoIds.length;
+    const told = o.driverId ? ' ' + (F.driverName(o.driverId, ctx.drivers) || 'The driver') + ' is told to do it again with a new photo.' : '';
     const v = await dialog({ title: 'Undo "' + what + '" on ' + o.code, okLabel: 'Undo ' + what.toLowerCase(), danger: true,
-      message: delivered ? 'The order is out for delivery again. Cash and charges recorded at the delivery are taken back, and an invoice it sent goes back to pending.'
-        : 'The collection is to do again. Charges recorded at it are taken back; the photos stay on file.',
-      fields: [{ name: 'reason', label: 'Why', type: 'textarea', rows: 2, required: true, placeholder: delivered ? 'Customer asked to deliver after 19:30' : 'Collected from the wrong place', requiredMessage: 'Say why' }] });
+      message: (delivered ? 'The order is out for delivery again. Cash and charges recorded at the delivery are taken back, and an invoice it sent goes back to pending.'
+        : 'The collection is to do again. Charges recorded at it are taken back.') + told,
+      fields: [{ name: 'reason', label: 'Why', type: 'textarea', rows: 2, required: true, placeholder: delivered ? 'Customer asked to deliver after 19:30' : 'Collected from the wrong place', requiredMessage: 'Say why' }]
+        .concat(n ? [{ name: 'removePhotos', label: n > 1 ? 'Also remove the ' + n + ' photos of this step' : 'Also remove the photo of this step', type: 'checkbox', value: false,
+          hint: 'For a photo of the wrong package: it is deleted for good. Without the tick it stays under "Photos and documents", marked as from a step that was taken back.' }] : []) });
     if (!v) return;
-    await MDM.store.undoStep(o.id, { reason: v.reason, by: by() });
+    await MDM.store.undoStep(o.id, v.removePhotos ? { reason: v.reason, by: by(), removePhotos: true, photoIds } : { reason: v.reason, by: by() });
     toast(delivered ? o.code + ' is out for delivery again' : o.code + ': collection to do again', 'ok');
   }
   async function dispatchOrder(o) { await MDM.store.dispatch(o.id, { by: by() }); toast('Dispatched to ' + F.driverName(o.driverId, state.drivers), 'ok'); }

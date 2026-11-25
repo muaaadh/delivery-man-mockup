@@ -1543,22 +1543,105 @@
     }
     return save(o);
   }
+  // ---- The photos of a step (client, 21/11/2026: a driver photographed the wrong package for an order) --------------------------
+  // One file can be in several places of an order at once: a photo of two packages together is on the stop and on both packages, a
+  // shop's receipt is also the proof of the shopping. photoOnOrder(o, id) → the order still points to it: from a stop, a package, a
+  // shop's receipts or a charge that is not voided.
+  const stopsOf = o => (o && o.route && o.route.stops) || [];
+  function shopAt(o, s) {
+    const pkg = (o.packages || []).find(k => k.id === s.packageId), extra = s.collectionId ? (o.extraCollections || []).find(c => c.id === s.collectionId) : null;
+    return pkg && pkg.shop ? pkg.shop : extra && extra.shop ? extra.shop : null;
+  }
+  function photoOnOrder(o, id) {
+    if (!o || !id) return false;
+    return stopsOf(o).some(s => s.proofPhotoId === id || (s.proofPhotoIds || []).indexOf(id) >= 0 || s.photoId === id || s.receiptPhotoId === id || s.failPhotoId === id)
+      || (o.packages || []).some(k => k.collectionPhotoId === id || k.photoId === id)
+      || shopsOf(o).some(x => x.shop.receiptPhotoId === id || (x.shop.extraReceipts || []).some(r => r && r.photoId === id))
+      || (o.charges || []).some(c => c.photoId === id && !c.void);
+  }
+  MDM.photoOnOrder = photoOnOrder;
+  // What the office may take off an order (removePhoto): a proof of collection or delivery and the photo of a failed attempt, always;
+  // a receipt or a Maldivian Cargo bill only once nothing on the order rests on it (an undo left it behind). Never a transfer slip,
+  // a document or a photo the customer sent. photoKept(o, file) → why it stays, or '' when it may go.
+  const PHOTO_WORD = { proof_collection: 'Proof of collection', proof: 'Proof of delivery', failed: 'Failed attempt', receipt: 'Shop receipt', cargo_bill: 'Maldivian Cargo bill' };
+  function photoKept(o, f) {
+    if (f.orderId && f.orderId !== o.id) return 'This photo belongs to another order';
+    if (['proof_collection', 'proof', 'failed'].indexOf(f.kind) >= 0) return '';
+    if (['receipt', 'cargo_bill'].indexOf(f.kind) < 0) return 'Only the photo of a collection, a delivery or a failed attempt can be removed';
+    return photoOnOrder(o, f.id) ? 'An amount on this order rests on this ' + (f.kind === 'receipt' ? 'receipt' : 'bill') + ': it stays' : '';
+  }
+  MDM.photoRemovable = (o, f) => !!o && !!f && f.orderId === o.id && !photoKept(o, f);
+  // The step undoStep takes back: the latest collection or delivery marked done, never a return. stepPhotoIds(o) → the photos that
+  // step lets go of: the proofs of the collection with each package's own, a shop's receipts, or the proof of delivery. The office's
+  // page and the store both read them here.
+  function lastDoneStop(o) { return stopsOf(o).filter(x => x.status === 'done' && x.type !== 'return').sort((a, b) => (String(a.at || '') < String(b.at || '') ? -1 : 1)).pop() || null; }
+  function stepPhotoIds(o) {
+    const s = lastDoneStop(o); if (!s) return [];
+    if (s.type !== 'pickup') return s.photoId ? [s.photoId] : [];
+    const here = (o.packages || []).filter(k => (s.packageIds || [s.packageId]).indexOf(k.id) >= 0), sh = s.shop ? shopAt(o, s) : null;
+    return [s.proofPhotoId].concat(s.proofPhotoIds || [], here.map(k => k.collectionPhotoId), [s.receiptPhotoId, sh && sh.receiptPhotoId], ((sh && sh.extraReceipts) || []).map(r => r && r.photoId))
+      .filter((id, i, a) => id && a.indexOf(id) === i);
+  }
+  MDM.stepPhotoIds = stepPhotoIds;
+  // Takes every pointer to a photo off the order (a copy from orderOrThrow) → { n, stop }: how many there were and the stop it was a
+  // proof of. The next photo of a collection becomes its first, the one the office prices from; a package keeps a photo the customer
+  // sent (only a photo the driver's collection put there goes).
+  function unlinkPhoto(o, id) {
+    let n = 0, stop = null;
+    stopsOf(o).forEach(s => {
+      const ids = s.proofPhotoIds || (s.proofPhotoId ? [s.proofPhotoId] : []);
+      if (ids.indexOf(id) >= 0 || s.proofPhotoId === id) { s.proofPhotoIds = ids.filter(x => x !== id); s.proofPhotoId = s.proofPhotoIds[0] || null; n++; stop = stop || s; }
+      ['photoId', 'receiptPhotoId', 'failPhotoId'].forEach(k => { if (s[k] === id) { s[k] = null; n++; stop = stop || s; } });
+    });
+    (o.packages || []).forEach(k => {
+      if (k.collectionPhotoId === id) { k.collectionPhotoId = null; n++; }
+      if (k.photoId === id && k.photoSource === 'driver') { k.photoId = null; k.photoSource = null; n++; }
+    });
+    (o.charges || []).forEach(c => { if (c.photoId === id) { c.photoId = null; n++; } });
+    return { n, stop };
+  }
+  // takePhotos(o, ids, why, by, { strict, stop }) → true when something changed. The part removePhoto and an undo with its photos
+  // share: each file comes off the order everywhere, one internal event says which and why (the customer is told nothing), then the
+  // rows are deleted with the store's own remove (the live service deletes the stored picture with the row). A row that is already
+  // gone only has its pointers cleared; a photo that belongs to no order (one photo for a whole bulk order) stays for the others.
+  // strict: a photo that may not go is refused; without it (the undo) it is left where it is.
+  function takePhotos(o, ids, why, by, opts) {
+    opts = opts || {};
+    const taken = [];
+    ids.filter((id, i, a) => id && a.indexOf(id) === i).forEach(id => {
+      const f = readCol('files').find(x => x.id === id) || null;
+      const no = f ? photoKept(o, f) : '';
+      if (no) { if (opts.strict) throw new StoreError('validation', no); return; }
+      const was = unlinkPhoto(o, id), mine = !!f && f.orderId === o.id;
+      if (!was.n && !mine) return;
+      const stop = was.stop || opts.stop || null;
+      taken.push({ id, mine, stop, name: f ? f.name || '' : '', what: f ? PHOTO_WORD[f.kind] : stop ? (stop.type === 'pickup' ? PHOTO_WORD.proof_collection : PHOTO_WORD.proof) : 'Proof' });
+    });
+    if (!taken.length) return false;
+    const names = taken.map(t => t.name).filter(Boolean).join(', '), gone = taken.some(t => t.mine);
+    const label = (taken.length > 1 ? taken.length + ' photos' : taken[0].what + ' photo') + (gone ? ' removed' : ' taken off this order') + (names ? ' (' + names + ')' : '') + ': ' + why;
+    pushEvent(o, makeEvent('photo_removed', label, by, 'internal', { stopId: (taken.find(t => t.stop) || { stop: {} }).stop.id || null, fileIds: taken.map(t => t.id) }));
+    taken.filter(t => t.mine).forEach(t => remove('files', t.id));
+    return true;
+  }
   // undoStep: the office takes back the last collection or delivery a driver marked done by mistake (client, 01/11/2026: a postponed
   // delivery was marked delivered). The stop is open again and the order goes back to the step before it; what that step recorded goes
   // with it: the charges entered there are voided, cash on delivery is pending again (unless it has reached the office), an invoice it
-  // sent goes back to pending, and the collection photos come off the packages (they stay on file). Then the office reschedules or
-  // reassigns as usual.
+  // sent goes back to pending, and the photos come off the stop and the packages. Then the office reschedules or reassigns as usual.
+  // The photos stay on file unless the office says to remove them with the step (p.removePhotos, client 21/11/2026: the photo of
+  // the wrong package); the page names their ids too (p.photoIds) so the live service loads those rows, and the store works them
+  // out again by itself (stepPhotoIds). The driver is told that the step is to do again, with a new photo.
   function undoStep(orderId, p) {
     p = p || {};
     const o = orderOrThrow(orderId);
     const by = p.by || 'admin', reason = String(p.reason || '').trim();
     if (!reason) throw new StoreError('validation', 'Say why the step is taken back');
     if (['cancelled', 'returned'].indexOf(o.status) >= 0) throw new StoreError('transition', 'This order is already ' + MDM.STATUS[o.status].label.toLowerCase());
-    const stops = (o.route && o.route.stops) || [];
-    const s = stops.filter(x => x.status === 'done' && x.type !== 'return').sort((a, b) => (String(a.at || '') < String(b.at || '') ? -1 : 1)).pop();
+    const s = lastDoneStop(o);
     if (!s) throw new StoreError('transition', 'There is no collection or delivery to take back');
     const drop = s.type !== 'pickup';
     if (drop && o.cod && ['with_office', 'remitted'].indexOf(o.cod.status) >= 0) throw new StoreError('transition', 'The cash for this delivery is already with the office');
+    const photoIds = p.removePhotos ? stepPhotoIds(o) : [];
     const at = String(s.at || '');
     const stage = drop ? 'delivery' : 'collection';
     (o.charges || []).forEach(c => {
@@ -1581,8 +1664,7 @@
       here.forEach(k => { k.collectionPhotoId = null; if (k.photoSource === 'driver') { k.photoId = null; k.photoSource = null; } });
       Object.assign(s, { proofPhotoId: null, proofPhotoIds: [] });
       if (s.shop) {
-        const pkg = o.packages.find(k => k.id === s.packageId), extra = s.collectionId ? (o.extraCollections || []).find(c => c.id === s.collectionId) : null;
-        const sh = pkg && pkg.shop ? pkg.shop : extra && extra.shop ? extra.shop : null;
+        const sh = shopAt(o, s);
         // The receipts added in the price table go with the one they were added to: the shopping is to be recorded again.
         if (sh) { sh.receiptTotal = null; sh.receiptPhotoId = null; if (sh.extraReceipts) sh.extraReceipts = []; recalc(o); }
         s.receiptTotal = null; s.receiptPhotoId = null;
@@ -1593,6 +1675,10 @@
     if (next !== o.status) { o.statusHistory = (o.statusHistory || []).concat([{ at: now(), from: o.status, to: next, by, undo: true }]); o.status = next; }
     pushEvent(o, makeEvent('step_undone', label, by, 'public', { stopId: s.id }));
     pushEvent(o, makeEvent('note', 'Taken back: ' + reason, by, 'internal', { stopId: s.id }));
+    if (photoIds.length) takePhotos(o, photoIds, reason, by, { stop: s });
+    // The driver holding the job is told (client, 21/11/2026): until now the job only came back on the phone, without a word.
+    notifyStaff(o, 'driver', drop ? 'Delivery to do again' : s.shop ? 'Shopping to record again' : 'Collection to do again',
+      'the office took back the ' + (drop ? 'delivery' : s.shop ? 'shopping' : 'collection') + ' (' + reason + '). ' + (drop ? 'Deliver it again and take a new photo' : s.shop ? 'Record it again with new photos' : 'Collect it again and take a new photo'));
     return save(o);
   }
   // A proof photo added after the step (client, 02/11/2026: a driver forgot it and the office had to undo the delivery to add
@@ -1617,6 +1703,18 @@
     }
     pushEvent(o, makeEvent('proof_added', (s.type === 'pickup' ? 'Proof of collection' : s.type === 'return' ? 'Proof of return' : 'Proof of delivery') + ' photo added', by, 'internal', { stopId }));
     return save(o);
+  }
+  // removePhoto: the office removes a photo that should not be on an order (client, 21/11/2026: the wrong package's picture stayed
+  // under "Photos and documents" after the collection was undone). It comes off the stop, the packages and the tracking page and the
+  // file is deleted, with the reason in the order's activity. The step is not taken back: a done collection or delivery left without
+  // a photo takes the right one through addStopPhoto. Removing a photo that is gone already changes nothing.
+  function removePhoto(orderId, p) {
+    p = p || {};
+    const o = orderOrThrow(orderId);
+    const by = p.by || 'admin', reason = String(p.reason || '').trim();
+    if (!p.photoId) throw new StoreError('validation', 'Choose the photo to remove');
+    if (!reason) throw new StoreError('validation', 'Say why the photo is removed');
+    return takePhotos(o, [p.photoId], reason, by, { strict: true }) ? save(o) : o;
   }
   function driverRoute(driverId) {
     const mine = readCol('orders').filter(o => o.driverId === driverId && ['dispatched', 'on_the_way', 'arrived', 'collected', 'out_for_delivery', 'failed'].indexOf(o.status) >= 0);
@@ -2465,7 +2563,7 @@
     addBusinessPackage: P(addBusinessPackage), removeBusinessPackage: P(removeBusinessPackage),
     requestPayment: P(requestPayment), submitPayment: P(submitPayment), verifyPayment: P(verifyPayment), markPaid: P(markPaid), rejectPayment: P(rejectPayment), recordRefund: P(recordRefund), markSettled: P(markSettled),
     cancel: P(cancel), requestCancel: P(requestCancel), decideCancel: P(decideCancel), requestPriority: P(requestPriority), decidePriority: P(decidePriority),
-    assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep), addStopPhoto: P(addStopPhoto),
+    assignDriver: P(assignDriver), dispatch: P(dispatch), startRoute: P(startRoute), outForDelivery: P(outForDelivery), setStop: P(setStop), resolveFailure: P(resolveFailure), undoStep: P(undoStep), addStopPhoto: P(addStopPhoto), removePhoto: P(removePhoto),
     handToOffice: P(handToOffice), changeDeliveryMethod: P(changeDeliveryMethod),
     driverRoute: P(driverRoute), createBatch: P(createBatch), batchCollected: P(batchCollected), assignCollector: P(assignCollector), assignByZone: P(assignByZone), batchStatus: P(b => batchStatus(b)),
     createStoreOrder: P(createStoreOrder), punchIn: P(punchIn), punchOut: P(punchOut), openShift: P(openShift), requestLeave: P(requestLeave), decideLeave: P(decideLeave),
