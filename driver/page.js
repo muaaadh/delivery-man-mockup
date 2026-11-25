@@ -399,6 +399,14 @@
       el('div', { class: 'alert__body' }, el('strong', null, 'Waiting for the office. '), (reason ? reason + '. ' : '') + 'They decide what happens next.',
         links ? el('div', { class: 'job__alert-link' }, el('a', { href: links.tel }, 'Call the office')) : null));
   }
+  // The office took back the step the driver is on (store.undoStep, client 21/11/2026: the photo of the wrong package): the card says
+  // so until it is done again, next to the message the store sends. The stop keeps who took it back, when and why (stop.undone).
+  function redoAlert(stop) {
+    const u = (stop.undone || [])[stop.undone.length - 1], pick = stop.type === 'pickup';
+    const why = String(u.reason || '').trim().replace(/[.\s]+$/, '');
+    return MDM.ui.notice('warn', (pick ? (stop.shop ? 'Record the shopping again, with new photos.' : 'Collect it again and take a new photo.') : 'Deliver it again and take a new photo.') + (why ? ' Reason: ' + why + '.' : ''),
+      { title: 'The office took back this ' + (pick ? (stop.shop ? 'shopping' : 'collection') : 'delivery') + (u.at ? ' at ' + MDM.ui.fmtTime(u.at) : ''), testid: 'driver-redo' });
+  }
   // The office sent a failed delivery back to the sender: there is an open return stop, so no cash is collected on it.
   const returning = o => ((o.route && o.route.stops) || []).some(s => s.type === 'return' && s.status !== 'done' && s.status !== 'skipped');
   const codDue = o => !!(o.cod && o.cod.amount > 0 && o.cod.status === 'pending') && !returning(o);
@@ -504,6 +512,7 @@
         showDrop ? stopBlock(o, showDrop, showDrop.type === 'return' ? 'Return to' : 'Deliver to', 'driver-drop') : null),
       el('div', { class: 'card__body job__actions' },
         o.status === 'failed' ? officeAlert(o) : null,
+        cur && (cur.undone || []).length ? redoAlert(cur) : null,
         codDue(o) ? MDM.ui.notice('warn', 'Enter it on proof of delivery.', { testid: 'driver-cod', title: 'Collect ' + money(o.cod.amount) + ' in cash' }) : null,
         returning(o) && o.cod && o.cod.amount > 0 && o.cod.status === 'pending' ? el('p', { class: 'job__line', 'data-testid': 'driver-return-cash' }, 'No cash to collect: it goes back to the sender.') : null,
         primary,
