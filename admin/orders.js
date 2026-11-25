@@ -1956,7 +1956,7 @@
       html(MDM.icon(icon, 20, 'icon--muted')),
       el('span', { class: 'list__main', style: { display: 'grid' } }, el('span', { class: 'list__title' }, title), el('span', { class: 'list__meta' }, sub)),
       html(MDM.icon('chevron-right', 16, 'icon--muted')));
-    const forCustomer = choice('a', { href: MDM.href('request/?office=1'), 'data-testid': 'neworder-for-customer' }, 'user', 'For a customer', 'The same form customers use');
+    const forCustomer = choice('a', { href: MDM.href('request/?office=1&new=1'), 'data-testid': 'neworder-for-customer' }, 'user', 'For a customer', 'The same form customers use');
     const forBusiness = choice('button', { type: 'button', 'data-testid': 'neworder-for-business', on: { click: () => { dlg.close(); act(openNewOrder); } } }, 'building', 'For a business account', 'Agreed rates, from a collection point');
     const dlg = el('dialog', { class: 'dialog', 'aria-labelledby': 'neworder-choose-title', 'data-testid': 'neworder-choose' },
       el('div', { class: 'dialog__body' },

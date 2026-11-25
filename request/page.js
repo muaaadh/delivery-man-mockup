@@ -19,9 +19,15 @@
 // form takes the customer's mobile (a known number acts like that customer signed in: saved addresses, "Order again"), the name and
 // how the order came in; step 5 is always shown, for the operator; the draft has its own key; mdm:me is never written (it would sign
 // the office browser in as the customer); `by` is the office user, and the new order opens in the office.
+// One page for the office (client, 24/11/2026, "turn these 6 pages into 1 or 2"): request/?office=1 shows every section at once, in
+// two columns on a laptop: the customer bar, Service, Collection, Packages, Delivery, "Updates to the customer" and "Price and
+// payment", with one "Create order" that marks every problem and goes to the first. The steps are still the six builders below; the
+// flag SINGLE says how they are shown, and a choice in one section redraws the sections that follow from it (FOLLOWS). Customers keep
+// the six short steps, and so does the office with request/?office=1&steps=1. request/?office=1&new=1 starts with an empty form.
 (function (MDM) { 'use strict';
   const { el, html, setError, phone } = MDM.ui;
   const OFFICE = new URLSearchParams(location.search).get('office') === '1';
+  const SINGLE = OFFICE && new URLSearchParams(location.search).get('steps') !== '1';
   const OFFICE_ROLES = MDM.OFFICE_ROLES;
   // How an office order came in: the same values as the office's own New order (admin/orders.js SOURCES).
   const SOURCES = [{ value: 'phone', label: 'Phone' }, { value: 'whatsapp', label: 'WhatsApp' }, { value: 'viber', label: 'Viber' }, { value: 'walkin', label: 'Walk-in' }];
@@ -52,7 +58,10 @@
   let draft = emptyDraft();
   let step = 1, shownStep = 0;
   let me = null, profile = null, savedAddresses = [], reorderChoices = [], recentBoats = [], submitting = false;
-  let checks = {};   // step → [{ wrap, check() → message|null, focus() }]
+  let checks = {};   // step → [{ wrap, check() → message|null, focus() }]; on one page 0 holds the customer bar's two fields
+  // One page: attention is on after a Create that found problems, until none is marked any more; sendError is what the store
+  // answered when the order could not be created. Both show in the line by the Create buttons (paintAttention).
+  let attention = false, sendError = '';
 
   // ---- Draft -----------------------------------------------------------------------------------------------------------------
   function blankItem() { return { name: '', details: '', qty: '1', instructions: '', photoId: '' }; }
@@ -384,7 +393,7 @@
 
   // ---- Field helpers -------------------------------------------------------------------------------------------------------------
   let uid = 0;
-  function reg(n, wrap, check, focusEl) { (checks[n] = checks[n] || []).push({ wrap, check, focus: () => { const f = focusEl ? focusEl() : wrap.querySelector('input:not([type="file"]), select, textarea, button'); if (f) f.focus(); } }); }
+  function reg(n, wrap, check, focusEl) { (checks[n] = checks[n] || []).push({ wrap, check, focus: o => { const f = focusEl ? focusEl() : wrap.querySelector('input:not([type="file"]), select, textarea, button'); if (f) f.focus(o); } }); }
   // F(n, path, label, { type, options, required, hint, placeholder, validate, intl, landline, rows, testid, onChange, attrs, readonly }) → .field bound to draft[path]
   function F(n, path, label, o) {
     o = o || {};
@@ -444,7 +453,7 @@
     o = o || {};
     const id = 'rq-' + path.replace(/\./g, '-') + '-' + (++uid);
     const input = el('input', { type: 'checkbox', id, checked: !!getPath(path), 'data-testid': o.testid || 'request-' + path.split('.').pop() });
-    input.addEventListener('change', () => { setPath(path, input.checked); saveDraft(); updateSummary(); if (o.onChange) o.onChange(input.checked); const w = input.closest('.field'); if (w) setError(w, null); });
+    input.addEventListener('change', () => { setPath(path, input.checked); saveDraft(); updateSummary(); if (o.onChange) o.onChange(input.checked); const w = input.closest('.field'); if (w) setError(w, null); paintAttention(); });
     const wrap = el('div', { class: ['field', o.fieldClass], 'data-field': path }, el('div', null, el('label', { class: 'checkbox', for: id }, input, el('span', null, label, o.hint ? el('span', { class: 'checkbox__hint' }, o.hint) : null))), el('div', { class: 'field__error', hidden: true }));
     if (o.required) reg(n, wrap, () => (getPath(path) ? null : o.requiredMessage || 'Tick the box to continue'), () => input);
     return wrap;
@@ -466,12 +475,13 @@
   }
   const grid = (...kids) => el('div', { class: 'grid-2' }, kids);
   // rerender(n) rebuilds a step after a choice that changes its fields, keeping focus on the control that was used.
-  function rerender(n) {
+  // rerender(n, draw) rebuilds it with draw(n) instead (one page: renderOne, the section alone).
+  function rerender(n, draw) {
     const a = document.activeElement;
     const key = a && a.closest && a.closest('[data-testid]') ? a.closest('[data-testid]').getAttribute('data-testid') : null;
     const val = a && a.value;
     const sel = a && typeof a.selectionStart === 'number' && /^(text|tel|email|search)$/.test(a.type || '') ? [a.selectionStart, a.selectionEnd] : null;
-    renderStep(n);
+    (draw || renderStep)(n);
     if (key) {
       const again = dom.steps[n].querySelector('[data-testid="' + key + '"]');
       const target = again && (again.matches('input,select,textarea,button') ? again : again.querySelector('input[value="' + CSS.escape(val || '') + '"]') || again.querySelector('input:checked') || again.querySelector('input,select,textarea,button'));
@@ -480,6 +490,9 @@
   }
 
   // ---- Uploads (documents and package photos) ------------------------------------------------------------------------------------
+  // One page: an upload can end after its section was redrawn because of a choice elsewhere. Its preview was then painted into the
+  // old copy, so the section is drawn once more from the draft, which has the file.
+  function settle(n, node) { if (SINGLE && !node.isConnected) refresh(n); }
   async function prepareFile(file) {
     const type = String(file.type || '').toLowerCase(), name = file.name || 'file';
     if (file.size > 8 * 1024 * 1024) throw new Error('Choose a file under 8 MB.');
@@ -530,7 +543,7 @@
           draft.docs.push({ fileId: row.id, name: row.name, type: row.type, kind });
         } catch (e) { setError(wrap, e.message); }
       }
-      saveDraft(); paint(); updateSummary();
+      saveDraft(); paint(); updateSummary(); settle(n, wrap);
     });
     paint();
     if (o.required) reg(n, wrap, () => (draft.docs.some(d => d.kind === kind) ? null : 'Upload the ' + (DOC_KIND[kind] || 'document').toLowerCase()), () => btn);
@@ -562,7 +575,7 @@
       try {
         const row = await storeFile(f, 'package');
         if (ph.photoId) MDM.store.remove('files', ph.photoId).catch(() => {});
-        ph.photoId = row.id; ph.photoName = row.name; saveDraft(); paint(); updateSummary();
+        ph.photoId = row.id; ph.photoName = row.name; saveDraft(); paint(); updateSummary(); settle(3, box);
       } catch (e) { err.textContent = e.message; err.hidden = false; }
     });
     paint();
@@ -775,19 +788,21 @@
   }
   const totalCountOf = c => SIZES.reduce((n, s) => n + (Number(c[s]) || 0), 0);
   function applyDictatedTo(d) { const keep = draft; draft = d; applyDictated(); draft = keep; }
+  const CHECK_EACH = SINGLE ? 'Check each section.' : 'Check each step.';
   function startFrom(order, o) {
     const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember, termsAck: draft.termsAck, source: draft.source };
     draft = Object.assign(draftFromOrder(order), keep);
     saveDraft();
-    if (!(o && o.silent)) MDM.ui.toast('Filled in from ' + order.code + '. Check each step.', 'ok');
-    if (o && o.direct) setStep(6, { initial: true }); else go(6);
+    if (!(o && o.silent)) MDM.ui.toast('Filled in from ' + order.code + '. ' + CHECK_EACH, 'ok');
+    // One page: the whole order is in view, from the top.
+    if (o && o.direct) setStep(6, { initial: true }); else go(SINGLE ? 1 : 6);
   }
   function renderNotice() {
     if (!dom.notice) return;
     const r = draft.reorderFrom;
     dom.notice.hidden = !r;
     if (!r) { dom.notice.replaceChildren(); return; }
-    dom.notice.replaceChildren(MDM.ui.notice('info', 'Filled in from ' + r.code + '. Check each step.', {
+    dom.notice.replaceChildren(MDM.ui.notice('info', 'Filled in from ' + r.code + '. ' + CHECK_EACH, {
       action: el('button', { type: 'button', class: 'btn btn--ghost btn--sm request-notice__reset', 'data-testid': 'request-start-over', on: { click: () => { const keep = { customer: draft.customer, pay: draft.pay, remember: draft.remember, termsAck: draft.termsAck, source: draft.source }; draft = Object.assign(emptyDraft(), keep); saveDraft(); go(1); renderNotice(); } } }, 'Start over'),
     }));
   }
@@ -795,6 +810,8 @@
   // ---- Steps -------------------------------------------------------------------------------------------------------------------------
   function head(n, title, desc) { return el('div', { class: 'section-head' }, el('h2', { id: 'request-step-' + n + '-title', tabindex: '-1' }, title), desc ? el('p', { class: 'section-head__desc' }, desc) : null); }
   function actions(o) {
+    // One page: no Continue or Back, and the one button is not the form's submit button, so Enter in a field never creates the order.
+    if (SINGLE) return o && o.submit ? el('div', { class: 'form-actions' }, el('button', { type: 'button', class: 'btn btn--brand', 'data-testid': 'request-submit', on: { click: () => submit() } }, o.label)) : null;
     const back = step > 1 ? el('button', { type: 'button', class: 'btn btn--ghost', 'data-testid': 'request-back', on: { click: () => go(prevStep(step)) } }, 'Back') : null;
     const next = o && o.submit
       ? el('button', { type: 'submit', class: 'btn btn--brand', 'data-testid': 'request-submit' }, o.label)
@@ -829,7 +846,8 @@
   function typeFields(n) {
     const d = draft.details, t = draft.type;
     const out = [];
-    const dictate = () => { applyDictated(); };
+    // One page: the Collection section is in view and follows these fields as they are typed.
+    const dictate = () => { applyDictated(); if (SINGLE) redraw([2]); };
     if (t === 'postal') {
       out.push(carrierField(n));
       const c = d.carrier;
@@ -977,7 +995,7 @@
     const locked = !!dictatedCollection();
     const t = draft.type;
     const title = t === 'shop_collect' ? 'Collect from the shop or godown' : t === 'postal' ? 'Collect from the carrier' : t === 'boat_collect' ? 'Collect from the boat' : t === 'office' ? 'Where do we collect the documents?' : 'Where do we collect from?';
-    const desc = locked ? 'Filled in from step 1.' : null;
+    const desc = locked ? (SINGLE ? 'Filled in from the Service section.' : 'Filled in from step 1.') : null;
     const out = [head(n, title, desc)];
     if (locked) {
       out.push(F(n, 'collection.address', 'Collection address', { required: true, testid: 'request-collection-address', attrs: { readonly: true } }),
@@ -1019,7 +1037,7 @@
         if (/pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '')) throw new Error('Choose a photo (JPG or PNG).');
         const row = await storeFile(f, 'item_photo');
         if (it.photoId) MDM.store.remove('files', it.photoId).catch(() => {});
-        it.photoId = row.id; saveDraft(); paint();
+        it.photoId = row.id; saveDraft(); paint(); settle(2, box);
       } catch (e) { err.textContent = e.message; err.hidden = false; }
     });
     paint();
@@ -1239,11 +1257,13 @@
   }
   // Step 5 is skipped for a signed-in customer (visibleSteps); a guest ticks "I've read what we carry" here. In the office it is the
   // customer's details (name and mobile shared with the office bar), and the operator ticks the box for a customer who has not yet.
+  // One page: the name and the mobile are typed once, in the bar on top (checked there, buildOfficeBar), so this section is only
+  // how the customer hears from us and the tick.
   function step5(n) {
     const sync = () => { if (OFFICE) syncOfficeBar(); };
-    return [head(n, OFFICE ? 'Customer details' : 'Your details'),
+    return [head(n, SINGLE ? 'Updates to the customer' : OFFICE ? 'Customer details' : 'Your details'),
       !OFFICE && profileReady() ? MDM.ui.notice('info', 'Signed in as ' + profile.name + '. Changes apply to this request only.', { testid: 'request-signed-in' }) : null,
-      grid(F(n, 'customer.name', OFFICE ? 'Name' : 'Your name', { required: true, attrs: { autocomplete: OFFICE ? 'off' : 'name' }, onChange: sync }),
+      SINGLE ? null : grid(F(n, 'customer.name', OFFICE ? 'Name' : 'Your name', { required: true, attrs: { autocomplete: OFFICE ? 'off' : 'name' }, onChange: sync }),
         F(n, 'customer.phone', 'Mobile number', { type: 'tel', required: true, intl: true, hint: 'A number from abroad: + and the country code', attrs: OFFICE ? { autocomplete: 'off' } : null, onChange: () => { sync(); if (OFFICE) lookupSoon(); } })),
       seg(n, 'customer.notify', OFFICE ? 'Notify by' : 'Send updates by', NOTIFY, { onChange: () => { saveDraft(); rerender(n); }, hint: OFFICE ? 'Same as “Order received by” for WhatsApp and Viber' : null }),
       F(n, 'customer.email', 'Email', { type: 'email', required: draft.customer.notify === 'email', attrs: { autocomplete: OFFICE ? 'off' : 'email' } }),
@@ -1349,15 +1369,31 @@
     add('Instructions', dd.instructions);
     return rows;
   }
+  // The note under the price: when the final price is confirmed and how the customer hears of it.
+  function finalPriceNote() {
+    const notifyWord = (NOTIFY.find(x => x.value === draft.customer.notify) || NOTIFY[0]).label;
+    return 'We confirm the final price' + (priceAfterCollection() ? ' after collection' : settings.ops && settings.ops.reviewText ? ' within ' + settings.ops.reviewText : '') + ' and message ' + (OFFICE ? 'the customer' : 'you') + ' by ' + notifyWord
+      + (upfrontForced() || draft.pay === 'upfront' ? ' with the amount to transfer.' : '.');
+  }
   function step6(n) {
     const cust = draft.customer;
     const model = priceModel();
     const notifyWord = (NOTIFY.find(x => x.value === cust.notify) || NOTIFY[0]).label;
     const photos = SIZES.filter(s => draft.counts[s] && draft.photos[s].photoId);
-    const upfront = upfrontForced() || draft.pay === 'upfront';
     const payNote = (OFFICE ? 'Call the customer to agree the items and the price before buying. ' : 'We call to agree the items and the price before we buy. ')
       + (isShop() ? 'Paid upfront' : 'A shop stop makes this paid upfront') + ' once confirmed; anything not spent is refunded.';
-    const who = OFFICE ? 'the customer' : 'you';
+    // One page: what was typed is on the page itself, so there is no read-back of it. When to pay, the itemised estimate (kept
+    // current by updateSummary), the note, the line that says what needs attention and the button stay.
+    if (SINGLE) return [head(n, 'Price and payment', 'Nothing is charged now.'),
+      el('div', { class: 'stack-4' },
+        el('div', { class: 'request-review__pay', 'data-testid': 'request-review-pay' }, upfrontForced() ? MDM.ui.notice('info', payNote)
+          : seg(n, 'pay', 'When to pay', [{ value: 'after', label: 'After delivery' }, { value: 'upfront', label: 'Upfront' }],
+            { testid: 'request-pay', hint: 'By bank transfer', onChange: () => { saveDraft(); rerender(n); } })),
+        el('div', null, el('h3', { class: 'request-group__title request-review__price-title' }, 'Estimated price'),
+          el('div', { class: 'summary', 'data-testid': 'request-review-price', 'data-live-charges': 'request-review' }, chargeLines(model, 'request-review'))),
+        MDM.ui.notice('info', finalPriceNote(), { testid: 'request-review-note' })),
+      el('div', { class: 'field__error request-attention', role: 'alert', 'data-testid': 'request-error', hidden: true }),
+      actions({ submit: true, label: 'Create order' })];
     return [head(n, 'Check and send', 'Nothing is charged now.'),
       el('div', { class: 'stack-4' },
         reviewGroup(isShop() ? 'Shop & Deliver' : typeOf().label, 1, serviceRows(), 'request-review-service'),
@@ -1373,12 +1409,32 @@
             { testid: 'request-pay', hint: 'By bank transfer', onChange: () => { saveDraft(); rerender(n); } })),
         el('div', null, el('h3', { class: 'request-group__title request-review__price-title' }, 'Estimated price'),
           el('div', { class: 'summary', 'data-testid': 'request-review-price' }, chargeLines(model, 'request-review'))),
-        MDM.ui.notice('info', 'We confirm the final price' + (priceAfterCollection() ? ' after collection' : settings.ops && settings.ops.reviewText ? ' within ' + settings.ops.reviewText : '') + ' and message ' + who + ' by ' + notifyWord + (upfront ? ' with the amount to transfer.' : '.'), { testid: 'request-review-note' })),
+        MDM.ui.notice('info', finalPriceNote(), { testid: 'request-review-note' })),
       el('div', { class: 'field__error', role: 'alert', 'data-testid': 'request-error', hidden: true }),
       actions({ submit: true, label: OFFICE ? 'Create order' : 'Send request' })];
   }
   const BUILDERS = { 1: step1, 2: step2, 3: step3, 4: step4, 5: step5, 6: step6 };
-  function renderStep(n) { checks[n] = []; dom.steps[n].replaceChildren(...BUILDERS[n](n).filter(Boolean)); }
+  // renderOne(n) rebuilds one section. On one page the error marks it showed are put back while their checks still fail: a choice
+  // made elsewhere must not wipe the problems that Create listed.
+  function renderOne(n) {
+    const marked = SINGLE ? Array.from(dom.steps[n].querySelectorAll('.field.is-invalid[data-field]'), f => f.getAttribute('data-field')) : [];
+    checks[n] = []; dom.steps[n].replaceChildren(...BUILDERS[n](n).filter(Boolean));
+    if (marked.length) checks[n].forEach(c => { const msg = marked.indexOf(c.wrap.getAttribute('data-field')) >= 0 ? c.check() : null; if (msg) setError(c.wrap, msg); });
+  }
+  // One page: what a section shows can follow from an earlier one (the category and the collection type decide Collection and
+  // Packages, a stop adds a block of packages, a shop anywhere makes payment upfront), so a rebuilt section takes those with it.
+  const FOLLOWS = { 1: [2, 3, 6], 2: [3, 6], 3: [6], 4: [6], 5: [6] };
+  function renderStep(n) { renderOne(n); if (SINGLE) redraw(FOLLOWS[n]); }
+  // redraw([n…]) rebuilds those sections from the draft, never the one holding the focus (what is being typed there stays as it is).
+  function redraw(list) {
+    (list || []).forEach(k => { if (!dom.steps[k].contains(document.activeElement)) renderOne(k); });
+    showSections(); paintAttention();
+  }
+  // refresh(n) rebuilds section n alone; when the focus is inside, it goes back to the same control.
+  function refresh(n) { if (dom.steps[n].contains(document.activeElement)) rerender(n, renderOne); else renderOne(n); }
+  function renderAll() { for (let k = 1; k <= 6; k++) refresh(k); showSections(); paintAttention(); }
+  // Business Delivery is booked elsewhere: only the Service section, with its link, stays.
+  function showSections() { const only = isBusiness(); for (let k = 1; k <= 6; k++) dom.steps[k].hidden = only && k > 1; dom.form.classList.toggle('is-business', only); }
 
   // ---- Navigation -----------------------------------------------------------------------------------------------------------------
   function validStep(n) {
@@ -1386,17 +1442,63 @@
     return (checks[n] || []).every(c => !c.check());
   }
   function firstInvalid(max) { for (let n = 1; n < max; n++) { if (!validStep(n)) return n; } return max; }
-  function showErrors(n) {
+  // markErrors(n) shows every failed check of step n and returns the first one (null when the step is fine).
+  function markErrors(n) {
     let first = null;
     (checks[n] || []).forEach(c => { const msg = c.check(); setError(c.wrap, msg); if (msg && !first) first = c; });
+    return first;
+  }
+  function showErrors(n) {
+    const first = markErrors(n);
     if (first) { first.focus(); MDM.ui.scrollIntoViewIfNeeded(first.wrap); return false; }
     return true;
   }
+  // One page: Create checks every section at once. Each problem is marked; the first in page order (the customer bar, then the
+  // sections as numbered) takes the focus and is brought into view.
+  function showAllErrors() {
+    const failed = [];
+    [0, 1, 2, 3, 4, 5].forEach(n => {
+      const bad = (checks[n] || []).filter(c => { const msg = c.check(); setError(c.wrap, msg); return !!msg; });
+      failed.push(...bad.sort((a, b) => (a.wrap.compareDocumentPosition(b.wrap) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)));
+    });
+    attention = failed.length > 0; paintAttention();
+    if (!failed.length) return true;
+    failed[0].focus({ preventScroll: true }); reveal(failed[0].wrap);
+    return false;
+  }
+  // Bring a problem into view between the sticky header and the bar at the bottom: a field under either looks like nothing happened.
+  function reveal(node) {
+    const r = node.getBoundingClientRect(), top = 72, bottom = window.innerHeight - (dom.bar ? dom.bar.offsetHeight : 0) - 12;
+    if (r.top >= top && r.bottom <= bottom) return;
+    node.scrollIntoView({ block: 'center', behavior: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }
+  // One page: the line by each Create button. After a Create that found problems it counts the ones still marked, and goes once
+  // none is left; when the store refused the order it says why.
+  function paintAttention() {
+    if (!SINGLE || !dom.form) return;
+    const n = attention ? document.querySelectorAll('main .field.is-invalid').length : 0;
+    if (!n) attention = false;
+    const count = n ? MDM.ui.plural(n, 'thing needs', 'things need') + ' attention' : '';
+    const line = dom.steps[6].querySelector('[data-testid="request-error"]');
+    if (line) { line.textContent = sendError || (count ? count + '. Each one is marked.' : ''); line.hidden = !line.textContent; }
+    const note = dom.bar.querySelector('[data-testid="request-bar-note"]'), short = sendError ? 'Order not created' : count;
+    if (note) { note.textContent = short || 'Estimate'; note.classList.toggle('is-alert', !!short); }
+  }
   function stepFromHash() { const m = /^#step-([1-6])$/.exec(location.hash || ''); return m ? Number(m[1]) : 0; }
   function setStep(n, o) {
+    if (SINGLE) {
+      // One page: every section is drawn and shown; a step number only says which section to bring into view.
+      renderAll(); renderStepper(); renderNotice(); updateSummary();
+      if (o && o.initial) return;
+      const sec = dom.steps[n] || dom.steps[1];
+      if (n > 1) sec.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
+      const h = sec.querySelector('h2'); if (h) h.focus({ preventScroll: true });
+      return;
+    }
     // Steps before the target must be valid; otherwise land on the first one that is not. A skipped step 5 moves on to the review.
     for (let k = 1; k <= 6; k++) renderStep(k);
     if (visibleSteps().indexOf(n) < 0) n = nextStep(n);
+    const asked = n;
     n = Math.min(n, firstInvalid(n));
     step = n;
     if (stepFromHash() !== n) history.replaceState(null, '', location.pathname + location.search + '#step-' + n);
@@ -1406,15 +1508,21 @@
     renderStepper(); renderNotice(); updateSummary();
     // The new step eases in once; re-renders of the same step (a choice, a lookup) do not replay it.
     if (shownStep !== n) { shownStep = n; if (MDM.motion) MDM.motion.enter(dom.steps[n]); }
+    // Sent back to an earlier step because it has a problem (a time typed there has passed since, a field was emptied): the step
+    // shows what it is. Before 24/11/2026 the person landed on step 1 with no message and only saw it on the next Continue.
+    const why = n < asked ? markErrors(n) : null;
     if (o && o.initial) return;
     window.scrollTo(0, 0);
+    if (why) { why.focus(); MDM.ui.scrollIntoViewIfNeeded(why.wrap); return; }
     const h = dom.steps[n].querySelector('h2'); if (h) h.focus({ preventScroll: true });
   }
-  function go(n) { if (stepFromHash() === n) setStep(n); else location.hash = '#step-' + n; }
+  function go(n) { if (SINGLE || stepFromHash() === n) setStep(n); else location.hash = '#step-' + n; }
   function advance() { if (!showErrors(step)) return; go(nextStep(step)); }
   // stepOf() → { at, of }: the position among the steps this customer sees ('Step 5 of 5' on the review when step 5 is skipped).
   const stepOf = () => { const v = visibleSteps(); return { at: Math.max(1, v.indexOf(step) + 1), of: v.length }; };
   function renderStepper() {
+    // One page: nothing to step through.
+    if (SINGLE) { dom.stepper.hidden = true; return; }
     const shown = visibleSteps();
     dom.stepper.hidden = isBusiness();
     dom.stepper.replaceChildren(...shown.map((n, i) => {
@@ -1428,6 +1536,14 @@
     const model = priceModel();
     const est = dom.steps[3] && dom.steps[3].querySelector('.request-estimate__value'); if (est) est.textContent = model ? rangeText(model.delivery, model.xl) : 'Add a package';
     document.querySelectorAll('.request-step [data-live-charges]').forEach(box => box.replaceChildren(...chargeLines(model, box.dataset.liveCharges)));
+    if (SINGLE) {
+      // One page: two lines follow what is typed in another section and are changed in place (a rebuild per keystroke would blink
+      // the photo previews): where each stop is, above its packages, and the note under the price.
+      const where = dom.steps[3].querySelectorAll('.request-sizes__where');
+      if (where.length === draft.extra.length + 1) where.forEach((w, i) => { const t = stopPlace(i); if (w.textContent !== t) w.textContent = t; });
+      const note = dom.steps[6].querySelector('[data-testid="request-review-note"] .alert__body > div'), text = finalPriceNote();
+      if (note && note.textContent !== text) note.textContent = text;
+    }
     if (isBusiness()) {
       dom.panel.replaceChildren(el('div', { class: 'summary' }, el('h2', { class: 'summary__head' }, OFFICE ? 'Order' : 'Your request'),
         el('div', { class: 'summary__line' }, el('span', { class: 'summary__desc' }, 'Business Delivery', el('span', { class: 'summary__sub' }, OFFICE ? 'Booked from the business order' : 'Booked in the business portal')))));
@@ -1446,6 +1562,13 @@
       chargeLines(model, 'request-panel'),
       el('p', { class: 'small muted', 'data-testid': 'request-panel-note' }, priceAfterCollection() ? 'No photo: price confirmed after collection.' : 'Final price confirmed before collection.')));
     const totalEl = dom.panel.querySelector('[data-testid="request-panel-total"]'); if (totalEl) totalEl.setAttribute('data-testid', 'request-panel-estimate');
+    // One page: the bar shows at every width, with the estimate, what needs attention (paintAttention) and the one button.
+    if (SINGLE) {
+      dom.bar.replaceChildren(el('div', { class: 'mobile-bar__info' }, el('div', { class: 'mobile-bar__total mono', 'data-testid': 'request-bar-estimate' }, model ? rangeText(model.total, model.xl) : 'Add a package'), el('div', { class: 'mobile-bar__meta', 'data-testid': 'request-bar-note' }, 'Estimate')),
+        el('button', { type: 'button', class: 'btn btn--brand', 'data-testid': 'request-bar-submit', disabled: submitting, on: { click: () => submit() } }, 'Create order'));
+      paintAttention();
+      return;
+    }
     dom.bar.replaceChildren(el('div', { class: 'mobile-bar__info' }, el('div', { class: 'mobile-bar__total mono', 'data-testid': 'request-bar-estimate' }, model ? rangeText(model.total, model.xl) : 'Add a package'), el('div', { class: 'mobile-bar__meta' }, 'Estimate · Step ' + stepOf().at + ' of ' + stepOf().of)),
       step < 6 ? el('button', { type: 'button', class: 'btn btn--primary', on: { click: advance } }, 'Continue') : el('button', { type: 'submit', form: 'request-form', class: 'btn btn--brand' }, OFFICE ? 'Create' : 'Send'));
   }
@@ -1491,14 +1614,23 @@
       book.splice(0, book.length, ...(saved.addresses || []));
     }
   }
-  async function submit(e) {
-    e.preventDefault();
-    if (submitting || step !== 6 || isBusiness()) return;
-    const bad = firstInvalid(7);
-    if (bad < 7) { go(bad); setTimeout(() => showErrors(bad), 0); return; }
+  async function submit() {
+    if (submitting || (!SINGLE && step !== 6) || isBusiness()) return;
+    if (SINGLE) {
+      // The number may have been typed a moment ago: find the customer first, so the checks run on their record (the terms tick,
+      // their saved addresses) and no lookup lands while the order is being created. Then every problem is marked at once.
+      submitting = true;
+      await lookupCustomer(draft.customer.phone).catch(() => {});
+      submitting = false; sendError = '';
+      if (!showAllErrors()) return;
+    } else {
+      const bad = firstInvalid(7);
+      if (bad < 7) { go(bad); setTimeout(() => showErrors(bad), 0); return; }
+    }
     submitting = true;
     const btn = dom.steps[6].querySelector('[data-testid="request-submit"]'); MDM.ui.setLoading(btn, true);
     const errEl = dom.steps[6].querySelector('[data-testid="request-error"]');
+    if (SINGLE) updateSummary();   // the bar's button waits too
     try {
       if (OFFICE && !officeSession()) throw new Error('Your office sign-in has ended. Sign in again, then send this order.');
       const cust = draft.customer, t = draft.type;
@@ -1536,7 +1668,10 @@
       location.href = OFFICE ? MDM.href('admin/#/orders/' + encodeURIComponent(order.id)) : MDM.href('track/?order=' + encodeURIComponent(order.id) + '&new=1');
     } catch (err) {
       submitting = false; MDM.ui.setLoading(btn, false);
-      errEl.textContent = err && err.code === 'quota' ? 'This browser is out of storage for the demo. Remove a photo and try again.' : (err && err.message) || 'Could not send your request. Try again.';
+      const why = err && err.code === 'quota' ? 'This browser is out of storage for the demo. Remove a photo and try again.' : (err && err.message) || 'Could not send your request. Try again.';
+      // One page: the line by both buttons says it (the section may have been redrawn since), and the bar's button works again.
+      if (SINGLE) { sendError = why; updateSummary(); reveal(dom.steps[6].querySelector('[data-testid="request-error"]')); return; }
+      errEl.textContent = why;
       errEl.hidden = false;
     }
   }
@@ -1555,30 +1690,40 @@
       if (!e.target || !e.target.checked) return;
       draft.source = e.target.value;
       const nf = notifyFromSource(draft.source);
-      if (nf && draft.customer.notify !== nf) { draft.customer.notify = nf; if (step === 5) rerender(5); }
+      if (nf && draft.customer.notify !== nf) { draft.customer.notify = nf; if (SINGLE || step === 5) rerender(5); }
       saveDraft();
     });
-    officeEls.phone.addEventListener('input', () => { draft.customer.phone = officeEls.phone.value; saveDraft(); syncStep5(); lookupSoon(); });
-    officeEls.name.addEventListener('input', () => { draft.customer.name = officeEls.name.value; saveDraft(); syncStep5(); });
     const phoneField = MDM.ui.field({ name: 'office.phone', control: officeEls.phone, label: "Customer's mobile" });
+    const nameField = MDM.ui.field({ name: 'office.name', control: officeEls.name, label: 'Name' });
+    // Typing in a marked field takes its mark off, as in the form (the status line under the mobile stays hidden while it is empty).
+    const unmark = wrap => { if (!wrap.classList.contains('is-invalid')) return; setError(wrap, null); officeEls.status.hidden = !officeEls.status.textContent; paintAttention(); };
+    officeEls.phone.addEventListener('input', () => { draft.customer.phone = officeEls.phone.value; unmark(phoneField); saveDraft(); syncStep5(); lookupSoon(); });
+    officeEls.name.addEventListener('input', () => { draft.customer.name = officeEls.name.value; unmark(nameField); saveDraft(); syncStep5(); });
     phoneField.insertBefore(officeEls.status, phoneField.querySelector('.field__error'));
+    // One page: these two are the only name and mobile on the page (section 5 has none), so Create checks them here, first of all.
+    if (SINGLE) {
+      reg(0, phoneField, () => { const v = trim(draft.customer.phone); return !v ? "Fill in the customer's mobile" : phone.valid(v, { intl: true }) ? null : 'Enter a 7-digit Maldives number, or + and the country code'; }, () => officeEls.phone);
+      reg(0, nameField, () => (trim(draft.customer.name) ? null : "Fill in the customer's name"), () => officeEls.name);
+    }
+    // "Clear form" on one page ("Start over" with the six steps): the same button, it empties the draft and loads the form again.
+    const resetWord = SINGLE ? 'Clear form' : 'Start over';
     const reset = el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'office-reset', on: { click: async () => {
-      if (!(await MDM.ui.confirm({ title: 'Start over?', message: 'This clears the order form.', okLabel: 'Start over' }))) return;
+      if (!(await MDM.ui.confirm(SINGLE ? { title: 'Clear the form?', message: 'Everything typed for this order is removed.', okLabel: resetWord } : { title: 'Start over?', message: 'This clears the order form.', okLabel: 'Start over' }))) return;
       clearDraft(); location.replace(location.pathname + location.search);
-    } } }, 'Start over');
+    } } }, resetWord);
     head.classList.add('request-office');
     head.replaceChildren(
       el('a', { class: 'request-office__back', href: MDM.href('admin/#/orders'), 'data-testid': 'office-back' }, html(MDM.icon('chevron-left', 16)), 'Back to orders'),
       el('div', { class: 'request-office__title' }, el('h1', null, 'New order'), reset),
       el('div', { class: 'request-office__bar', 'data-testid': 'office-bar' },
-        phoneField, MDM.ui.field({ name: 'office.name', control: officeEls.name, label: 'Name' }), MDM.ui.field({ name: 'office.source', control: source, label: 'Order received by' })));
+        phoneField, nameField, MDM.ui.field({ name: 'office.source', control: source, label: 'Order received by' })));
   }
   // Copy the draft's name and mobile into whichever of the two places is not being typed in.
   function syncOfficeBar() {
     [['phone', draft.customer.phone], ['name', draft.customer.name]].forEach(([k, v]) => { const c = officeEls[k]; if (c && document.activeElement !== c && c.value !== (v || '')) c.value = v || ''; });
   }
   function syncStep5() {
-    if (step !== 5 || !dom.steps[5]) return;
+    if (SINGLE || step !== 5 || !dom.steps[5]) return;   // one page: section 5 has no name or mobile of its own
     [['request-phone', draft.customer.phone], ['request-name', draft.customer.name]].forEach(([id, v]) => { const c = dom.steps[5].querySelector('[data-testid="' + id + '"]'); if (c && document.activeElement !== c) c.value = v || ''; });
   }
   function paintOfficeStatus(norm) {
@@ -1614,12 +1759,27 @@
     draft.reorderFrom = null;
     saveDraft();
     syncOfficeBar();
-    rerender(step); renderStepper(); renderNotice(); updateSummary();
+    // One page: this customer's saved addresses, "Order again", recent boats and terms tick show in four sections at once.
+    if (SINGLE) renderAll(); else rerender(step);
+    renderStepper(); renderNotice(); updateSummary();
   }
   const lookupSoon = MDM.ui.debounce(() => { lookupCustomer(draft.customer.phone).catch(() => {}); }, 250);
 
   // ---- Boot -------------------------------------------------------------------------------------------------------------------------
+  // One page, from 1100 px wide: two columns that each flow on their own (page.css), so a long Collection leaves no gap beside it.
+  // The sections move into two wrappers for that (left Service, Collection, Updates; right Packages, Delivery, Price and payment);
+  // below 1100 px they sit in the form in page order, which is also the order Tab follows.
+  function layColumns(wide) {
+    const a = document.activeElement, held = a && dom.form.contains(a) ? a : null;
+    if (wide) { dom.cols[0].append(dom.steps[1], dom.steps[2], dom.steps[5]); dom.cols[1].append(dom.steps[3], dom.steps[4], dom.steps[6]); dom.form.append(dom.cols[0], dom.cols[1]); }
+    else { for (let n = 1; n <= 6; n++) dom.form.append(dom.steps[n]); dom.cols.forEach(c => c.remove()); }
+    if (held && document.activeElement !== held) held.focus({ preventScroll: true });
+  }
   async function main() {
+    const q = new URLSearchParams(location.search);
+    // "New order" on the office board opens request/?office=1&new=1: an empty form, not the times and addresses of an order left
+    // half typed in this tab earlier. The flag works once and is taken off the address, so a reload keeps what is being typed.
+    if (OFFICE && q.get('new') === '1') { clearDraft(); q.delete('new'); history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash); }
     // Office mode needs an office sign-in; anyone else is sent to it and comes back here.
     if (OFFICE && !officeSession()) { location.replace(MDM.href('login/?as=admin&next=' + encodeURIComponent('request/?office=1'))); return; }
     await MDM.store.ready;
@@ -1650,7 +1810,14 @@
       buildOfficeBar();
       if (trim(draft.customer.phone)) await lookupCustomer(draft.customer.phone, { boot: true });
     }
-    const q = new URLSearchParams(location.search);
+    if (SINGLE) {
+      document.body.classList.add('is-onepage');
+      if (location.hash) history.replaceState(null, '', location.pathname + location.search);   // an old #step-3 means nothing here
+      dom.cols =[el('div', { class: 'request-col' }), el('div', { class: 'request-col' })];
+      const mq = window.matchMedia('(min-width: 1100px)'), lay = () => layColumns(mq.matches);
+      if (mq.addEventListener) mq.addEventListener('change', lay); else if (mq.addListener) mq.addListener(lay);
+      lay();
+    }
     const cat = q.get('category'), t = q.get('type'), reorderId = q.get('reorder');
     if (cat || t) draft.reorderFrom = null;   // a fresh link starts a fresh request, not the one filled from an old order
     if (cat && MDM.SERVICE_CATEGORIES.some(c => c.value === cat)) chooseCategory(cat);
@@ -1666,8 +1833,9 @@
       applyDictated();
     }
     saveDraft();
-    dom.form.addEventListener('submit', submit);
-    window.addEventListener('hashchange', () => setStep(stepFromHash() || 1));
+    // One page: the form itself is never submitted (Enter in a field does nothing); the two Create buttons call submit().
+    dom.form.addEventListener('submit', e => { e.preventDefault(); if (!SINGLE) submit(); });
+    window.addEventListener('hashchange', () => { if (!SINGLE) setStep(stepFromHash() || 1); });
     MDM.store.subscribe('settings', async () => { settings = await MDM.store.settings(); updateSummary(); });
     if (reorderId) {
       const order = (await MDM.store.get('orders', reorderId)) || (await MDM.store.orderByCode(reorderId));
