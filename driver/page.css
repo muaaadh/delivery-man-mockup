@@ -116,6 +116,10 @@ body.page-driver .job--hero .job__code { font-size: 20px; }
 body.page-driver .job__tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 body.page-driver .tag--hot { color: var(--brand); border-color: var(--brand); font-weight: 500; }
 body.page-driver .tag--cash { color: var(--warn); border-color: var(--warn); font-weight: 500; }
+/* The time that matters now (client, 25/11/2026: "Need highlight for this part, not noticeable enough"): filled and bold, solid red once
+   it has passed. */
+body.page-driver .tag--due { height: 28px; padding: 0 10px; font-size: 13px; font-weight: 600; color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+body.page-driver .tag--due.tag--hot { color: var(--on-red); background: var(--red); border-color: var(--red); }
 body.page-driver .job__meta { font-size: 13px; line-height: 1.4; color: var(--text-2); margin-top: 6px; overflow-wrap: anywhere; }
 body.page-driver .job .card__body + .card__body { border-top-color: var(--border); }
 body.page-driver .job__top + .job__stops { border-top: 0; padding-top: 0; }
@@ -257,4 +261,3 @@ body.page-driver .driver-cash-warn { margin-top: 6px; font-size: 13px; line-heig
 }
 html[data-theme="dark"] body.page-driver .driver-duty .segmented { background: var(--card); }
 
-body.page-driver .driver-scan { margin-bottom: 16px; }

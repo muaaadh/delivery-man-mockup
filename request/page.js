@@ -875,7 +875,9 @@
             F(n, 'details.courierZone', 'Area', { type: 'select', required: true, options: zoneOptions(), testid: 'request-courier-zone', onChange: dictate })));
         out.push(grid(tracking(), F(n, 'details.ownerName', 'Owner name', { required: true })), F(n, 'details.ownerContact', 'Owner contact number', { type: 'tel', required: true, intl: true }));
       }
-      if (c === 'dhl') out.push(tracking('Waybill or tracking number'), docField(n, 'collection_doc', 'DHL collection document', { required: true, hint: 'The authorisation DHL asks for' }));
+      // DHL: the waybill only. The collection document it asked for went on 25/11/2026 (client: "Need to remove DHL collection document
+      // part"); orders that have one still show it.
+      if (c === 'dhl') out.push(tracking('Waybill or tracking number'));
     }
     if (t === 'shop_collect') {
       out.push(F(n, 'details.shopName', 'Shop or godown', { required: true, placeholder: 'For example Agora Mall, electronics counter', testid: 'request-shop-name', onChange: dictate }),
@@ -1297,7 +1299,7 @@
   function relevantDoc(kind) {
     const t = draft.type, d = draft.details;
     if (isShop()) return false;
-    if (t === 'postal') return d.carrier === 'dhl' && kind === 'collection_doc';
+    if (t === 'postal') return false;
     if (t === 'shop_collect') return d.proof === 'quotation' ? kind === 'quotation' || kind === 'payment_slip' : kind === 'invoice';
     if (t === 'office') return kind === 'document';
     return false;

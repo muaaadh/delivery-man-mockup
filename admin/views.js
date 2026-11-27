@@ -775,6 +775,7 @@
         { label: 'Status', primary: true, render: r => badge(REQUEST_STATUS, r.status) },
         { label: 'Actions', actions: true, render: r => r.status !== 'pending' ? el('span', { class: 'table__sub' }, r.status === 'declined' && r.declineReason ? r.declineReason : '') : el('div', { class: 'table__actions-row actions-stack' },
           el('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-testid': 'business-approve', on: { click: () => approve(r, files) } }, 'Approve'),
+          el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'business-link', on: { click: () => link(r, files) } }, 'Link'),
           el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'business-decline', on: { click: () => decline(r) } }, 'Decline')) },
       ];
       return card(null, table(cols, sorted.map(r => ({ data: r, attrs: { 'data-testid': 'business-request-row', 'data-request-id': r.id, 'data-status': r.status } })), { testid: 'business-requests' }));
@@ -793,20 +794,62 @@
       ];
       return card(null, table(cols, accounts.map(a => ({ data: a, attrs: { class: 'is-clickable', 'data-testid': 'business-account-row', 'data-account-id': a.id, 'data-status': a.status, on: { click: e => { if (e.target.closest('a, button')) return; navigate('#/business/' + a.id); } } } })), { testid: 'business-accounts' }));
     }
+    // A request from a business that already has an account (client, 25/11/2026: linking kept the account but left the request's photos
+    // and collection address behind, and a business that applied with another number got a second, empty account). Link: choose the
+    // account (the ones with the same number, landline, email or name first); its orders, rates and invoices stay, and it takes the
+    // request's package photos and collection address (store.linkBusinessRequest). opts.offerNew: Approve's own "Open a new account".
+    // → 'linked' | 'new' | null.
+    async function link(r, files, opts) {
+      opts = opts || {};
+      try {
+        const accounts = (await MDM.store.list('business_accounts')).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        if (!accounts.length) { toast('There is no business account to link to yet', 'warn'); return null; }
+        const likely = MDM.sameBusiness(r, accounts), strict = MDM.sameBusiness(r, accounts, true);
+        const label = a => [a.name, phone.format(a.phone), a.email || ''].filter(Boolean).join(' · ');
+        // Nothing alike: the office picks the account on purpose, nothing is chosen for it.
+        const options = (likely.length ? [] : [{ value: '', label: 'Choose the business account' }])
+          .concat(likely.map(a => ({ value: a.id, label: label(a) + ' (same ' + sameWhat(r, a) + ')' })))
+          .concat(accounts.filter(a => likely.indexOf(a) < 0).map(a => ({ value: a.id, label: label(a) })));
+        const pick = select('accountId', options[0].value, options, { 'data-testid': 'link-account' });
+        const email = String(r.email || '').trim().toLowerCase();
+        const useEmail = checkbox('useEmail', false, 'Sign in with ' + email, 'Instead of the email on the account');
+        const emailNote = el('p', { class: 'muted small', 'data-testid': 'link-email-note' });
+        const showEmail = () => {
+          const a = accounts.find(x => x.id === pick.value) || {}, cur = String(a.email || '').trim().toLowerCase();
+          useEmail.hidden = !a.id || !email || !cur || cur === email;
+          emailNote.textContent = !a.id || !email ? '' : !cur ? 'The account has no email: it will sign in with ' + email + '.' : cur === email ? 'The account already signs in with ' + email + '.' : 'The account signs in with ' + cur + '.';
+        };
+        pick.addEventListener('change', showEmail); showEmail();
+        let wantsNew = false;
+        const content = [
+          el('p', { class: 'muted small' }, [r.name, phone.format(r.phone), email].filter(Boolean).join(' · ')),
+          photoStrip(r, files, { testid: 'link-photos', photoTestid: 'link-photo' }),
+          field('Business account', pick),
+          el('p', { class: 'muted small' }, 'Its orders, rates and invoices stay as they are. The request\'s package photos' + (r.pickupAddress ? ' and collection address (' + r.pickupAddress + ')' : '') + ' are added to it.'),
+          emailNote, useEmail,
+          opts.offerNew && !strict.length ? el('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-testid': 'link-new-instead',
+            on: { click: e => { wantsNew = true; e.currentTarget.closest('dialog').close(''); } } }, 'Open a new account instead') : null,
+        ];
+        let saved = null;
+        const ok = await formDialog({ title: 'Link ' + r.name + ' to an account', content, wide: true, okLabel: 'Approve and link', testid: 'link-dialog',
+          onOk: async () => { if (!pick.value) { toast('Choose the business account', 'warn'); return false; } saved = await MDM.store.linkBusinessRequest(r.id, pick.value, { useEmail: !useEmail.hidden && useEmail.querySelector('input').checked, by: actor() }); return true; } });
+        if (wantsNew) return 'new';
+        if (ok && saved) { toast('Request approved and linked to ' + saved.name); return 'linked'; }
+        return null;
+      } catch (e) { toast(storeMessage(e), 'danger'); return null; }
+    }
+    function sameWhat(r, a) {
+      const low = s => String(s || '').trim().toLowerCase();
+      return r.phone && (a.phone === r.phone || a.landline === r.phone) ? 'number' : r.email && low(a.email) === low(r.email) ? 'email'
+        : r.landline && (a.phone === r.landline || a.landline === r.landline) ? 'landline' : 'name';
+    }
     // §1.3: look at the package photos, pick the size categories the business sends and agree a fixed rate for each. The business no
     // longer picks a size (24/10/2026), so every size starts ticked at its default rate; untick the ones they do not send.
     async function approve(r, files) {
       try {
         const [settings, accounts] = await Promise.all([MDM.store.settings(), MDM.store.list('business_accounts')]);
-        const existing = accounts.find(a => a.phone === r.phone);
-        if (existing) {
-          const ok = await MDM.ui.confirm({ title: 'Link to ' + existing.name, message: phone.format(r.phone) + ' already has this account. Approving links the request and keeps its rates.', okLabel: 'Approve and link' });
-          if (!ok) return;
-          await MDM.store.update('business_requests', r.id, { status: 'approved', accountId: existing.id, decidedAt: nowIso(), decidedBy: actor() });
-          await MDM.store.audit('business_approved', 'Business request from ' + r.name + ' linked to ' + existing.name, actor(), { accountId: existing.id });
-          toast('Request approved and linked to ' + existing.name);
-          return;
-        }
+        // The business may already have an account: link to it first (a new account would leave its orders on the old one).
+        if (MDM.sameBusiness(r, accounts).length && (await link(r, files, { offerNew: true })) !== 'new') return;
         const tiers = MDM.pricing.businessTiers(settings);
         const editor = tierEditor(tiers, { picked: () => true, rate: t => t.rate });
         const notes = textarea('assessment', '', { rows: 2, placeholder: 'Cake boxes about 1 ft, fragile', 'data-testid': 'approve-assessment' });

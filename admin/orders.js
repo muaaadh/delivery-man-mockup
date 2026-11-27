@@ -483,7 +483,8 @@
         el('div', { class: 'list__aside mono' }, '× ' + (i.qty || 1)))))) : null;
     const storeItems = o.items && o.items.length ? el('div', { class: 'list' }, o.items.map(i => el('div', { class: 'list__item' }, el('div', { class: 'list__main' }, el('div', { class: 'list__title' }, i.qty + ' × ' + i.name)), el('div', { class: 'list__aside mono' }, money(i.total))))) : null;
     if (!rows.filter(Boolean).length && !shopItems && !storeItems) return null;
-    const edit = o.requestType === 'postal' && open(o) ? el('div', { class: 'row row--wrap' }, smallBtn('Edit collection details', 'drawer-edit-postal', () => editPostal(o), 'btn--secondary')) : null;
+    const edit = o.requestType === 'postal' && open(o) ? el('div', { class: 'row row--wrap' }, smallBtn('Edit collection details', 'drawer-edit-postal', () => editPostal(o), 'btn--secondary'))
+      : o.requestType === 'boat_collect' && open(o) ? el('div', { class: 'row row--wrap' }, smallBtn('Edit boat details', 'drawer-edit-boat', () => editBoat(o), 'btn--secondary')) : null;
     return sec(F.typeLabel(o) + ' details', 'drawer-details', rows.filter(Boolean).length ? el('div', { class: 'rate-table' }, rows) : null, shopItems, storeItems, edit);
   }
   // Postal and courier details the office corrects (client, 01/11/2026): the carrier's own fields, as the request form asks them. A new
@@ -528,6 +529,49 @@
     if (po && v.postOffice !== d.postOffice) patch.collection = { address: po.label, zone: po.zone };
     const upd = await MDM.store.modifyOrder(o.id, patch, by());
     toast((upd.changes || []).length > (o.changes || []).length ? 'Collection details saved' : 'Nothing changed', 'ok');
+  }
+  // Boat collection details the office corrects (client, 25/11/2026: "this boat was supposed to arrive to North Harbour in Malé but it
+  // went to Hulhumalé"; the zone could be changed, not the jetty). A new jetty or boat name moves the collection there, as the request
+  // form sets it (the jetty and the boat's name, in the jetty's area); store.modifyOrder keeps the packages and the stops still to do in
+  // step and records each change with who made it.
+  const BOAT_EDIT = ['vesselType', 'boatName', 'jetty', 'arrivalDate', 'arrivalTime', 'senderName', 'senderPhone', 'fromIsland'];
+  async function editBoat(o) {
+    o = await fresh(o);
+    const d = o.details || {}, c = o.collection || {};
+    const jetties = MDM.geo.jetties();
+    const v = await dialog({ title: 'Boat details · ' + o.code, message: 'Changes are recorded with your name. A new jetty moves the collection there.', okLabel: 'Save details', testid: 'boat-edit',
+      fields: [
+        { name: 'vesselType', label: 'Arriving on', type: 'select', options: MDM.VESSEL_TYPES.map(x => ({ value: x.value, label: x.label })), value: d.vesselType || '' },
+        { name: 'boatName', label: 'Boat, ferry or speedboat name', required: true, value: d.boatName || '' },
+        { name: 'jetty', label: 'Arriving at', type: 'select', required: true, placeholder: 'Choose the harbour or jetty', options: jetties.map(j => ({ value: j.value, label: j.label })), value: d.jetty || '' },
+        { name: 'arrivalDate', label: 'Arrival date', type: 'date', value: d.arrivalDate || '' },
+        { name: 'arrivalTime', label: 'Arrival time', type: 'time', value: d.arrivalTime || '', hint: 'Leave empty if not known yet' },
+        { name: 'senderName', label: 'Who hands it over', value: d.senderName || '' },
+        { name: 'senderPhone', label: 'Their number', type: 'tel', intl: true, value: d.senderPhone || '' },
+        { name: 'fromIsland', label: 'Coming from', value: d.fromIsland || '' },
+      ] });
+    if (!v) return;
+    const details = {};
+    BOAT_EDIT.forEach(k => {
+      const next = k === 'senderPhone' ? (phone.normalize(v[k]) || trim(v[k])) : trim(v[k]);
+      if (next !== trim(d[k])) details[k] = next;
+    });
+    const patch = { details };
+    const boat = trim(v.boatName), j = jetties.find(x => x.value === v.jetty);
+    // The collection place follows the jetty and the boat's name; its contact follows the person handing it over when it was theirs.
+    const placeOf = (jt, name) => (jt.unsure ? 'Jetty to be confirmed' : jt.label) + (name ? ', ' + name : '');
+    const oldJetty = jetties.find(x => x.value === d.jetty);
+    if (j && (v.jetty !== d.jetty || boat !== trim(d.boatName))) {
+      patch.collection = { address: placeOf(j, boat), zone: j.zone };
+      // An address someone typed over the jetty (neither the jetty's place nor empty) is kept apart from the jetty's own.
+      if (c.address && oldJetty && c.address !== placeOf(oldJetty, trim(d.boatName)) && v.jetty === d.jetty) delete patch.collection.address;
+    }
+    const contactWas = trim(d.senderName) || trim(d.boatName) || 'Boat crew', contactNow = trim(v.senderName) || boat || 'Boat crew';
+    if (contactNow !== contactWas && (!c.contactName || c.contactName === contactWas)) patch.collection = Object.assign({}, patch.collection, { contactName: contactNow });
+    if ('senderPhone' in details && details.senderPhone && (!c.contactPhone || c.contactPhone === trim(d.senderPhone))) patch.collection = Object.assign({}, patch.collection, { contactPhone: details.senderPhone });
+    const upd = await MDM.store.modifyOrder(o.id, patch, by());
+    const islandMoved = patch.collection && patch.collection.zone && MDM.geo.island(patch.collection.zone) !== MDM.geo.island(c.zone);
+    toast((upd.changes || []).length > (o.changes || []).length ? 'Boat details saved' + (islandMoved ? '. The collection is now in ' + MDM.geo.zoneLabel(patch.collection.zone) + ': check the price' : '') : 'Nothing changed', 'ok');
   }
   // Where the package is handed over: a home address, or the jetty / cargo counter / airport point of the delivery method (§3).
   function deliverToBlock(o) {
@@ -1291,6 +1335,9 @@
   }
   // The live service's link carries the order's secret (MDM.remote.trackLink), so the customer opens it on any phone without signing in.
   function trackUrl(o) { return MDM.remote && MDM.remote.trackLink ? MDM.remote.trackLink(o) : o.trackToken ? MDM.href('track/?code=' + encodeURIComponent(o.code) + '&t=' + o.trackToken) : MDM.href('track/?order=' + encodeURIComponent(o.id)); }
+  // A payment that is due links straight to the payment page, with the same secret, where the slip is uploaded (client, 25/11/2026:
+  // "Pay and upload the slip" instead of "Pay and track"). The page links back to the tracking page.
+  function payUrl(o) { return trackUrl(o).replace('/track/?', '/checkout/?'); }
   // A delivered order still to be paid says what is due, so Send update also works as a payment reminder.
   // The first message about an order carries its tracking link and what the link is for; the ones after it are the order number and
   // the update only (client, 20/11/2026). A payment that is due always has the link: that is where it is paid.
@@ -1306,14 +1353,14 @@
   function statusMessage(o) {
     const due = o.status === 'delivered' && o.payment && o.payment.method !== 'invoice' && o.payment.status === 'requested';
     const head = 'Mr. Delivery Man, order ' + o.code + ': ' + statusWords(o) + '.';
-    if (due) return head + ' Amount due ' + money(o.totals.total) + '. Pay and track it here: ' + trackUrl(o);
+    if (due) return head + ' Amount due ' + money(o.totals.total) + '. Pay and upload the slip here: ' + payUrl(o);
     if (updateSent(o)) return head;
     return head + ' Track it here: ' + trackUrl(o) + '\n\n' + FIRST_UPDATE_LINES.join('\n\n');
   }
   // The payment request (client, 01/11/2026: "Request payment" sent nothing): the amount and the tracking link, where the customer pays
   // without signing in.
   function paymentMessage(o) {
-    return 'Mr. Delivery Man, order ' + o.code + ': payment of ' + money(o.totals.total) + ' is due. Pay by bank transfer and send the slip here: ' + trackUrl(o);
+    return 'Mr. Delivery Man, order ' + o.code + ': payment of ' + money(o.totals.total) + ' is due. Pay by bank transfer and upload the slip here: ' + payUrl(o);
   }
   // Send a message (client, 01/11/2026: Viber did not open): the text, then WhatsApp, Viber and SMS as buttons the operator taps, the
   // customer's own channel first. A real tap is what lets the browser open the app. Viber does not always take the text from its link,

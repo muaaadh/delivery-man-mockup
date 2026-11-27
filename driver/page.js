@@ -22,7 +22,7 @@
     duty: q('[data-testid="driver-duty"]'), name: q('[data-testid="driver-name"]'), dutyStatus: q('[data-testid="driver-duty-status"]'),
     punch: q('[data-testid="driver-punch"]'), zones: q('[data-testid="driver-zones"]'),
     online: q('[data-testid="driver-online"]'), status: q('[data-testid="driver-status"]'),
-    simulate: q('[data-testid="driver-simulate"]'), gps: q('[data-testid="driver-gps"]'),
+    simulate: q('[data-testid="driver-simulate"]'), gps: q('[data-testid="driver-gps"]'), scan: q('[data-testid="driver-scan"]'),
     gpsNote: q('[data-testid="driver-gps-note"]'), gpsAlert: q('[data-testid="driver-gps-alert"]'),
     leave: q('[data-testid="driver-leave"]'), leaveSection: q('[data-testid="driver-leave-section"]'), leaveCount: q('[data-testid="driver-leave-count"]'),
     leaveBalance: q('[data-testid="driver-leave-balance"]'), leaveFormSlot: q('[data-slot="leave-form"]'),
@@ -160,7 +160,7 @@
     const t = MDM.nextTime(o);
     if (!t || !t.time) return null;
     const late = MDM.timeAt(t) < Date.now();
-    return el('span', { class: 'tag' + (late ? ' tag--hot' : ''), 'data-testid': 'driver-due', 'data-late': late ? 'true' : null }, icon('clock', 12), (t.kind === 'deliver' ? 'Deliver by ' : 'Collect ') + MDM.ui.timeText(t));
+    return el('span', { class: 'tag tag--due' + (late ? ' tag--hot' : ''), 'data-testid': 'driver-due', 'data-late': late ? 'true' : null }, icon('clock', 14), (t.kind === 'deliver' ? 'Deliver by ' : 'Collect ') + MDM.ui.timeText(t));
   }
   // Several collections or deliveries on one job (client, 12/11/2026 evening: a second stop is hard to spot in a rush). A purple tag
   // says how many, every stop is listed in the order to do them with the one to go to now marked, the stop being worked on says
@@ -616,8 +616,6 @@
     if (!active.length && !waiting.length && !returns.length && !state.upcoming.length && !collections.length) {
       parts.push(el('div', { class: 'empty driver-empty', 'data-testid': 'driver-empty' }, el('div', { class: 'empty__title' }, 'No jobs right now'), el('div', { class: 'empty__hint' }, 'New jobs appear here.')));
     }
-    // Scan a label (client, 20/11/2026): straight to that package's job, and to its "Delivered" step when it is out for delivery.
-    if (state.driver) parts.push(el('div', { class: 'driver-scan' }, el('button', { type: 'button', class: 'btn btn--secondary btn--block', 'data-testid': 'driver-scan', on: { click: () => onScan().catch(e => fail(e, 'Could not open the scanner')) } }, icon('camera', 16), 'Scan a label')));
     if (collections.length) parts.push(group('Bulk collections', 'Collect from the business and tick each package off.', el('div', { class: 'jobs-list' }, collections.map(collectionCard)), 'driver-collections'));
     if (returns.length) parts.push(group('Returns', 'Bring each package back to the sender.', el('div', { class: 'jobs-list' }, returns.map(returnCard)), 'driver-returns'));
     // The first active job (priority first, then oldest) is the one to work on now; the rest follow under Next.
@@ -911,6 +909,9 @@
     ui.simulate.textContent = state.sim ? 'Stop simulation' : 'Simulate route';
     ui.gps.disabled = !has || !state.online || !window.isSecureContext;
     ui.gps.textContent = state.gpsOn ? 'Stop GPS' : 'Use my GPS';
+    // Scan a label (client, 20/11/2026: straight to that package's job, and to its "Delivered" step when it is out for delivery) sits
+    // beside "Use my GPS" at the top since 25/11/2026, the first thing on the page after a refresh; it was above the jobs.
+    ui.scan.hidden = !has;
     ui.gpsNote.hidden = !!window.isSecureContext;
   }
   function statusText() {
@@ -1501,6 +1502,8 @@
     ui.online.addEventListener('change', e => { if (e.target && e.target.name === 'online') setOnline(e.target.value === 'online').catch(err => fail(err, 'Could not change your status')); });
     ui.simulate.addEventListener('click', () => { toggleSimulate().catch(e => fail(e, 'Could not start the simulation')); });
     ui.gps.addEventListener('click', toggleGps);
+    ui.scan.replaceChildren(icon('camera', 16), 'Scan a label');
+    ui.scan.addEventListener('click', () => { onScan().catch(e => fail(e, 'Could not open the scanner')); });
     ui.recenter.addEventListener('click', fitMap);
     ui.punch.addEventListener('click', () => { onPunch().catch(e => fail(e, 'Could not update your duty')); });
     buildLeaveForm();

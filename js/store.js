@@ -2728,7 +2728,7 @@
   function saveCollectionPoint(accountId, pt) {
     const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
     if (!pt || !String(pt.address || '').trim()) throw new StoreError('validation', 'Enter the collection address');
-    const list = (acc.collectionPoints || []).slice();
+    const list = (acc.collectionPoints || []).map(x => Object.assign({}, x));   // copies: the saved points are never changed in place
     const rec = { id: pt.id || MDM.id('cpt'), label: String(pt.label || 'Collection point').trim(), address: String(pt.address).trim(), zone: pt.zone || acc.zone || 'male', landmark: pt.landmark || '', contactName: pt.contactName || acc.contactName || '', contactPhone: pt.contactPhone || acc.phone || '', preferredTime: pt.preferredTime || '', isDefault: !!pt.isDefault };
     if (rec.isDefault) list.forEach(x => { x.isDefault = false; });
     const i = list.findIndex(x => x.id === rec.id);
@@ -2738,7 +2738,7 @@
   }
   function removeCollectionPoint(accountId, id) {
     const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
-    const list = (acc.collectionPoints || []).filter(x => x.id !== id);
+    const list = (acc.collectionPoints || []).filter(x => x.id !== id).map(x => Object.assign({}, x));
     if (list.length && !list.some(x => x.isDefault)) list[0].isDefault = true;
     return update('business_accounts', accountId, { collectionPoints: list });
   }
@@ -2755,9 +2755,14 @@
   function approveBusinessRequest(requestId, p) {
     p = p || {};
     const req = readCol('business_requests').find(r => r.id === requestId); if (!req) throw new StoreError('not_found', 'Request not found');
+    if (req.status === 'approved') throw new StoreError('validation', 'This request is already approved');
     const rates = {}; Object.keys(p.rates || {}).forEach(k => { const v = Math.round(Number(p.rates[k])); if (v > 0) rates[k] = v; });
     if (!Object.keys(rates).length) throw new StoreError('validation', 'Agree a rate for at least one package size');
     const tiers = MDM.pricing.businessTiers(settings()).map(t => t.value).filter(k => rates[k] != null);
+    // A business that already has an account is linked to it (linkBusinessRequest), never given a second one: until 25/11/2026 an
+    // existing business that sent a request could get a new, empty account, and signing in then showed that one ("records reset").
+    const taken = MDM.sameBusiness(req, readCol('business_accounts'), true)[0];
+    if (taken) throw new StoreError('validation', taken.name + ' already has this ' + (taken.phone === req.phone || taken.landline === req.phone ? 'number' : 'email') + '. Link the request to it instead.');
     const photos = MDM.requestPhotos(req);
     const acc = insert('business_accounts', { name: req.name, contactName: req.contactName, phone: req.phone, landline: req.landline || '', email: req.email || '', tin: req.tin || '', zone: req.zone, pickupAddress: req.pickupAddress, pickupWindow: req.pickupWindow || '',
       pickupFrom: req.pickupFrom || 'address', packagePhotos: photos,
@@ -2766,6 +2771,44 @@
     update('business_requests', requestId, { status: 'approved', accountId: acc.id, decidedAt: now(), decidedBy: p.by || 'admin', rates });
     audit('business_approved', 'Business account approved: ' + req.name + ' (' + tiers.map(k => k + ' ' + fmt(rates[k])).join(', ') + ')', p.by || 'admin', { accountId: acc.id });
     return acc;
+  }
+  // MDM.sameBusiness(request, accounts, strict) → the accounts that are this request's business: the same mobile number or email, and
+  // unless strict, also the same landline or name. The office's Approve suggests them; approving refuses the strict ones.
+  MDM.sameBusiness = function (req, accounts, strict) {
+    const low = s => String(s || '').trim().toLowerCase();
+    const ph = req && req.phone, land = req && req.landline, em = low(req && req.email), name = low(req && req.name);
+    return (accounts || []).filter(a => (ph && (a.phone === ph || a.landline === ph)) || (em && low(a.email) === em)
+      || (!strict && ((land && (a.phone === land || a.landline === land)) || (name && low(a.name) === name))));
+  };
+  // linkBusinessRequest(requestId, accountId, { useEmail, by }): a request from a business that already has an account (client,
+  // 25/11/2026: linking left the request's sample photos and collection address behind). The request is approved onto that account,
+  // which keeps its orders, rates, invoices and sign-in, and takes the request's package photos and, when it is new to the account,
+  // its collection address. The request's email becomes the account's when the account has none, or with useEmail (the business then
+  // signs in with it).
+  function linkBusinessRequest(requestId, accountId, p) {
+    p = p || {};
+    const req = readCol('business_requests').find(r => r.id === requestId); if (!req) throw new StoreError('not_found', 'Request not found');
+    if (req.status === 'approved') throw new StoreError('validation', 'This request is already approved');
+    const acc = readCol('business_accounts').find(a => a.id === accountId); if (!acc) throw new StoreError('not_found', 'Business account not found');
+    const by = p.by || 'admin', at = now(), low = s => String(s || '').trim().toLowerCase();
+    const had = MDM.requestPhotos(acc);
+    const added = MDM.requestPhotos(req).filter(x => !had.some(h => h.fileId === x.fileId)).map(x => ({ fileId: x.fileId, note: x.note || '', tier: x.tier || '', at, by }));
+    const photos = had.concat(added).slice(0, 30);
+    const points = (acc.collectionPoints || []).map(x => Object.assign({}, x));
+    const addr = String(req.pickupAddress || '').trim();
+    const newPoint = !!addr && !points.some(x => low(x.address) === low(addr));
+    if (newPoint) points.push({ id: MDM.id('cpt'), label: points.length ? 'From the request' : 'Main', address: addr, zone: req.zone || acc.zone || 'male', landmark: '',
+      contactName: req.contactName || acc.contactName || '', contactPhone: req.phone || acc.phone || '', preferredTime: '', isDefault: !points.length });
+    const patch = { packagePhotos: photos, packagePhotoId: acc.packagePhotoId || (photos[0] ? photos[0].fileId : null), collectionPoints: points };
+    const email = low(req.email);
+    if (email && email !== low(acc.email) && (!acc.email || p.useEmail)) patch.email = email;
+    if (!acc.landline && req.landline && req.landline !== acc.phone) patch.landline = req.landline;
+    if (!acc.pickupAddress && addr) patch.pickupAddress = addr;
+    const saved = update('business_accounts', accountId, patch);
+    update('business_requests', requestId, { status: 'approved', accountId, decidedAt: at, decidedBy: by });
+    const what = [added.length ? added.length + ' package photo' + (added.length > 1 ? 's' : '') : '', newPoint ? 'its collection address' : '', patch.email ? 'sign-in email ' + patch.email : ''].filter(Boolean);
+    audit('business_approved', 'Business request from ' + req.name + ' linked to ' + acc.name + (what.length ? ', with ' + what.join(', ') : ''), by, { accountId });
+    return saved;
   }
   // createBusinessAccount: the office opens an account directly, without a sign-up request (client, 01/11/2026). Signing in comes
   // later: whoever signs in with the account's email, or its mobile number, gets the account (app.link_user on the live service).
@@ -2885,7 +2928,7 @@
     addCharge: P(addCharge), setChargeBillable: P(setChargeBillable), voidCharge: P(voidCharge), reimburseCharges: P(reimburseCharges), addVehicleCharge: P(addVehicleCharge),
     updateBoat: P(updateBoat), businessCancel: P(businessCancel), markReturned: P(markReturned), cashHandover: P(cashHandover), remitCash: P(remitCash),
     offDayBalance: P(offDayBalance), saveAddress: P(saveAddress), removeAddress: P(removeAddress), saveCollectionPoint: P(saveCollectionPoint), removeCollectionPoint: P(removeCollectionPoint),
-    approveBusinessRequest: P(approveBusinessRequest), createBusinessAccount: P(createBusinessAccount), setBusinessRates: P(setBusinessRates), deliveryEndpoint: P(d => deliveryEndpoint(d)),
+    approveBusinessRequest: P(approveBusinessRequest), linkBusinessRequest: P(linkBusinessRequest), createBusinessAccount: P(createBusinessAccount), setBusinessRates: P(setBusinessRates), deliveryEndpoint: P(d => deliveryEndpoint(d)),
     buildStops: P(o => buildStops(clone(o))),
     // _list also returns deleted orders: the live service's js/remote.js matches and catches up the page's copy through it.
     _buildStops: buildStops, _batchStatus: batchStatus, _list: (col, q) => list(col, Object.assign({}, q, { deleted: 'all' })), _settings: settings, _offDayBalance: offDayBalance,   // synchronous, for seed.js, geo zones and reports
