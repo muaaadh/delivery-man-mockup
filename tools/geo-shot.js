@@ -1,7 +1,6 @@
 // Screenshot the corridor calibration page. Usage: node tools/geo-shot.js <outDir> [fit1,fit2,...]
 const path = require('path'); const fs = require('fs');
-module.paths.push('/Users/muadhhashim/.npm/_npx/6bcb61ec6d5aea22/node_modules');
-const { chromium } = require('playwright');
+const { chromium } = require('./playwright')();   // tools/playwright.js says where it is
 (async () => {
   const out = process.argv[2] || '/tmp/mdm-shots'; fs.mkdirSync(out, { recursive: true });
   const fits = (process.argv[3] || 'all,south,bridge,north').split(',');

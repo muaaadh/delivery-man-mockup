@@ -1,5 +1,4 @@
-module.paths.push('/Users/muadhhashim/.npm/_npx/6bcb61ec6d5aea22/node_modules');
-const { chromium } = require('playwright');
+const { chromium } = require('../playwright')();   // tools/playwright.js says where it is
 const assert = require('assert');
 (async () => {
   const browser = await chromium.launch();

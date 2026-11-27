@@ -1,5 +1,4 @@
-module.paths.push('/Users/muadhhashim/.npm/_npx/6bcb61ec6d5aea22/node_modules');
-const { chromium } = require('playwright');
+const { chromium } = require('../playwright')();   // tools/playwright.js says where it is
 (async () => {
   const b = await chromium.launch(); const page = await b.newPage({ viewport: { width: 390, height: 844 } });
   const errs = []; page.on('pageerror', e => errs.push(String(e))); page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });

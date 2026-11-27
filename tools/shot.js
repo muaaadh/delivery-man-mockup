@@ -1,10 +1,9 @@
-// Screenshot pages at desktop + phone widths with Playwright (cached under ~/.npm/_npx).
+// Screenshot pages at desktop + phone widths with Playwright (tools/playwright.js).
 // Usage: node tools/shot.js <outDir> <path>[,<path>...] [--widths=1280,390] [--full] [--base=http://localhost:4180]
 // Example: node tools/shot.js /tmp/shots /,/request/,/admin/#/orders --full
 const path = require('path');
 const fs = require('fs');
-module.paths.push('/Users/muadhhashim/.npm/_npx/6bcb61ec6d5aea22/node_modules');
-const { chromium } = require('playwright');
+const { chromium } = require('./playwright')();   // tools/playwright.js says where it is
 (async () => {
   const [outDir, list, ...flags] = process.argv.slice(2);
   const opt = Object.fromEntries(flags.map(f => { const [k, v] = f.replace(/^--/, '').split('='); return [k, v ?? true]; }));

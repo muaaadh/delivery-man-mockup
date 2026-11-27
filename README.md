@@ -71,7 +71,7 @@ All of it is editable in Admin → Rates and labelled as an assumption to confir
 ## Running locally
 
 ```
-node tools/serve.js 4180      # serves the parent folder, open http://localhost:4180/<repo-folder>/
+node tools/serve.js 4180      # serves the site folders in the parent folder to this computer (HOST=0.0.0.0 for a phone), open http://localhost:4180/<repo-folder>/
 node tools/shot.js /tmp/shots '/<repo-folder>/,/<repo-folder>/track/?code=MDM-1038' --full   # screenshots at 1280 and 390
 bash tools/check.sh           # forbidden-pattern scan (must print nothing)
 ```

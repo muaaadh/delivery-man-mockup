@@ -1,7 +1,6 @@
 // Build a compact road graph for Greater Malé from OpenFreeMap vector tiles → js/roads.js (MDM.roads).
 // Usage: node tools/geo-build-graph.js   (needs the dev server on :4180)
-module.paths.push('/Users/muadhhashim/.npm/_npx/6bcb61ec6d5aea22/node_modules');
-const { chromium } = require('playwright');
+const { chromium } = require('./playwright')();   // tools/playwright.js says where it is
 const fs = require('fs');
 const path = require('path');
 const CLASSES = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor'];

@@ -1,7 +1,6 @@
 // Dump named road geometry from the OpenFreeMap vector tiles around Greater Malé (for corridor calibration).
 // Usage: node tools/geo-extract.js > /tmp/roads.json
-module.paths.push('/Users/muadhhashim/.npm/_npx/6bcb61ec6d5aea22/node_modules');
-const { chromium } = require('playwright');
+const { chromium } = require('./playwright')();   // tools/playwright.js says where it is
 (async () => {
   const b = await chromium.launch();
   const p = await b.newPage({ viewport: { width: 1200, height: 1200 } });

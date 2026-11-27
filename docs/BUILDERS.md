@@ -73,8 +73,8 @@ Admin pages use `<div data-shell="admin"><main id="main"></main></div>` instead 
 - `data-testid` attributes exactly as listed in SPEC §3 for your page and §5.
 
 ## Local testing
-- Dev server: `node tools/serve.js 4180 &` serves the PARENT folder; open `http://localhost:4180/mr-delivery-man-mockup/<page>/`.
-- Playwright: `module.paths.push('/Users/muadhhashim/.npm/_npx/6bcb61ec6d5aea22/node_modules'); const { chromium } = require('playwright');`
+- Dev server: `node tools/serve.js 4180 &` serves the copies of the site in the PARENT folder, to this computer only (`HOST=0.0.0.0` for a phone); open `http://localhost:4180/mr-delivery-man-mockup/<page>/`.
+- Playwright: `const { chromium } = require('./playwright')();` from `tools/` (`tools/playwright.js` looks in $PLAYWRIGHT, then `~/.mdm-tools/playwright`).
 - Screenshots: `node tools/shot.js /tmp/shots /mr-delivery-man-mockup/request/ --full` (1280 + 390; reports page errors and horizontal overflow).
 - Wait for readiness: `await page.waitForFunction(() => window.MDM && MDM.store.readyState === 'ready')`.
 - Admin login skip: `context.addInitScript(() => localStorage.setItem('mdm:session', JSON.stringify({ user: 'admin', at: new Date().toISOString() })))`.
